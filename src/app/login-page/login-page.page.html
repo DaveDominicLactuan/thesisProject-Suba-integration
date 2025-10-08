@@ -1,0 +1,63 @@
+<div class="background scrollable-container">
+
+    <div class="overlay-image"></div> <!-- overlay image only -->
+
+  <!-- actual content starts here -->
+  <div class="logo">
+    <img src="assets/thesisIcon1.png" alt="D.A.M.A.G.E. Logo">
+  </div>
+
+  
+<div class="login-form">
+  <h2 class="login-title">Welcome back Engineer!</h2>
+  <p class="login-subtitle">
+    Hello, you must login first to be able to use the application and enjoy all the features in Calashop
+  </p>
+
+
+  <!-- Email -->
+  <div class="form-group">
+    <label for="email">Email Address</label>
+    <div class="input-item">
+      <span class="icon"><i class="fa fa-envelope"></i></span>
+      <input id="email" type="email" placeholder="Email Address" [(ngModel)]="email" name="email" />
+    </div>
+  </div>
+
+
+
+  <!-- Password -->
+  <div class="form-group">
+    <label for="password">Password</label>
+    <div class="input-item">
+      <span class="icon"><i class="fa fa-lock"></i></span>
+      <input
+        id="password"
+        [type]="showPassword ? 'text' : 'password'"
+        placeholder="Password"
+        [(ngModel)]="password"
+        name="password" />
+      <span class="icon toggle" (click)="togglePasswordVisibility()">
+        <i [class]="showPassword ? 'fa fa-eye-slash' : 'fa fa-eye'"></i>
+      </span>
+    </div>
+  </div>
+
+  <!-- Options -->
+  <div class="options">
+    <label class="remember-me">
+      <input type="checkbox" [(ngModel)]="rememberMe" />
+      Remember me
+    </label>
+    <a class="forgot-password" href="#">Forgot Password?</a>
+  </div>
+
+  <button class="sign-in-button" (click)="login()">Sign in</button>
+  <button class="sign-in-button" (click)="goToHomePage()">HomePage</button>
+</div>
+
+
+
+
+
+</div>

@@ -1,0 +1,72 @@
+<ion-content class="home-page">
+
+  <!-- Greeting Section -->
+  <div class="greeting">
+    <!-- <h1>Good Morning,<br><p *ngIf="userName">Signed in as: {{ firstName }}</p></h1> -->
+     <h1>
+  Good Morning,<br>
+  <p *ngIf="firstName && lastName" class="profileName">
+     {{ firstName }} {{ lastName }}
+  </p>
+</h1>
+
+    <ion-avatar class="profile-avatar">
+      <img src="assets/engIcon.png" alt="Profile" />
+    </ion-avatar>
+  </div>
+
+  <!-- Big Action Boxes -->
+ <!-- Big Action Boxes -->
+<div class="main-buttons">
+  <div class="big-btn grammar" (click)="goToHomePage()">
+    <ion-icon name="book-outline"></ion-icon>
+    <h2>Start New Session</h2>
+    <!-- <p>120 × 30 words</p> -->
+  </div>
+
+  <div class="right-column">
+    <div class="big-btn lessons"  (click)="gopdfPage2()">
+      <ion-icon name="reader-outline"></ion-icon>
+      <h2>Previous Sessions</h2>
+      <!-- <p>20 × 8 words</p> -->
+    </div>
+
+    <div class="big-btn tests" (click)="gopdfPage3()">
+      <ion-icon name="document-text-outline"></ion-icon>
+      <h2>Sessions</h2>
+      <!-- <p>60 × 2 words</p> -->
+    </div>
+  </div>
+</div>
+
+
+  <!-- Recommended Courses -->
+  <!-- <div class="recommendation-header">
+    <h2>Recommended course</h2>
+    <span class="more-link">More</span>
+  </div>
+  <p class="suggestion-label">you may also like <ion-badge>0</ion-badge></p> -->
+
+  
+
+<!-- Bottom Navigation -->
+<div class="bottom-nav">
+  <!-- <div class="nav-item active">
+    <ion-icon name="home-outline"></ion-icon>
+    <span>Home</span>
+  </div>
+  <div class="nav-item">
+    <ion-icon name="bookmark-outline"></ion-icon>
+    <span>Subject</span>
+  </div>
+  <div class="nav-item">
+    <ion-icon name="leaf-outline"></ion-icon>
+    <span>Growing</span>
+  </div>
+  <div class="nav-item">
+    <ion-icon name="person-outline"></ion-icon>
+    <span>My</span>
+  </div> -->
+</div>
+
+</ion-content>

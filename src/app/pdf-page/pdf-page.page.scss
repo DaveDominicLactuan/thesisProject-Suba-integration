@@ -1,0 +1,13 @@
+.pdf-container {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+ion-content, iframe {
+  height: 100%;
+}
+
+// iframe {
+//   flex: 1;
+// }

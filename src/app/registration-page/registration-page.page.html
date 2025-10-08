@@ -1,0 +1,76 @@
+
+<div class="background scrollable-container">
+
+    <div class="overlay-image"></div> <!-- overlay image only -->
+
+  <!-- actual content starts here -->
+  <div class="logo">
+    <img src="assets/thesisIcon1.png" alt="D.A.M.A.G.E. Logo">
+  </div>
+
+  
+<div class="login-form">
+  <h2 class="login-title">Welcome back Engineer</h2>
+  <p class="login-subtitle">
+   Sign up and create an account to join our growing community of engineers and users.
+  </p>
+    <!-- <h1 class="signup-title">Sign up</h1> -->
+    <h3 class="role-label">WHO YOU ARE?</h3>
+
+    <div class="role-selector">
+      <div class="role-option" [class.selected]="selectedRole === 'parent'" (click)="selectRole('parent')">
+        <img src="assets/engIcon.png" alt="Parent Icon" />
+        <span>Engineer</span>
+      </div>
+      <div class="role-option" [class.selected]="selectedRole === 'child'" (click)="selectRole('child')">
+        <img src="assets/useIcon.png" alt="Child Icon" />
+        <span>User</span>
+      </div>
+    </div>
+
+   <form [formGroup]="regForm" (ngSubmit)="onRegister()">
+
+      <div class="form-field">
+        <ion-icon name="person-outline"></ion-icon>
+        <input type="text" placeholder="First Name" formControlName="firstName" />
+      </div>
+
+      <div class="form-field">
+        <ion-icon name="person-outline"></ion-icon>
+        <input type="text" placeholder="Last Name" formControlName="lastName" />
+      </div>
+
+      <div class="form-field">
+        <ion-icon name="id-card-outline"></ion-icon>
+        <input type="text" placeholder="Engineering ID" formControlName="engineeringID" />
+      </div>
+
+      <div class="form-field">
+        <ion-icon name="mail-outline"></ion-icon>
+        <input type="email" placeholder="Email" formControlName="email" />
+      </div>
+
+      <div class="form-field">
+        <ion-icon name="lock-closed-outline"></ion-icon>
+        <input type="password" placeholder="Password" formControlName="password" />
+      </div>
+
+      <div class="form-field">
+  <ion-icon name="lock-closed-outline"></ion-icon>
+  <input type="password" placeholder="Confirm Password" formControlName="confirmPassword" />
+</div>
+
+      <button class="signup-btn" type="submit">SIGN UP</button>
+    </form>
+
+
+    <!-- <p class="login-link">
+      Already have an account? <a routerLink="/login">Login here</a>
+    </p> -->
+  </div>
+
+
+
+
+
+</div>

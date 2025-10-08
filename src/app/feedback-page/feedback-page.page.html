@@ -1,0 +1,76 @@
+<div class="background">
+  <ion-content class="ion-padding">
+    
+    <!-- Toggle: Original vs With Boxes -->
+    <!-- <div class="toggle-wrapper">
+      <label class="switch">
+        <input type="checkbox" [(ngModel)]="showWithBoxes" (change)="detectCenterImage()">
+        <span class="slider round"></span>
+      </label>
+      <span class="toggle-label">{{ showWithBoxes ? 'With Boxes' : 'Original' }}</span>
+    </div> -->
+
+    <div class="top-bar">
+  <div class="toggle-wrapper">
+    <label class="switch">
+      <input type="checkbox" [(ngModel)]="showWithBoxes" (change)="detectCenterImage()" />
+      <span class="slider round"></span>
+    </label>
+    <span class="toggle-label">{{ showWithBoxes ? 'With Boxes' : 'Original' }}</span>
+  </div>
+  <!-- <div class="top-title">{{ selectedImageTitle }}</div> -->
+</div>
+
+    <!-- Scrollable image gallery -->
+    <div class="scroll-wrapper">
+      <div class="image-scroll" #scrollContainer (scroll)="onScroll($event)">
+        <img
+          *ngFor="let img of imagePaths"
+          [src]="showWithBoxes ? img.withBoxes : img.original"
+          [class.selected]="(showWithBoxes ? img.withBoxes : img.original) === selectedImage"
+          (click)="detectCenterImage()"
+          class="image-item"
+        />
+      </div>
+    </div>
+
+    <hr />
+
+    <!-- Form metadata section -->
+    <div class="login-form">
+      <!-- <h2 class="login-title">Hello {{ message }}</h2> -->
+      <div class="image-title">{{ selectedImageTitle }}</div>
+
+      <div class="form-group">
+        <label for="dropdown1">Severity of Crack</label>
+        <select id="dropdown1" [(ngModel)]="dropdown1" class="input-item">
+          <option *ngFor="let option of dropdownOptions" [value]="option">{{ option }}</option>
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label for="dropdown2">Direction</label>
+        <select id="dropdown2" [(ngModel)]="dropdown2" class="input-item">
+          <option *ngFor="let option of dropdownOptionsDirection" [value]="option">{{ option }}</option>
+        </select>
+      </div>
+
+
+      <div class="form-group">
+  <label for="extraText">Detection Info</label>
+  <input
+    id="extraText"
+    type="text"
+    [(ngModel)]="detectionMessage"
+    class="input-item"
+    readonly
+  />
+</div>
+
+
+      <!-- <button class="sign-in-button" (click)="getAllEntries()">Submit</button>
+      <button class="sign-in-button" (click)="testApi()">Test API</button> -->
+      <button class="sign-in-button" (click)="gopdfPage()">Proceed to PDF</button>
+    </div>
+  </ion-content>
+</div>

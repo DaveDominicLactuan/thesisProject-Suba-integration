@@ -1,0 +1,235 @@
+.background {
+  background-color: #008799;
+  height: 100vh;
+  width: 100vw;
+  overflow: hidden;
+
+  &.scrollable-container {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    width: 100vw;
+    overflow-y: auto;
+    position: relative;
+    padding-bottom: 10px;
+  }
+}
+
+.overlay-image {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-image: url('/assets/backgroundCover.png');
+  background-size: cover;
+  background-position: center;
+  opacity: 0.5;
+  z-index: 1;
+}
+
+.logo {
+  width: 130px;
+  height: 130px;
+  position: absolute;
+  z-index: 2;
+  top: 5%;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+// .signup-container {
+//   width: 90%;
+//   max-width: 400px;
+//   background: rgba(0, 0, 0, 0.7);
+//   margin: auto;
+//   text-align: center;
+//   padding: 20px;
+//   color: #fff;
+//   position: relative;
+//   z-index: 2;
+// }
+
+.login-form {
+//   max-width: 270px;
+max-width: 90%;
+width: 500px;
+  // min-height: 420px;
+  // height: 450px;.
+  max-height: 110%;
+  height: 900px;
+  // height: 90%;
+
+  margin: auto;
+  background-color: #ffffff;
+  border-radius: 15px;
+  padding: 17px;
+  box-shadow: 0px 5px 20px rgba(0, 0, 0, 0.1);
+  position: relative;
+  top: 30%;
+//   margin-top: 10px;
+  margin-bottom: 200px;
+// margin: 20px auto 30px auto; 
+  z-index: 2;
+  align-items: center;
+  justify-content: center;
+  
+}
+
+.login-subtitle {
+  font-size: 14px;
+  color: #666;
+  margin-bottom: 20px;
+  text-align: center;
+}
+
+.login-title {
+  font-size: 24px;
+  font-weight: bold;
+  margin-bottom: 10px;
+  color: black;
+//   justify-content: center;
+//   align-items: center;
+  text-align: center;
+}
+
+.signup-title {
+  font-size: 36px;
+  font-weight: 500;
+  margin-bottom: 10px;
+  color: #000000;
+  justify-content: center;
+  text-align: center;
+}
+
+.role-label {
+  color: #b2ebf2;
+  font-weight: 700;
+  margin: 20px 0 10px;
+  text-align: center;
+}
+
+.role-selector {
+  background-color: #ffffff;
+  display: flex;
+  flex-direction: row;
+  justify-content: space-around;
+  margin-bottom: 10px;
+
+  .role-option {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    cursor: pointer;
+    padding: 5px;
+    width: 100px;
+
+    img {
+      width: 65px;
+      height: 65px;
+      border-radius: 50%;
+      border: 0.3px solid black;
+      transition: 0.3s;
+    }
+
+    span {
+      margin-top: 8px;
+      font-size: 16px;
+      font-weight: bold;
+      color: #000000;
+    }
+
+    &.selected img {
+      border-color: #ffca28;
+      box-shadow: 0 0 10px rgba(255, 202, 40, 0.6);
+    }
+  }
+}
+
+// .form-field {
+//   display: flex;
+//   align-items: center;
+//   background-color: transparent;
+//   border: 1.5px solid #008799;
+//   border-radius: 25px;
+//   padding: 10px 15px;
+//   margin-bottom: 15px;
+
+//   ion-icon {
+//     font-size: 20px;
+//     color: #fff;
+//     margin-right: 10px;
+//   }
+
+//   input {
+//     flex: 1;
+//     background: transparent;
+//     border: none;
+//     color: white;
+//     font-size: 16px;
+//     outline: none;
+//   }
+// }
+
+.form-field {
+  display: flex;
+  align-items: center;
+  border: 1.5px solid transparent;
+  border-radius: 10px;
+  padding: 8px 13px;
+  margin-bottom: 15px;
+  background: 
+    linear-gradient(#fffdfd, #fffdfd) padding-box,  /* Inner background color */
+    linear-gradient(to right, #ff512f, #f09819) border-box; /* Gradient border */
+
+  ion-icon {
+    font-size: 20px;
+    color: #fff;
+    margin-right: 10px;
+  }
+
+  input {
+    flex: 1;
+    background: transparent;
+    border: none;
+    color: rgb(0, 0, 0);
+    font-size: 14px;
+    outline: none;
+  }
+}
+
+
+.signup-btn {
+  width: 100%;
+  padding: 12px;
+  // border-radius: 30px;
+  border-radius: 12px;
+  background: linear-gradient(to right, #ff512f, #f09819);
+  color: #fff;
+  font-weight: bold;
+  font-size: 18px;
+  border: none;
+  margin-top: 10px;
+  cursor: pointer;
+}
+
+.login-link {
+  margin-top: 20px;
+  color: #eee;
+
+  a {
+    color: #ff9800;
+    font-weight: bold;
+    text-decoration: none;
+    align-items: center;
+    position: relative;
+    left: -25%;
+  }
+}
+
+@media (max-width: 480px) {
+  .role-selector {
+    flex-direction: row;
+    gap: 16px;
+  }
+}

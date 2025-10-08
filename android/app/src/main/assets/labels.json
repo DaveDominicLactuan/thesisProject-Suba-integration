@@ -1,0 +1,5 @@
+{
+  "type": ["branching", "diagonal", "horizontal", "map/web", "vertical"],
+  "shape": ["branching", "curved", "mapped/network", "straight"],
+  "severity": ["hairline", "minor", "moderate", "severe"]
+}

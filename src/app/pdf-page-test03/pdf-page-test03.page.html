@@ -1,0 +1,23 @@
+
+
+<ion-content padding>
+
+  <!-- PDF Source Content -->
+  <div #pdfContent id="pdf-content" class="pdf-content">
+    <h2>Sample Multi-page Invoice</h2>
+    <p>This is a long list to ensure multiple pages are generated.</p>
+    <ul>
+      <li *ngFor="let i of [].constructor(50); let idx = index">
+        Item {{ idx + 1 }} - Example description for invoice
+      </li>
+    </ul>
+  </div>
+
+  <!-- Buttons -->
+  <button ion-button block (click)="generatePdf()">Generate & Preview</button>
+  <button ion-button block color="secondary" (click)="downloadPdf()">Download</button>
+
+  <!-- Preview Area -->
+  <div id="pdf-preview" class="pdf-preview"></div>
+
+</ion-content>

@@ -1,0 +1,30 @@
+<ion-header>
+  <ion-toolbar>
+    <ion-title>PDF Preview</ion-title>
+  </ion-toolbar>
+</ion-header>
+
+<ion-content class="pdf-content">
+  <!-- Floating action buttons -->
+  <ion-fab vertical="top" horizontal="end" slot="fixed">
+    <ion-fab-button>
+      <ion-icon name="menu"></ion-icon>
+    </ion-fab-button>
+    <ion-fab-list side="bottom">
+      <ion-fab-button (click)="generatePDF()">
+        <ion-icon name="open"></ion-icon>
+      </ion-fab-button>
+      <ion-fab-button (click)="downloadPDF()">
+        <ion-icon name="download"></ion-icon>
+      </ion-fab-button>
+      <ion-fab-button (click)="previewPDF()">
+        <ion-icon name="eye"></ion-icon>
+      </ion-fab-button>
+    </ion-fab-list>
+  </ion-fab>
+
+  <!-- Fullscreen PDF Preview -->
+  <div *ngIf="pdfSrc" class="pdf-container">
+    <iframe [src]="pdfSrc" class="pdf-iframe"></iframe>
+  </div>
+</ion-content>
