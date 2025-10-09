@@ -17,7 +17,10 @@ export interface StoredImage {
   faceData?: any[];
   timestamp: string;
   detectionMessage: string;
+  // Optional fields used by other pages/components
   filename?: string; // ✅ Add this
+  statusMessage?: string;
+  prediction?: { type: string; shape: string; severity?: string };
 }
 
 @Injectable({

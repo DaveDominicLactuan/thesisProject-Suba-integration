@@ -6,6 +6,9 @@ export interface StoredImage {
   timestamp: string;
   filename: string;
   prediction?: { type: string; shape: string; severity: string };
+  // New optional helpers for status/testing
+  hasPrediction?: boolean;
+  statusMessage?: string;
 }
 
 @Injectable({
@@ -32,6 +35,7 @@ export class ImageStorageService {
   async addImage(image: StoredImage) {
     this.images.unshift(image);
     await this._storage?.set(this.STORAGE_KEY, this.images);
+    console.log(`📤 Image saved. Total stored images: ${this.images.length}`);
   }
 
   /** Return a copy of all images */

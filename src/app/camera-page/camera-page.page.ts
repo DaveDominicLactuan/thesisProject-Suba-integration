@@ -129,14 +129,28 @@ export class CameraPagePage implements AfterViewInit {
   // Preprocess → inference → save
   const imageTensor = await this.preprocessImage(dataUrl);
   // call the backend/model
-  const prediction = await this.crackDetectionService.runInference(imageTensor);
-  inferenceCalled = true;
-  inferenceSucceeded = true;
+  let prediction = null;
+  try {
+    prediction = await this.crackDetectionService.runInference(imageTensor);
+    inferenceCalled = true;
+    inferenceSucceeded = true;
+  } catch (e) {
+    console.warn('Inference failed:', e);
+    inferenceCalled = true;
+    inferenceSucceeded = false;
+  }
 
       const now = new Date().toISOString();
       const filename = this.generateFilename();
 
-      const entry: StoredImage = { original: dataUrl, timestamp: now, filename, prediction };
+      const entry: StoredImage = {
+        original: dataUrl,
+        timestamp: now,
+        filename,
+        prediction: prediction || undefined,
+        hasPrediction: !!prediction,
+        statusMessage: inferenceSucceeded ? 'Prediction succeeded' : (inferenceCalled ? 'Prediction failed' : 'No prediction')
+      };
       await this.imageStorage.addImage(entry); // persists via @ionic/storage
       this.savedImage = entry;
       this.lastPrediction = prediction;
@@ -145,10 +159,34 @@ export class CameraPagePage implements AfterViewInit {
 
       // Keep console.log before clearing isProcessing so callers/UI see processing until logging completes
       console.log('✅ Prediction stored:', prediction);
+      // Print all currently stored images to verify persistence
+      try {
+        // getAllImages might be synchronous (returns array) or asynchronous in other implementations.
+        const allOrPromise = this.imageStorage.getAllImages();
+        let all: any[];
+        if (allOrPromise && typeof (allOrPromise as any).then === 'function') {
+          // await the promise-like value
+          all = await (allOrPromise as any);
+        } else {
+          all = allOrPromise as any;
+        }
+        // Stringify for more reliable remote/device console output, and also print a table if possible
+        try {
+          console.log('📂 Currently stored images (latest first):', JSON.stringify(all));
+          if (Array.isArray(all) && (console as any).table) (console as any).table(all);
+        } catch (e) {
+          console.log('📂 Currently stored images (latest first):', all);
+        }
+      } catch (logErr) {
+        console.warn('Failed to read stored images for verification:', logErr);
+      }
 
       // Set a user-facing message depending on whether inference ran/succeeded
-      if (inferenceCalled && inferenceSucceeded) {
-        this.extraText = `✅ Inference: ${prediction.type}, ${prediction.shape}, ${prediction.severity}`;
+      if (inferenceCalled && inferenceSucceeded && prediction) {
+        // TypeScript can't infer that `prediction` is non-null from the booleans above,
+        // so check explicitly before accessing properties.
+        const { type, shape, severity } = prediction;
+        this.extraText = `✅ Inference: ${type}, ${shape}, ${severity}`;
       } else if (inferenceCalled && !inferenceSucceeded) {
         this.extraText = '⚠️ Inference was called but failed.';
       } else {
@@ -223,17 +261,29 @@ export class CameraPagePage implements AfterViewInit {
   }
 
   async requestCameraPermission() {
+    // Only request Capacitor Camera permissions on native platforms.
     try {
-      const permission = await Camera.requestPermissions();
+      const platform = Capacitor.getPlatform();
+      if (platform === 'android' || platform === 'ios') {
+        const permission = await Camera.requestPermissions();
 
-      if (permission.camera === 'granted') {
-        console.log('✅ Camera permission granted');
-        this.initCamera(); // Call your custom camera init
+        if (permission.camera === 'granted') {
+          console.log('✅ Camera permission granted');
+          this.initCamera(); // Call your custom camera init
+        } else {
+          alert('❌ Camera permission denied. Please allow it in system settings.');
+        }
       } else {
-        alert('❌ Camera permission denied. Please allow it in system settings.');
+        // Web: permissions handled by the browser when calling getUserMedia
+        console.log('Skipping Capacitor Camera.requestPermissions on web platform:', platform);
+        // still attempt to init the camera for browser
+        this.initCamera();
       }
     } catch (error) {
-      console.error('Permission request failed:', error);
+      // Some Capacitor methods throw on web (Not implemented) — ignore but log.
+      console.warn('Permission request failed (continuing):', error);
+      // Attempt to initialize camera using browser APIs as a fallback
+      try { await this.initCamera(); } catch (e) { /* ignore */ }
     }
   }
 

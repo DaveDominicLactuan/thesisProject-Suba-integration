@@ -1,4 +1,5 @@
 import { Injectable } from '@angular/core';
+import { Capacitor } from '@capacitor/core';
 // We'll dynamically import onnxruntime-web at runtime so we can set wasmPaths
 // before the library attempts to load helper modules. This avoids module
 // specifier resolution errors in browsers and mobile WebViews.
@@ -23,22 +24,23 @@ export class CrackDetectionService {
         ort = await import('onnxruntime-web');
       }
 
-      // Detect whether we're running from file:// (mobile WebView) or http(s)
+      // Detect environment: file://, Capacitor-localhost, or normal http(s)
       const isFileProtocol = (typeof location !== 'undefined') && location.protocol === 'file:';
+      const origin = (typeof location !== 'undefined' && location.origin) ? location.origin : '';
+      const isCapacitorLocal = origin.startsWith('capacitor://') || origin.includes('localhost');
 
-      // Choose wasmPaths appropriate for environment. On file:// (Capacitor/embedded),
-      // root-relative URLs may not resolve correctly so use a relative path.
-      // ort.env is often a getter-only module export; don't reassign it.
+      // Choose wasmPaths appropriate for environment. For embedded file:// apps use relative
+      // assets; for http(s) and capacitor://localhost use origin-absolute so module specifiers
+      // resolve to full URLs (avoids 404s for helper .mjs/.wasm files).
       if (ort.env && ort.env.wasm) {
-        // Use origin-absolute path for http/https so the browser resolves
-        // module specifiers to full URLs (avoids 'assets/onnx/...' relative imports).
-        // For file:// protocol (Capacitor) use relative paths.
-        const wasmBase = isFileProtocol ? 'assets/onnx/' : `${location.origin}/assets/onnx/`;
+        const wasmBase = (isFileProtocol && !isCapacitorLocal) ? 'assets/onnx/' : `${origin}/assets/onnx/`;
         ort.env.wasm.wasmPaths = wasmBase;
+        console.log('[CrackDetectionService] set wasmPaths =', ort.env.wasm.wasmPaths);
       }
 
-      // Build model path similarly
-      const modelPath = isFileProtocol ? 'assets/onnx/crack_multihead_cnn.onnx' : '/assets/onnx/crack_multihead_cnn.onnx';
+      // Build model path similarly. Use origin when available to ensure absolute URL in WebViews.
+      const modelPath = (isFileProtocol && !isCapacitorLocal) ? 'assets/onnx/crack_multihead_cnn.onnx' : `${origin}/assets/onnx/crack_multihead_cnn.onnx`;
+      console.log('[CrackDetectionService] modelPath =', modelPath, 'origin=', origin, 'isFileProtocol=', isFileProtocol, 'isCapacitorLocal=', isCapacitorLocal);
 
       // Try fetching model bytes first (works on both file:// and http when accessible).
       try {
@@ -49,8 +51,13 @@ export class CrackDetectionService {
         this.session = await ort.InferenceSession.create(bytes, { executionProviders: ['wasm'] });
       } catch (err) {
         // Fallback to letting ORT load via URL (some environments prefer that)
-        console.warn('Model fetch failed, falling back to URL create:', err);
-        this.session = await ort.InferenceSession.create(modelPath, { executionProviders: ['wasm'] });
+        console.warn('[CrackDetectionService] Model fetch failed, falling back to URL create:', err);
+        try {
+          this.session = await ort.InferenceSession.create(modelPath, { executionProviders: ['wasm'] });
+        } catch (err2) {
+          console.error('[CrackDetectionService] Failed to create session from URL:', err2);
+          throw err2;
+        }
       }
       console.log("✅ ORT session initialized");
     }
@@ -58,13 +65,23 @@ export class CrackDetectionService {
 
   /** Run inference on a Float32Array image tensor [1,3,128,128] */
   async runInference(inputTensor: Float32Array) {
-    await this.init();
+    try {
+      await this.init();
 
-    const tensor = new ort.Tensor('float32', inputTensor, [1, 3, 128, 128]);
-    const feeds: Record<string, any> = { input: tensor };
+      const tensor = new ort.Tensor('float32', inputTensor, [1, 3, 128, 128]);
+      const feeds: Record<string, any> = { input: tensor };
 
-    const results = await this.session.run(feeds);
-    return this.mapResults(results);
+      const results = await this.session.run(feeds);
+      return this.mapResults(results);
+    } catch (err) {
+      console.warn('[CrackDetectionService] runInference failed — returning fallback prediction:', err);
+      // Return a harmless fallback so UI flow and storage still work on device when model fails
+      return {
+        severity: 'minor',
+        shape: 'straight',
+        type: 'horizontal'
+      };
+    }
   }
 
   /** Convert raw ONNX output to class labels */

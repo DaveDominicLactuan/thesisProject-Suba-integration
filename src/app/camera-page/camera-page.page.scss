@@ -74,6 +74,12 @@
   z-index: 31;
 }
 
+form, input, optgroup, select {
+    margin: 0;
+    font: inherit;
+    max-width: 50px;
+    color: inherit;
+}
 
 .camera-live {
   position: relative;
