@@ -28,7 +28,7 @@
           *ngFor="let img of imagePaths"
           [src]="showWithBoxes ? img.withBoxes : img.original"
           [class.selected]="(showWithBoxes ? img.withBoxes : img.original) === selectedImage"
-          (click)="detectCenterImage()"
+          (click)="onImageClick(img)"
           class="image-item"
         />
       </div>

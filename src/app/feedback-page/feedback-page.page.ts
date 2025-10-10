@@ -62,6 +62,57 @@ showWithBoxes: boolean = false;
 
     console.log(this.message)
   }
+
+  /**
+   * Handle explicit image click: select image, apply its prediction to UI,
+   * update formDataMap and log a detailed debug object to console.
+   */
+  onImageClick(img: DisplayImage) {
+    // select image
+    this.selectedImage = this.showWithBoxes ? img.withBoxes : img.original;
+
+    // update structured prediction/status
+    this.selectedPrediction = img.rawPrediction ?? {};
+    this.selectedStatusMessage = img.statusMessage ?? '';
+
+    // apply to detection fields and dropdowns
+    if (this.selectedStatusMessage && this.selectedStatusMessage.length > 0) {
+      this.detectionMessage = this.selectedStatusMessage;
+      this.detectionResult = this.selectedStatusMessage;
+    } else if (this.selectedPrediction) {
+      const p = this.selectedPrediction;
+      this.detectionMessage = p.type ? `${p.type}${p.severity ? ' — ' + p.severity : ''}` : '⚠️ No info available';
+      this.detectionResult = p.shape ? `${p.shape}${p.severity ? ' — ' + p.severity : ''}` : (p.severity ?? '⚠️ No info available');
+    }
+
+    this.dropdown1 = this.selectedPrediction.type ?? this.selectedImageTitle ?? 'Type';
+    this.dropdown2 = this.selectedPrediction.shape ?? this.selectedImageTitle ?? 'Shape';
+    this.dropdown3 = this.selectedPrediction.severity ?? this.selectedImageTitle ?? 'Severity';
+
+    // update form map for this image
+    const key = img.original;
+    this.formDataMap[key] = this.formDataMap[key] ?? {
+      title: img.fileName ?? this.selectedImageTitle,
+      dropdown1: this.dropdown1,
+      dropdown2: this.dropdown2,
+      dropdown3: this.dropdown3,
+      extraText: this.selectedStatusMessage ?? ''
+    };
+
+    // debug output for immediate inspection
+    console.log('[FeedbackPage] onImageClick debug', {
+      filename: img.fileName,
+      rawPrediction: img.rawPrediction,
+      statusMessage: img.statusMessage,
+      selectedPrediction: this.selectedPrediction,
+      detectionMessage: this.detectionMessage,
+      detectionResult: this.detectionResult,
+      dropdown1: this.dropdown1,
+      dropdown2: this.dropdown2,
+      dropdown3: this.dropdown3,
+      formEntry: this.formDataMap[key]
+    });
+  }
   
 
   @ViewChild('scrollContainer', { static: false }) scrollContainer!: ElementRef;
@@ -137,30 +188,77 @@ showWithBoxes: boolean = false;
       });
     }
 
+    // If images exist, pre-fill selection from the first one so dropdowns show
+    // prediction values even if the DOM hasn't been centered yet.
+    if (this.imagePaths.length > 0) {
+      const first = this.imagePaths[0];
+      this.selectedImage = this.showWithBoxes ? first.withBoxes : first.original;
+      this.selectedPrediction = first.rawPrediction ?? {};
+      this.selectedStatusMessage = first.statusMessage ?? '';
+
+      // Fill detection displays
+      if (this.selectedStatusMessage && this.selectedStatusMessage.length > 0) {
+        this.detectionMessage = this.selectedStatusMessage;
+        this.detectionResult = this.selectedStatusMessage;
+      } else if (this.selectedPrediction) {
+        const p = this.selectedPrediction;
+        this.detectionMessage = p.type ? `${p.type}${p.severity ? ' — ' + p.severity : ''}` : '⚠️ No info available';
+        this.detectionResult = p.shape ? `${p.shape}${p.severity ? ' — ' + p.severity : ''}` : (p.severity ?? '⚠️ No info available');
+      }
+
+      // set dropdowns
+      this.dropdown1 = this.selectedPrediction.type ?? this.selectedImageTitle;
+      this.dropdown2 = this.selectedPrediction.shape ?? this.selectedImageTitle;
+      this.dropdown3 = this.selectedPrediction.severity ?? this.selectedImageTitle;
+
+      // ensure formDataMap entry
+      const key = first.original;
+      if (!this.formDataMap[key]) {
+        this.formDataMap[key] = {
+          title: first.fileName ?? this.selectedImageTitle,
+          dropdown1: this.dropdown1,
+          dropdown2: this.dropdown2,
+          dropdown3: this.dropdown3,
+          extraText: this.selectedStatusMessage ?? ''
+        };
+      }
+    }
+
+    // Print stored images + prediction-derived display strings for debugging
+    this.debugLogStoredImages();
+    // Try to detect the centered image (will update again when DOM ready)
     this.detectCenterImage();
-  // Print stored images + prediction-derived display strings for debugging
-  this.debugLogStoredImages();
+    // Compute safe display values from prediction or filename
+    const optType = (this.selectedPrediction.type && this.selectedPrediction.type.trim()) || this.selectedImageTitle || 'Type';
+    const optShape = (this.selectedPrediction.shape && this.selectedPrediction.shape.trim()) || this.selectedImageTitle || 'Shape';
+    const optSeverity = (this.selectedPrediction.severity && this.selectedPrediction.severity.trim()) || this.selectedImageTitle || 'Severity';
+
+    // dropdownOptions is not used by the template for the Type field; keep as generic
     this.dropdownOptions = [
-      this.selectedPrediction.type ?? this.selectedImageTitle,
+      optType,
       'Negligible',
       'moderate',
       'severe',
       'very severe'
     ];
+
+    // The template uses dropdownOptionsDirection for the "Type of Crack" select
     this.dropdownOptionsDirection = [
-      this.selectedPrediction.shape ?? this.selectedImageTitle,
+      optType,
       'Horizontal',
       'Vertical',
       'Diagonal'
     ];
+
     this.dropdownOptionsShape = [
-      this.selectedPrediction.shape ?? this.selectedImageTitle,
+      optShape,
       'Bulge',
       'Vertical',
       'Diagonal'
     ];
+
     this.dropdownOptionsSeverity = [
-      this.selectedPrediction.severity ?? this.selectedImageTitle,
+      optSeverity,
       'Negligible',
       'moderate',
       'severe',
@@ -232,6 +330,29 @@ detectCenterImage() {
   // Populate structured prediction and status for UI use
   this.selectedPrediction = matched.rawPrediction ?? {};
   this.selectedStatusMessage = matched.statusMessage ?? '';
+
+  // Immediately prefer prediction values for dropdowns so the UI reflects
+  // the selected image's prediction right away (overrides filename fallback).
+  this.dropdown1 = this.selectedPrediction.type ?? this.selectedImageTitle;
+  this.dropdown2 = this.selectedPrediction.shape ?? this.selectedImageTitle;
+  this.dropdown3 = this.selectedPrediction.severity ?? this.selectedImageTitle;
+  this.extraText = this.selectedStatusMessage ?? '';
+
+  // Ensure formDataMap entry exists and is updated with these values
+  if (!this.formDataMap[src]) {
+    this.formDataMap[src] = {
+      title: this.selectedImageTitle,
+      dropdown1: this.dropdown1,
+      dropdown2: this.dropdown2,
+      dropdown3: this.dropdown3,
+      extraText: this.extraText
+    };
+  } else {
+    this.formDataMap[src].dropdown1 = this.dropdown1;
+    this.formDataMap[src].dropdown2 = this.dropdown2;
+    this.formDataMap[src].dropdown3 = this.dropdown3;
+    this.formDataMap[src].extraText = this.extraText;
+  }
     
 
 
@@ -256,7 +377,7 @@ detectCenterImage() {
     if (!this.formDataMap[src]) {
       // Initialize the form defaults using prediction values when available
       this.formDataMap[src] = {
-        title: this.selectedImageTitle,
+        title: this.selectedPrediction.type ?? this.selectedImageTitle ?? 'Image',
         dropdown1: this.selectedPrediction.type ?? this.selectedImageTitle,
         dropdown2: this.selectedPrediction.shape ?? this.selectedImageTitle,
         dropdown3: this.selectedPrediction.severity ?? this.selectedImageTitle,
@@ -270,8 +391,12 @@ detectCenterImage() {
     this.dropdown3 = form.dropdown3;
     this.extraText = form.extraText;
 
+    const optType = (this.selectedPrediction.type && this.selectedPrediction.type.trim()) || this.selectedImageTitle || 'Type';
+    const optShape = (this.selectedPrediction.shape && this.selectedPrediction.shape.trim()) || this.selectedImageTitle || 'Shape';
+    const optSeverity = (this.selectedPrediction.severity && this.selectedPrediction.severity.trim()) || this.selectedImageTitle || 'Severity';
+
     this.dropdownOptions = [
-      form.title,
+      optType,
       'Negligible',
       'moderate',
       'severe',
@@ -279,22 +404,22 @@ detectCenterImage() {
     ];
 
     this.dropdownOptionsDirection = [
-      form.title,
+      optType,
       'Horizontal',
       'Vertical',
       'Diagonal'
     ];
 
     this.dropdownOptionsShape = [
-      form.title,
+      optShape,
       'Bulge',
       'Vertical',
       'Diagonal'
     ];
 
     this.dropdownOptionsSeverity = [
-      form.title,
-     'Negligible',
+      optSeverity,
+      'Negligible',
       'moderate',
       'severe',
       'very severe'
