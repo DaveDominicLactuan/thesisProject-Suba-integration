@@ -95,8 +95,8 @@ this.lastName = profile['lastName'];
   }
 
 
-  gopdfPage3() {
-    this.router.navigate(['/pdf-page-test03']);
+  goToUploadImage() {
+    this.router.navigate(['/upload-image-page']);
     console.log('pdf 3 page');
   }
 
