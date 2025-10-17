@@ -54,7 +54,11 @@ const routes: Routes = [
   {
     path: 'pdf-page-test03',
     loadChildren: () => import('./pdf-page-test03/pdf-page-test03.module').then( m => m.PdfPageTest03PageModule)
+  },  {
+    path: 'upload-image-page',
+    loadChildren: () => import('./upload-image-page/upload-image-page.module').then( m => m.UploadImagePagePageModule)
   },
+
 ];
 
 @NgModule({

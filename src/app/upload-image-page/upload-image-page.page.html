@@ -1,0 +1,117 @@
+<!-- 📸 Live Camera Preview Container -->
+<div class="camera-live">
+    <!-- 🎥 Live Camera Feed -->
+    <video #video autoplay playsinline muted class="camera-feed"></video>
+    <canvas #canvas style="display:none"></canvas>
+
+  <!-- 🔝 Top Bar -->
+  <div class="top-bar">
+    <button class="top-btn left" (click)="goToHomePage()">✖</button>
+    <button class="top-btn right" (click)="goToFeedBackPage()">↻</button>
+  </div>
+
+  <!-- Gallery + toggle (copied from feedback-page for quick testing) -->
+  <div class="top-bar">
+    <div class="toggle-wrapper">
+      <label class="switch">
+        <input type="checkbox" [(ngModel)]="showWithBoxes" (change)="detectCenterImage()" />
+        <span class="slider round"></span>
+      </label>
+      <span class="toggle-label">{{ showWithBoxes ? 'With Boxes' : 'Original' }}</span>
+    </div>
+    <!-- helpful small title showing current selection -->
+    <div class="top-title">{{ selectedImageTitle }}</div>
+    <div class="gallery-controls">
+      <button class="control-btn" (click)="loadTestAssets()">Load Test Assets</button>
+      <button class="control-btn" (click)="loadStoredImages()">Load Stored Images</button>
+        <button class="control-btn" (click)="toggleDebugPanel()">Debug</button>
+        <button class="control-btn" (click)="triggerFileInput()">Upload Images</button>
+        <button class="control-btn" (click)="pickImagesMobile()">Pick Images (Mobile)</button>
+    </div>
+  </div>
+
+  <!-- Scrollable image gallery (assets/test images) -->
+  <!-- To disable test-assets, set includeTestAssets = false in the page TS or comment out this block. -->
+  <div class="scroll-wrapper" *ngIf="imagePaths && imagePaths.length > 0">
+    <div class="image-scroll" #scrollContainer (scroll)="onScroll($event)">
+      <img
+        *ngFor="let img of imagePaths"
+        [src]="showWithBoxes ? img.withBoxes : img.original"
+        [class.selected]="(showWithBoxes ? img.withBoxes : img.original) === selectedImage"
+        (click)="onImageClick(img)"
+        class="image-item"
+      />
+    </div>
+  </div>
+
+  <!-- Debug panel (overlay) -->
+  <div class="debug-panel" *ngIf="showDebugPanel">
+    <div class="debug-content">
+      <button class="debug-close" (click)="toggleDebugPanel()">✖</button>
+      <h3>Selected Prediction</h3>
+      <p><strong>Type:</strong> {{ selectedPrediction?.type || '-' }}</p>
+      <p><strong>Shape:</strong> {{ selectedPrediction?.shape || '-' }}</p>
+      <p><strong>Severity:</strong> {{ selectedPrediction?.severity || '-' }}</p>
+      <p><strong>Status:</strong> {{ selectedStatusMessage || '-' }}</p>
+      <h4>Raw prediction object</h4>
+      <pre>{{ selectedPrediction | json }}</pre>
+    </div>
+  </div>
+
+    <!-- Hidden multi-file input used by Upload Images button -->
+    <input type="file" #fileInput accept="image/*" multiple style="display:none" (change)="onFileSelected($event)" />
+
+  <!-- 🔽 Bottom Bar -->
+  <div class="bottom-bar">
+    
+    <div class="bottom-top-row">
+     
+
+<div class="spinner-container-rect" (click)="goToFeedBackPage()">
+  <svg *ngIf="photosProcessed < photosTaken" class="rect-spinner" width="70" height="40">
+    <rect
+      x="2"
+      y="2"
+      width="66"
+      height="36"
+      rx="12"
+      ry="12"
+      class="rect-spinner-path"
+    />
+  </svg>
+  <div class="center-value-rect">
+    {{ photosProcessed }}/{{ photosTaken }}
+  </div>
+  <div 
+    class="red-circle"
+    [ngClass]="{
+      'green': photosProcessed === photosTaken,
+      'red': photosProcessed < photosTaken
+    }">
+  </div>
+</div>
+
+    <!-- Bottom Section (Shutter + Thumbnails + Settings) -->
+    <div class="bottom-bottom-row">
+      <div *ngIf="capturedImages.length === 0" class="thumbnail-placeholder">📸</div>
+
+      <div *ngIf="capturedImages.length > 0" class="thumbnail-scroll">
+        <img *ngFor="let img of capturedImages" [src]="img" class="thumbnail" />
+      </div>
+
+      <!-- 🔘 Capture Button -->
+      <button class="shutter-btn" (click)="takePicture()"></button>
+
+      <!-- ⚙️ Settings Button -->
+      <button class="side-btn" (click)="toggleCamera()">🔁</button>
+    </div>
+
+    <input type="file" accept="image/*" (change)="onFileSelected($event)" />
+
+    <div *ngIf="lastPrediction">
+      <p>Type: {{ lastPrediction.type }}</p>
+      <p>Shape: {{ lastPrediction.shape }}</p>
+      <p>Severity: {{ lastPrediction.severity }}</p>
+    </div>
+  </div>
+</div>
