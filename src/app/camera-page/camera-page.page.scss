@@ -88,6 +88,67 @@ form, input, optgroup, select {
   overflow: hidden;
 }
 
+/* Make the top bar minimal and white icons */
+.top-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 10px;
+  position: absolute;
+  top: 8px;
+  left: 0;
+  right: 0;
+  z-index: 30;
+}
+
+.top-btn {
+  background: rgba(0,0,0,0.45);
+  color: white;
+  border: none;
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  font-size: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.top-center { display:flex; justify-content:center; align-items:center; }
+
+/* Bottom sheet style similar to mobile camera UI */
+.bottom-bar {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: 12px;
+  background: rgba(240,240,240,0.95);
+  border-radius: 18px;
+  padding: 10px;
+  box-shadow: 0 6px 18px rgba(0,0,0,0.15);
+  z-index: 30;
+}
+
+.bottom-top-row { display:flex; justify-content:space-between; padding:6px 8px; }
+.function-btn { background:#fff; border:1px solid #ddd; padding:8px 12px; border-radius:16px; box-shadow:none; }
+
+.bottom-bottom-row { display:flex; align-items:center; justify-content:space-between; padding:8px 6px; }
+
+/* Spinner on left */
+.spinner-container-rect { margin-left:6px; }
+
+/* Large centered shutter */
+.shutter-btn { width:84px; height:84px; border-radius:50%; background:#000; border:6px solid #fff; box-shadow:0 6px 20px rgba(0,0,0,0.35); margin:0 12px; }
+
+.thumbnail-scroll { display:flex; gap:10px; align-items:center; max-width:110px; }
+.thumbnail { width:56px; height:56px; border-radius:8px; object-fit:cover; border:2px solid #fff; box-shadow:0 6px 18px rgba(0,0,0,0.12); }
+
+/* helper small placeholder */
+.thumbnail-placeholder { width:56px; height:56px; background:#fff; border-radius:8px; display:flex; align-items:center; justify-content:center; box-shadow:0 6px 18px rgba(0,0,0,0.06); }
+
+/* make sure preview overlay is above bottom sheet */
+.image-preview { z-index: 50; }
+
 .overlay {
   position: absolute;
   top: 0;

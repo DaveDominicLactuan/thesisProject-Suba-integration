@@ -9,8 +9,7 @@ import { CrackDetectionService } from '../services/crack-detection.service';
 import { ImageStorageService, StoredImage } from '../services/image-storage.service';
 
 // Capacitor/Camera/Filesystem imports (used conditionally in mobile flows)
-import { Capacitor } from '@capacitor/core';
-import { Camera, CameraResultType, CameraSource } from '@capacitor/camera';
+// Capacitor camera imports removed — this page uses gallery view only
 
 // Basic bounding box types used in drawing helper
 interface BoundingBox {
@@ -30,14 +29,13 @@ console.log('CameraPagePage component file loaded');
 })
 export class UploadImagePagePage implements AfterViewInit, OnDestroy {
 
-  @ViewChild('video') videoRef!: ElementRef<HTMLVideoElement>;
-  @ViewChild('canvas') canvasRef!: ElementRef<HTMLCanvasElement>;
+  // video ref removed for gallery-only page
+  // video/canvas removed — gallery-only page
   @ViewChild('fileInput') fileInputRef!: ElementRef<HTMLInputElement>;
 
   imagePreview: string | null = null;
   capturedImages: string[] = [];
-  usingFrontCamera = false;
-  mediaStream: MediaStream | null = null;
+  // camera-related state removed
   extraText: string | null = null;
   isProcessing: boolean = true;
   photosTaken = 0;
@@ -54,13 +52,17 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
   showWithBoxes = false;
   selectedImage: string = '';
   selectedImageTitle: string = '';
-  includeTestAssets = true; // set to false after testing to remove placeholder assets
+  includeTestAssets = false; // prefer device uploads by default
+  showUploadPrompt = false;
   // debug panel and selected prediction
   showDebugPanel = false;
   selectedPrediction: { type?: string; shape?: string; severity?: string } | null = null;
   selectedStatusMessage: string = '';
 
   scaledBoxes: ScaledBox[] = [];
+  // UI state for top actions
+  flashOn = false;
+  showMoreMenu = false;
 
   get countdown() {
     return this.photosTaken - this.photosProcessed;
@@ -73,121 +75,43 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
     private crackDetectionService: CrackDetectionService,
     private imageStorage: ImageStorageService
   ) {
-    this.requestCameraPermission();
-    // Preload test assets if requested
+    // Page loads images only from user uploads. Optionally preload test assets for dev when enabled.
     if (this.includeTestAssets) this.loadTestAssets();
   }
 
+  toggleFlash() {
+    // Web cameras don't generally support programmatic flash control; toggle UI state for mobile
+    this.flashOn = !this.flashOn;
+    console.log('Flash toggled, now', this.flashOn);
+  }
+
+  openMoreMenu() {
+    this.showMoreMenu = !this.showMoreMenu;
+    console.log('More menu:', this.showMoreMenu);
+  }
+
+  /** Trigger file input click and upload selected images to session */
+  uploadSelectedImages() {
+    try {
+      this.fileInputRef.nativeElement.click();
+    } catch (e) {
+      console.warn('uploadSelectedImages failed', e);
+    }
+  }
+
+  finishSession() {
+    // navigate to feedback page as the user requested
+    this.goToFeedBackPage();
+  }
+
   ngAfterViewInit() {
-    this.platform.ready().then(() => this.initCamera());
+    this.platform.ready().then(() => {
+      // Do not auto-load stored images; prompt user to upload if nothing is present
+      this.showUploadPrompt = true;
+    });
   }
 
-  /** Initialize live camera feed */
-  async initCamera() {
-    if (Capacitor.getPlatform() === 'android' || Capacitor.getPlatform() === 'ios') {
-      const permissions = await Camera.requestPermissions();
-      if (permissions.camera !== 'granted') {
-        // user denied camera
-        return;
-      }
-    }
 
-    if (this.mediaStream) {
-      this.mediaStream.getTracks().forEach(track => track.stop());
-      this.mediaStream = null;
-    }
-
-    try {
-      const constraints: MediaStreamConstraints = { video: { facingMode: 'environment' }, audio: false };
-      this.mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
-      const videoEl = this.videoRef.nativeElement;
-      videoEl.srcObject = this.mediaStream;
-      await new Promise<void>(resolve => {
-        videoEl.onloadedmetadata = () => {
-          videoEl.play().catch(()=>{});
-          resolve();
-        };
-      });
-      console.log('✅ Live camera preview started');
-    } catch (error) {
-      console.error('Camera access error:', error);
-      alert('Failed to access camera. Please check permissions and device compatibility.');
-    }
-  }
-
-  /** Capture a frame, preprocess, run inference, and save result */
-  async takePicture() {
-    // Ensure UI shows processing state immediately
-    this.isProcessing = true;
-    this.photosTaken++;
-    // track whether inference was invoked and whether it succeeded
-    let inferenceCalled = false;
-    let inferenceSucceeded = false;
-
-    try {
-      const video = this.videoRef.nativeElement;
-      const canvas = this.canvasRef.nativeElement;
-      const ctx = canvas.getContext('2d')!;
-
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-
-      const dataUrl = canvas.toDataURL('image/png');
-      this.imagePreview = dataUrl;
-      this.capturedImages.unshift(dataUrl);
-
-      // Preprocess → inference → save
-      const imageTensor = await this.preprocessImage(dataUrl);
-      // call the backend/model
-      let prediction = null;
-      try {
-        inferenceCalled = true;
-        prediction = await this.crackDetectionService.runInference(imageTensor);
-        inferenceSucceeded = !!prediction;
-      } catch (e) {
-        console.error('Inference error', e);
-      }
-
-      const now = new Date().toISOString();
-      const filename = this.generateFilename();
-
-      const entry: StoredImage = {
-        original: dataUrl,
-        timestamp: now,
-        filename,
-        prediction: prediction || undefined
-      };
-      await this.imageStorage.addImage(entry); // persists via @ionic/storage
-  this.savedImage = entry;
-  this.lastPrediction = prediction;
-
-      this.photosProcessed++;
-
-      // Keep console.log before clearing isProcessing so callers/UI see processing until logging completes
-      console.log('✅ Prediction stored:', prediction);
-      // Print all currently stored images to verify persistence
-      try {
-        const all = await this.imageStorage.getAllImages();
-        console.log('Stored images count:', all.length);
-      } catch (logErr) {
-        console.warn('Could not list stored images', logErr);
-      }
-
-      // Set a user-facing message depending on whether inference ran/succeeded
-      if (inferenceSucceeded) {
-        this.selectedStatusMessage = 'Prediction succeeded';
-      } else if (inferenceCalled) {
-        this.selectedStatusMessage = 'Prediction failed';
-      } else {
-        this.selectedStatusMessage = 'No prediction performed';
-      }
-    } catch (err) {
-      console.error('takePicture error', err);
-    } finally {
-      this.isProcessing = false;
-    }
-  }
 
   /** Resize + normalize image to [1,3,128,128] Float32Array */
   async preprocessImage(dataUrl: string): Promise<Float32Array> {
@@ -222,8 +146,7 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
   }
 
   toggleCamera() {
-    this.usingFrontCamera = !this.usingFrontCamera;
-    this.initCamera();
+    // toggleCamera removed — gallery-only page
   }
 
   filterThumbnails(type: string) {
@@ -245,14 +168,7 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
   }
 
   async requestCameraPermission() {
-    // Only request Capacitor Camera permissions on native platforms.
-    try {
-      if (Capacitor.getPlatform() === 'android' || Capacitor.getPlatform() === 'ios') {
-        await Camera.requestPermissions();
-      }
-    } catch (error) {
-      console.warn('Camera permission request error', error);
-    }
+    // removed
   }
 
   generateFilename(): string {
@@ -263,7 +179,7 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
   }
 
   ngOnDestroy() {
-    this.mediaStream?.getTracks().forEach(track => track.stop());
+    // no camera to stop in gallery-only page
   }
 
   /**
@@ -386,6 +302,9 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
     const files = input.files;
     if (!files || files.length === 0) return;
 
+    // user picked files -> hide upload prompt
+    this.showUploadPrompt = false;
+
     // Process multiple files sequentially to avoid overwhelming the device
     const fileArray = Array.from(files);
     (async () => {
@@ -405,15 +324,7 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
 
   /** Mobile image picker — attempts Capacitor Photos API, falls back to camera pick single file */
   async pickImagesMobile() {
-    try {
-      const photo = await Camera.getPhoto({ quality: 80, allowEditing: false, resultType: CameraResultType.Base64, source: CameraSource.Photos });
-      if (photo && photo.base64String) {
-        const dataUrl = `data:image/jpeg;base64,${photo.base64String}`;
-        await this.processDataUrl(dataUrl, `mobile-${Date.now()}.jpg`);
-      }
-    } catch (e) {
-      console.warn('pickImagesMobile failed', e);
-    }
+    // Mobile photo picker removed for gallery-only page; use triggerFileInput instead
   }
 
   /** Process a File object: convert to dataURL, preprocess, run inference, store, and update gallery */
@@ -457,6 +368,8 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
       };
       await this.imageStorage.addImage(entry);
       this.imagePaths.unshift({ original: entry.original, withBoxes: entry.original, fileName: entry.filename, rawPrediction: entry.prediction });
+      // we have at least one uploaded image — hide the initial prompt
+      this.showUploadPrompt = false;
     } finally {
       this.isProcessing = false;
       this.photosProcessed++;

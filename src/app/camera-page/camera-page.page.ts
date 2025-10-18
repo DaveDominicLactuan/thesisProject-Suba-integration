@@ -39,6 +39,7 @@ console.log('CameraPagePage component file loaded');
 export class CameraPagePage implements AfterViewInit {
   @ViewChild('video') videoRef!: ElementRef<HTMLVideoElement>;
   @ViewChild('canvas') canvasRef!: ElementRef<HTMLCanvasElement>;
+  @ViewChild('uploadInput') uploadInputRef!: ElementRef<HTMLInputElement>;
 
   imagePreview: string | null = null;
   capturedImages: string[] = [];
@@ -55,6 +56,61 @@ export class CameraPagePage implements AfterViewInit {
 
   get countdown() {
     return this.photosTaken - this.photosProcessed;
+  }
+
+  triggerFileInput() {
+    try {
+      this.uploadInputRef.nativeElement.click();
+    } catch (e) {
+      console.warn('triggerFileInput failed', e);
+    }
+  }
+
+  async processFile(file: File) {
+    const reader = new FileReader();
+    const dataUrl: string = await new Promise((resolve, reject) => {
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+    await this.processDataUrl(dataUrl, file.name);
+  }
+
+  async processDataUrl(dataUrl: string, filename: string) {
+    // mimic upload-image-page behaviour: preprocess, run inference, store
+    this.imagePreview = dataUrl;
+    this.capturedImages.unshift(dataUrl);
+    this.photosTaken++;
+    this.isProcessing = true;
+
+    let prediction: any = null;
+    try {
+      const tensor = await this.preprocessImage(dataUrl);
+      prediction = await this.crackDetectionService.runInference(tensor);
+    } catch (e) {
+      console.warn('Inference failed during upload processing', e);
+    }
+
+    const entry: StoredImage = {
+      original: dataUrl,
+      timestamp: new Date().toISOString(),
+      filename,
+      prediction: prediction || undefined
+    };
+    await this.imageStorage.addImage(entry);
+    // update UI
+    this.photosProcessed++;
+    this.isProcessing = false;
+  }
+
+  toggleFlash() {
+    // stub — native flash control would require plugin access
+    console.log('toggleFlash pressed (stub)');
+  }
+
+  openMore() {
+    // stub for 'more' menu
+    console.log('openMore pressed (stub)');
   }
 
   constructor(

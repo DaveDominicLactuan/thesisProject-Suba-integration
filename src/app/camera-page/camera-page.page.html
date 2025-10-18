@@ -14,78 +14,49 @@
 
 
   <!-- 🔝 Top Bar -->
-  <div class="top-bar">
-    <button class="top-btn left" (click)="goToHomePage()">✖</button>
-    <button class="top-btn right" (click)="goToFeedBackPage()">↻</button>
-  </div>
+    <div class="top-bar">
+      <button class="top-btn left" (click)="goToHomePage()">←</button>
+      <div class="top-center">
+        <button class="top-btn" (click)="toggleFlash()">🔦</button>
+      </div>
+      <button class="top-btn right" (click)="openMore()">⋮</button>
+    </div>
 
   <!-- 🔽 Bottom Bar -->
   <div class="bottom-bar">
     <!-- Top Section (Buttons + Face Detection) -->
     <div class="bottom-top-row">
-      <!-- <button class="function-btn" (click)="filterThumbnails('all')">📷 All</button>
-      <button class="function-btn" (click)="filterThumbnails('machine')">🤖 Machine</button> -->
-      <!-- <button class="function-btn" (click)="filterThumbnails('user')">👤 User</button> -->
-       <!-- <div class="spinner-container" (click)="goToFeedBackPage()">
-  <div class="rotating-ring" *ngIf="photosProcessed < photosTaken"></div>
-  <div class="center-value">
-    {{ photosProcessed }}/{{ photosTaken }}
-  </div>
-  <div 
-    class="red-circle"
-    [ngClass]="{
-      'green': photosProcessed === photosTaken,
-      'red': photosProcessed < photosTaken
-    }">
-  </div>
-</div> -->
+      <button class="function-btn" (click)="triggerFileInput()">Upload Image ⬆️</button>
+      <button class="function-btn" (click)="goToFeedBackPage()">Finish Session ✔️</button>
+    </div>
 
-
-<div class="spinner-container-rect" (click)="goToFeedBackPage()">
-  <svg *ngIf="photosProcessed < photosTaken" class="rect-spinner" width="70" height="40">
-    <rect
-      x="2"
-      y="2"
-      width="66"
-      height="36"
-      rx="12"
-      ry="12"
-      class="rect-spinner-path"
-    />
-  </svg>
-  <div class="center-value-rect">
-    {{ photosProcessed }}/{{ photosTaken }}
-  </div>
-  <div 
-    class="red-circle"
-    [ngClass]="{
-      'green': photosProcessed === photosTaken,
-      'red': photosProcessed < photosTaken
-    }">
-  </div>
-</div>
-
-    <!-- Bottom Section (Shutter + Thumbnails + Settings) -->
+    <!-- Bottom Section (Spinner + Shutter + Thumbnails) -->
     <div class="bottom-bottom-row">
-      <div *ngIf="capturedImages.length === 0" class="thumbnail-placeholder">📸</div>
-
-      <div *ngIf="capturedImages.length > 0" class="thumbnail-scroll">
-        <img *ngFor="let img of capturedImages" [src]="img" class="thumbnail" />
+      <div class="spinner-container-rect" (click)="goToFeedBackPage()">
+        <svg *ngIf="photosProcessed < photosTaken" class="rect-spinner" width="70" height="40">
+          <rect x="2" y="2" width="66" height="36" rx="12" ry="12" class="rect-spinner-path" />
+        </svg>
+        <div class="center-value-rect">{{ photosProcessed }}/{{ photosTaken }}</div>
+        <div class="red-circle" [ngClass]="{ 'green': photosProcessed === photosTaken, 'red': photosProcessed < photosTaken }"></div>
       </div>
 
       <!-- 🔘 Capture Button -->
       <button class="shutter-btn" (click)="takePicture()"></button>
 
-      <!-- ⚙️ Settings Button -->
-      <button class="side-btn" (click)="toggleCamera()">🔁</button>
-    </div>
+      <!-- Thumbnails on the right -->
+      <div *ngIf="capturedImages.length === 0" class="thumbnail-placeholder">📸</div>
+      <div *ngIf="capturedImages.length > 0" class="thumbnail-scroll">
+        <img *ngFor="let img of capturedImages" [src]="img" class="thumbnail" />
+      </div>
 
-    <input type="file" accept="image/*" (change)="onFileSelected($event)" />
+      <!-- hidden file input used by Upload Image -->
+      <input #uploadInput type="file" accept="image/*" multiple style="display:none" (change)="onFileSelected($event)" />
 
-    <div *ngIf="lastPrediction">
-      <p>Type: {{ lastPrediction.type }}</p>
-      <p>Shape: {{ lastPrediction.shape }}</p>
-      <p>Severity: {{ lastPrediction.severity }}</p>
+      <div *ngIf="lastPrediction">
+        <p>Type: {{ lastPrediction.type }}</p>
+        <p>Shape: {{ lastPrediction.shape }}</p>
+        <p>Severity: {{ lastPrediction.severity }}</p>
+      </div>
     </div>
   </div>
 </div>
