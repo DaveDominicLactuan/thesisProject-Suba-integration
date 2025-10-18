@@ -232,9 +232,18 @@ togglePasswordVisibility() {
   }
 
   onBack() {
-  this.selectedRole = null; // Deselect role and show both options
-  // Optionally, go back in navigation:
-  // this.navCtrl.back(); // Uncomment if you want to navigate back
+  // If a role is selected, deselect it. Otherwise navigate back to landing page.
+  if (this.selectedRole) {
+    this.selectedRole = null;
+    return;
+  }
+
+  // No role selected: navigate back to landing page
+  try {
+    this.router.navigateByUrl('/landing-page');
+  } catch (e) {
+    this.navCtrl.back();
+  }
 }
 
 }

@@ -402,10 +402,34 @@ export class CameraPagePage implements AfterViewInit {
     this.lastPrediction = prediction;
   }
 
-  onFileSelected(event: Event) {
+  async onFileSelected(event: Event) {
     const input = event.target as HTMLInputElement;
-    if (input.files && input.files[0]) {
-      this.testWithLocalImage(input.files[0]);
+    if (!input || !input.files || input.files.length === 0) return;
+
+    const fileArray = Array.from(input.files);
+
+    // Immediately update counters so UI shows the spinner/count right away
+    this.photosTaken += fileArray.length;
+    this.isProcessing = true;
+
+    // yield to the event loop so the spinner can render before heavy work
+    await new Promise(resolve => setTimeout(resolve, 20));
+
+    for (const f of fileArray) {
+      try {
+        // reuse existing processFile flow which reads, preprocesses, runs inference and stores
+        await this.processFile(f);
+      } catch (e) {
+        console.warn('Error processing selected file', e);
+        // ensure spinner can clear if something went wrong
+        this.photosProcessed++;
+      }
     }
+
+    // Clear the input value so selecting the same file(s) again will trigger change event
+    try { input.value = ''; } catch (e) { /* ignore */ }
+
+    // turn off processing if everything finished
+    if (this.photosProcessed >= this.photosTaken) this.isProcessing = false;
   }
 }

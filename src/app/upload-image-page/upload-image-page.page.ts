@@ -111,6 +111,12 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
     });
   }
 
+  // Ionic lifecycle - reload stored images when the page becomes active
+  ionViewWillEnter() {
+    // Load persisted images so uploads from other pages (camera) appear here
+    this.loadStoredImages();
+  }
+
 
 
   /** Resize + normalize image to [1,3,128,128] Float32Array */
@@ -222,6 +228,25 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
     }
   }
 
+  /** Template handler for back button */
+  goBack() {
+    try {
+      // prefer router back navigation if available, otherwise fallback to history
+      if ((this.router as any).navigateBack) {
+        (this.router as any).navigateBack();
+      } else {
+        window.history.back();
+      }
+    } catch (e) {
+      window.history.back();
+    }
+  }
+
+  /** Template handler to open more/options UI */
+  openMore() {
+    this.openMoreMenu();
+  }
+
   onImageClick(img: any) {
     this.selectedImage = this.showWithBoxes ? img.withBoxes : img.original;
     this.selectedImageTitle = img.fileName || '';
@@ -296,7 +321,7 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
     this.lastPrediction = prediction;
   }
 
-  onFileSelected(event: Event) {
+  async onFileSelected(event: Event) {
     const input = event.target as HTMLInputElement;
     if (!input) return;
     const files = input.files;
@@ -307,11 +332,30 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
 
     // Process multiple files sequentially to avoid overwhelming the device
     const fileArray = Array.from(files);
-    (async () => {
-      for (const f of fileArray) {
+
+    // Update photosTaken immediately so the spinner shows right away
+    this.photosTaken += fileArray.length;
+    // Mark overall processing state so UI can show spinner immediately
+    this.isProcessing = true;
+
+    // yield back to the browser so the spinner/SVG can start rendering
+    await new Promise(resolve => setTimeout(resolve, 20));
+
+    for (const f of fileArray) {
+      try {
         await this.processFile(f);
+      } catch (e) {
+        console.warn('Error processing file', e);
+        // ensure we still mark as processed so spinner can clear
+        this.photosProcessed++;
       }
-    })();
+    }
+
+    // Clear the native file input so selecting the same files again triggers change
+    try { input.value = ''; } catch (e) { /* ignore */ }
+
+    // if all processed, clear overall flag (individual calls also clear it per-file)
+    if (this.photosProcessed >= this.photosTaken) this.isProcessing = false;
   }
 
   triggerFileInput() {
@@ -343,7 +387,6 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
     // Update UI
     this.imagePreview = dataUrl;
     this.capturedImages.unshift(dataUrl);
-    this.photosTaken++;
     this.isProcessing = true;
 
     let prediction: any = null;
@@ -366,7 +409,15 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
         filename,
         prediction: prediction || undefined
       };
-      await this.imageStorage.addImage(entry);
+
+      // Try to persist, but always update the gallery so the user sees the upload immediately
+      try {
+        await this.imageStorage.addImage(entry);
+      } catch (storeErr) {
+        console.warn('Failed to persist uploaded image:', storeErr);
+      }
+
+      // Update gallery view immediately
       this.imagePaths.unshift({ original: entry.original, withBoxes: entry.original, fileName: entry.filename, rawPrediction: entry.prediction });
       // we have at least one uploaded image — hide the initial prompt
       this.showUploadPrompt = false;
