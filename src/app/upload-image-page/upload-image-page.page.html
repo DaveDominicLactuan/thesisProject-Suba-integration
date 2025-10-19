@@ -1,8 +1,7 @@
 <!-- 📸 Live Camera Preview Container -->
-<div class="camera-live">
+
     <!-- 🎥 Live Camera Feed -->
-    <video #video autoplay playsinline muted class="camera-feed"></video>
-    <canvas #canvas style="display:none"></canvas>
+    
 
   <!-- 🔝 Top Bar -->
   <div class="top-bar">
@@ -30,9 +29,15 @@
     </div>
   </div>
 
+  <div *ngIf="capturedImages.length === 0" class="thumbnail-placeholder">📸</div>
+
+      <div *ngIf="capturedImages.length > 0" class="thumbnail-scroll2">
+        <img *ngFor="let img of capturedImages" [src]="img" class="thumbnail2" />
+      </div>
+
   <!-- Scrollable image gallery (assets/test images) -->
   <!-- To disable test-assets, set includeTestAssets = false in the page TS or comment out this block. -->
-  <div class="scroll-wrapper" *ngIf="imagePaths && imagePaths.length > 0">
+  <!-- <div class="scroll-wrapper" *ngIf="imagePaths && imagePaths.length > 0">
     <div class="image-scroll" #scrollContainer (scroll)="onScroll($event)">
       <img
         *ngFor="let img of imagePaths"
@@ -42,7 +47,7 @@
         class="image-item"
       />
     </div>
-  </div>
+  </div> -->
 
   <!-- Debug panel (overlay) -->
   <div class="debug-panel" *ngIf="showDebugPanel">

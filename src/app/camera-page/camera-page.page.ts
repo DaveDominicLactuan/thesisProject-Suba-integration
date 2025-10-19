@@ -39,6 +39,7 @@ console.log('CameraPagePage component file loaded');
 export class CameraPagePage implements AfterViewInit {
   @ViewChild('video') videoRef!: ElementRef<HTMLVideoElement>;
   @ViewChild('canvas') canvasRef!: ElementRef<HTMLCanvasElement>;
+  @ViewChild('uploadInput') uploadInputRef!: ElementRef<HTMLInputElement>;
 
   imagePreview: string | null = null;
   capturedImages: string[] = [];
@@ -55,6 +56,71 @@ export class CameraPagePage implements AfterViewInit {
 
   get countdown() {
     return this.photosTaken - this.photosProcessed;
+  }
+
+  triggerFileInput() {
+    try {
+      this.uploadInputRef.nativeElement.click();
+    } catch (e) {
+      console.warn('triggerFileInput failed', e);
+    }
+  }
+
+  async processFile(file: File) {
+    const reader = new FileReader();
+    const dataUrl: string = await new Promise((resolve, reject) => {
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+    await this.processDataUrl(dataUrl, file.name);
+  }
+
+  async processDataUrl(dataUrl: string, filename: string) {
+    // mimic upload-image-page behaviour: preprocess, run inference, store
+    this.imagePreview = dataUrl;
+    this.capturedImages.unshift(dataUrl);
+    this.photosTaken++;
+    this.isProcessing = true;
+
+    let prediction: any = null;
+    try {
+      const tensor = await this.preprocessImage(dataUrl);
+      // guard inference with timeout to avoid device hangs
+      const inferenceTimeoutMs = 20_000; // 20s
+      try {
+        prediction = await Promise.race([
+          this.crackDetectionService.runInference(tensor),
+          new Promise((_, rej) => setTimeout(() => rej(new Error('inference-timeout')), inferenceTimeoutMs))
+        ]);
+      } catch (infErr) {
+        console.warn('Inference error/timeout during upload processing', infErr);
+        prediction = null;
+      }
+    } catch (e) {
+      console.warn('Inference failed during upload processing', e);
+    }
+
+    const entry: StoredImage = {
+      original: dataUrl,
+      timestamp: new Date().toISOString(),
+      filename,
+      prediction: prediction || undefined
+    };
+    await this.imageStorage.addImage(entry);
+    // update UI
+    this.photosProcessed++;
+    this.isProcessing = false;
+  }
+
+  toggleFlash() {
+    // stub — native flash control would require plugin access
+    console.log('toggleFlash pressed (stub)');
+  }
+
+  openMore() {
+    // stub for 'more' menu
+    console.log('openMore pressed (stub)');
   }
 
   constructor(
@@ -346,10 +412,34 @@ export class CameraPagePage implements AfterViewInit {
     this.lastPrediction = prediction;
   }
 
-  onFileSelected(event: Event) {
+  async onFileSelected(event: Event) {
     const input = event.target as HTMLInputElement;
-    if (input.files && input.files[0]) {
-      this.testWithLocalImage(input.files[0]);
+    if (!input || !input.files || input.files.length === 0) return;
+
+    const fileArray = Array.from(input.files);
+
+    // Immediately update counters so UI shows the spinner/count right away
+    this.photosTaken += fileArray.length;
+    this.isProcessing = true;
+
+    // yield to the event loop so the spinner can render before heavy work
+    await new Promise(resolve => setTimeout(resolve, 20));
+
+    for (const f of fileArray) {
+      try {
+        // reuse existing processFile flow which reads, preprocesses, runs inference and stores
+        await this.processFile(f);
+      } catch (e) {
+        console.warn('Error processing selected file', e);
+        // ensure spinner can clear if something went wrong
+        this.photosProcessed++;
+      }
     }
+
+    // Clear the input value so selecting the same file(s) again will trigger change event
+    try { input.value = ''; } catch (e) { /* ignore */ }
+
+    // turn off processing if everything finished
+    if (this.photosProcessed >= this.photosTaken) this.isProcessing = false;
   }
 }

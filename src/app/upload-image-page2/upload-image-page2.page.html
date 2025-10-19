@@ -1,0 +1,98 @@
+<!-- Gallery-style layout (uses scroll-wrapper + image-scroll from feedback-page) -->
+<div class="background">
+  <ion-content class="ion-padding">
+
+    <div class="top-bar">
+      <!-- Back button on the left -->
+      <button class="top-btn left" (click)="goBack()" aria-label="Back">←</button>
+
+      <!-- Center area: toggle and title -->
+      <div class="top-center">
+        <div class="toggle-wrapper">
+          <label class="switch">
+            <input type="checkbox" [(ngModel)]="showWithBoxes" (change)="detectCenterImage()" />
+            <span class="slider round"></span>
+          </label>
+          <span class="toggle-label">{{ showWithBoxes ? 'With Boxes' : 'Original' }}</span>
+        </div>
+        <div class="top-title">{{ selectedImageTitle }}</div>
+      </div>
+
+      <!-- More/options button on the right -->
+      <div style="display:flex;gap:8px;align-items:center">
+        <button class="top-btn" (click)="showUploadLogs()" aria-label="Logs" title="View upload logs">📝</button>
+        <button class="top-btn right" (click)="openMore()" aria-label="More">⋮</button>
+      </div>
+    </div>
+
+    <!-- Scrollable image gallery area -->
+    <div class="scroll-wrapper">
+      <div class="image-scroll" #scrollContainer (scroll)="onScroll($event)">
+        <div *ngFor="let img of imagePaths" class="image-wrapper">
+          <img
+            [src]="showWithBoxes ? img.withBoxes : img.original"
+            [class.selected]="(showWithBoxes ? img.withBoxes : img.original) === selectedImage"
+            (click)="onImageClick(img)"
+            class="image-item"
+          />
+          <!-- spinner overlay while processing -->
+          <div *ngIf="img.status === 'processing'" class="thumbnail-spinner-overlay">
+            <div class="tiny-spinner"></div>
+          </div>
+          <div *ngIf="img.inferenceError" class="image-error-badge" (click)="showImageErrorDetails(img)" title="Image processing error">⚠️</div>
+        </div>
+
+        <!-- Upload prompt when no images yet -->
+        <div *ngIf="imagePaths.length === 0 && showUploadPrompt" class="image-item" style="display:flex;flex-direction:column;align-items:center;justify-content:center;color:white;font-size:20px;height:80vh;gap:12px">
+          <div>Please upload images to begin.</div>
+          <button class="function-btn" (click)="triggerFileInput()">Upload Image</button>
+        </div>
+
+        <!-- fallback placeholder (dev) -->
+        <div *ngIf="imagePaths.length === 0 && !showUploadPrompt" class="image-item" style="display:flex;align-items:center;justify-content:center;color:white;font-size:32px;height:80vh">Image-Scroll</div>
+      </div>
+    </div>
+
+    <!-- Bottom rounded action bar reworked to have two sections like camera-page (top + bottom) -->
+    <div class="bottom-bar">
+      <!-- Top section: keep existing controls here (spinner + action buttons) -->
+      <div class="bottom-top-row">
+        <!-- Images processed block (spinner on top, label below) -->
+        <div class="func-action" (click)="goToFeedBackPage()">
+          <div class="spinner-container-rect">
+            <svg *ngIf="photosProcessed < photosTaken" class="rect-spinner" width="70" height="40">
+              <rect x="2" y="2" width="66" height="36" rx="12" ry="12" class="rect-spinner-path" />
+            </svg>
+            <div class="center-value-rect">{{ photosProcessed }}/{{ photosTaken }}</div>
+            <div class="red-circle" [ngClass]="{ 'green': photosProcessed === photosTaken, 'red': photosProcessed < photosTaken }"></div>
+          </div>
+          <div class="action-label">Images Processed</div>
+        </div>
+
+        <!-- Upload and Finish blocks (now siblings of the spinner block for even spacing) -->
+        <div class="func-action" (click)="triggerFileInput()">
+          <button class="function-btn icon-btn" aria-label="Upload Image">
+            <span class="action-icon">⬆️</span>
+          </button>
+          <div class="action-label">Upload Image</div>
+        </div>
+
+        <div class="func-action" (click)="finishSession()">
+          <button class="function-btn icon-btn" aria-label="Finish Session">
+            <span class="action-icon">✔️</span>
+          </button>
+          <div class="action-label">Finish Session</div>
+        </div>
+      </div>
+
+      <!-- Bottom section: empty placeholder to match camera-page's two-section layout (for future controls) -->
+      <div class="bottom-bottom-row" style="display:flex;justify-content:center;align-items:center;padding-top:8px;">
+        <!-- Intentionally left blank for upload-image specific controls if needed -->
+      </div>
+    </div>
+
+    <!-- hidden file input used for uploads -->
+    <input type="file" #fileInput accept="image/*" multiple style="display:none" (change)="onFileSelected($event)" />
+
+  </ion-content>
+</div>
