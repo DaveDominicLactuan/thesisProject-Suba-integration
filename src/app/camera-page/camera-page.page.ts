@@ -86,7 +86,17 @@ export class CameraPagePage implements AfterViewInit {
     let prediction: any = null;
     try {
       const tensor = await this.preprocessImage(dataUrl);
-      prediction = await this.crackDetectionService.runInference(tensor);
+      // guard inference with timeout to avoid device hangs
+      const inferenceTimeoutMs = 20_000; // 20s
+      try {
+        prediction = await Promise.race([
+          this.crackDetectionService.runInference(tensor),
+          new Promise((_, rej) => setTimeout(() => rej(new Error('inference-timeout')), inferenceTimeoutMs))
+        ]);
+      } catch (infErr) {
+        console.warn('Inference error/timeout during upload processing', infErr);
+        prediction = null;
+      }
     } catch (e) {
       console.warn('Inference failed during upload processing', e);
     }

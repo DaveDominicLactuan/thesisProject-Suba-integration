@@ -101,6 +101,51 @@
   margin-right: 30px;
 }
 
+/* wrapper to position overlay elements relative to each thumbnail */
+.image-wrapper { position: relative; display: inline-block; }
+
+.image-error-badge {
+  position: absolute;
+  top: 8px;
+  right: 24px;
+  background: rgba(255, 200, 0, 0.95);
+  color: #6b2b00;
+  font-weight: 700;
+  padding: 4px 6px;
+  border-radius: 6px;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.2);
+  cursor: pointer;
+  z-index: 30;
+}
+
+/* Spinner overlay on provisional thumbnails */
+.thumbnail-spinner-overlay {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  background: rgba(255,255,255,0.85);
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+}
+
+.tiny-spinner {
+  width: 22px;
+  height: 22px;
+  border: 3px solid rgba(0,0,0,0.15);
+  border-top-color: #222;
+  border-radius: 50%;
+  animation: tiny-spin 0.9s linear infinite;
+}
+
+@keyframes tiny-spin { to { transform: rotate(360deg); } }
+
 .image-item.selected {
   border: 3px solid #3880ff;
   transform: scale(1.05);

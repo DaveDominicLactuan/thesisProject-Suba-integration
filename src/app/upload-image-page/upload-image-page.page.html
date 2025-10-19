@@ -19,19 +19,28 @@
       </div>
 
       <!-- More/options button on the right -->
-      <button class="top-btn right" (click)="openMore()" aria-label="More">⋮</button>
+      <div style="display:flex;gap:8px;align-items:center">
+        <button class="top-btn" (click)="showUploadLogs()" aria-label="Logs" title="View upload logs">📝</button>
+        <button class="top-btn right" (click)="openMore()" aria-label="More">⋮</button>
+      </div>
     </div>
 
     <!-- Scrollable image gallery area -->
     <div class="scroll-wrapper">
       <div class="image-scroll" #scrollContainer (scroll)="onScroll($event)">
-        <img
-          *ngFor="let img of imagePaths"
-          [src]="showWithBoxes ? img.withBoxes : img.original"
-          [class.selected]="(showWithBoxes ? img.withBoxes : img.original) === selectedImage"
-          (click)="onImageClick(img)"
-          class="image-item"
-        />
+        <div *ngFor="let img of imagePaths" class="image-wrapper">
+          <img
+            [src]="showWithBoxes ? img.withBoxes : img.original"
+            [class.selected]="(showWithBoxes ? img.withBoxes : img.original) === selectedImage"
+            (click)="onImageClick(img)"
+            class="image-item"
+          />
+          <!-- spinner overlay while processing -->
+          <div *ngIf="img.status === 'processing'" class="thumbnail-spinner-overlay">
+            <div class="tiny-spinner"></div>
+          </div>
+          <div *ngIf="img.inferenceError" class="image-error-badge" (click)="showImageErrorDetails(img)" title="Image processing error">⚠️</div>
+        </div>
 
         <!-- Upload prompt when no images yet -->
         <div *ngIf="imagePaths.length === 0 && showUploadPrompt" class="image-item" style="display:flex;flex-direction:column;align-items:center;justify-content:center;color:white;font-size:20px;height:80vh;gap:12px">

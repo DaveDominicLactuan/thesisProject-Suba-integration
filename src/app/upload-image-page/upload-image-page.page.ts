@@ -1,6 +1,6 @@
 
 import { AfterViewInit, Component, ElementRef, OnDestroy, ViewChild } from '@angular/core';
-import { Platform } from '@ionic/angular';
+import { Platform, AlertController, ToastController } from '@ionic/angular';
 import { Router } from '@angular/router';
 import { DomSanitizer } from '@angular/platform-browser';
 
@@ -32,6 +32,7 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
   // video ref removed for gallery-only page
   // video/canvas removed — gallery-only page
   @ViewChild('fileInput') fileInputRef!: ElementRef<HTMLInputElement>;
+  @ViewChild('scrollContainer') scrollContainer!: ElementRef<HTMLDivElement>;
 
   imagePreview: string | null = null;
   capturedImages: string[] = [];
@@ -58,6 +59,8 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
   showDebugPanel = false;
   selectedPrediction: { type?: string; shape?: string; severity?: string } | null = null;
   selectedStatusMessage: string = '';
+  // New: keep simple runtime upload logs for troubleshooting
+  uploadLogs: string[] = [];
 
   scaledBoxes: ScaledBox[] = [];
   // UI state for top actions
@@ -74,6 +77,9 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
     private sanitizer: DomSanitizer,
     private crackDetectionService: CrackDetectionService,
     private imageStorage: ImageStorageService
+    ,
+    private alertCtrl: AlertController,
+    private toastCtrl: ToastController
   ) {
     // Page loads images only from user uploads. Optionally preload test assets for dev when enabled.
     if (this.includeTestAssets) this.loadTestAssets();
@@ -348,6 +354,8 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
         console.warn('Error processing file', e);
         // ensure we still mark as processed so spinner can clear
         this.photosProcessed++;
+        // log failure
+        this.pushLog(`File ${f.name} processing failed: ${e}`);
       }
     }
 
@@ -379,26 +387,60 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
       reader.onerror = reject;
       reader.readAsDataURL(file);
     });
-    await this.processDataUrl(dataUrl, file.name);
+
+    // Create a temporary id so we can show the preview immediately and later update it
+    const tempId = `tmp_${Date.now()}_${Math.floor(Math.random() * 10000)}`;
+
+    // Insert provisional gallery entry so user sees the uploaded image right away
+    try {
+      this.imagePaths.unshift({ original: dataUrl, withBoxes: dataUrl, fileName: file.name, rawPrediction: null, tempId, status: 'processing', inferenceError: false, inferenceErrorMessage: '' });
+      // Hide initial upload prompt since we have at least one image
+      this.showUploadPrompt = false;
+      // Auto-scroll the gallery to show the newly added provisional image
+      setTimeout(() => this.scrollToStart(), 80);
+    } catch (e) {
+      console.warn('Failed to insert provisional image entry', e);
+    }
+
+    await this.processDataUrl(dataUrl, file.name, tempId);
   }
 
   /** Helper to process a data URL (image) — runs inference and stores the image */
-  async processDataUrl(dataUrl: string, filename: string) {
+  async processDataUrl(dataUrl: string, filename: string, tempId?: string) {
     // Update UI
     this.imagePreview = dataUrl;
     this.capturedImages.unshift(dataUrl);
     this.isProcessing = true;
 
-    let prediction: any = null;
+  let prediction: any = null;
     let inferenceCalled = false;
     let inferenceSucceeded = false;
+  let inferenceErrorMessage: string | null = null;
 
     try {
       try {
         inferenceCalled = true;
         const tensor = await this.preprocessImage(dataUrl);
-        prediction = await this.crackDetectionService.runInference(tensor);
-        inferenceSucceeded = !!prediction;
+
+        // Run inference but guard against hangs/timeouts on some Android WebViews
+        // Use a shorter timeout for upload flows (10s) to fail fast on device
+        const inferenceTimeoutMs = 10_000; // 10s
+        try {
+          prediction = await Promise.race([
+            this.crackDetectionService.runInference(tensor),
+            new Promise((_, rej) => setTimeout(() => rej(new Error('inference-timeout')), inferenceTimeoutMs))
+          ]);
+          inferenceSucceeded = !!prediction;
+        } catch (infErr) {
+          console.warn('Inference error/timeout in processDataUrl:', infErr);
+          inferenceErrorMessage = (infErr && (infErr as Error).message) ? (infErr as Error).message : String(infErr);
+          prediction = null;
+          inferenceSucceeded = false;
+          // record a log entry and persist
+          this.pushLog(`Inference failed for ${filename}: ${inferenceErrorMessage}`);
+          // show a short toast to inform the user
+          try { this.showToast(`Inference failed for ${filename}: ${inferenceErrorMessage}`, 4000); } catch (e) { /* ignore */ }
+        }
       } catch (inner) {
         console.warn('Inference error in processDataUrl', inner);
       }
@@ -407,24 +449,123 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
         original: dataUrl,
         timestamp: new Date().toISOString(),
         filename,
-        prediction: prediction || undefined
+        prediction: prediction || undefined,
+        // store inference error info if any (ImageStorageService's StoredImage type may accept extra fields)
+        // We'll attach a best-effort map to persist troubleshooting info
+        ...(inferenceErrorMessage ? { inferenceError: true, inferenceErrorMessage } : {})
       };
 
-      // Try to persist, but always update the gallery so the user sees the upload immediately
+      // Try to persist
       try {
         await this.imageStorage.addImage(entry);
       } catch (storeErr) {
         console.warn('Failed to persist uploaded image:', storeErr);
+        // record persistence error
+        this.pushLog(`Persist failed for ${filename}: ${storeErr}`);
       }
 
-      // Update gallery view immediately
-      this.imagePaths.unshift({ original: entry.original, withBoxes: entry.original, fileName: entry.filename, rawPrediction: entry.prediction });
-      // we have at least one uploaded image — hide the initial prompt
-      this.showUploadPrompt = false;
+      // Update gallery view: replace provisional entry (if exists) or insert
+      try {
+        if (tempId) {
+          const idx = this.imagePaths.findIndex(p => p.tempId === tempId);
+          if (idx >= 0) {
+            // replace the provisional entry with the final one
+            this.imagePaths[idx] = { original: entry.original, withBoxes: entry.original, fileName: entry.filename, rawPrediction: entry.prediction, inferenceError: !!inferenceErrorMessage, inferenceErrorMessage };
+          } else {
+            this.imagePaths.unshift({ original: entry.original, withBoxes: entry.original, fileName: entry.filename, rawPrediction: entry.prediction, inferenceError: !!inferenceErrorMessage, inferenceErrorMessage });
+          }
+        } else {
+          this.imagePaths.unshift({ original: entry.original, withBoxes: entry.original, fileName: entry.filename, rawPrediction: entry.prediction, inferenceError: !!inferenceErrorMessage, inferenceErrorMessage });
+        }
+        // we have at least one uploaded image — hide the initial prompt
+        this.showUploadPrompt = false;
+      } catch (e) {
+        console.warn('Failed to update gallery after processing:', e);
+      }
     } finally {
       this.isProcessing = false;
       this.photosProcessed++;
+      // if the file had an error, surface a small alert (non-blocking) for the user to view logs
+      if (inferenceErrorMessage) {
+        try {
+          console.warn('Upload inference error:', inferenceErrorMessage);
+          // toast already shown earlier; ensure logs persisted
+          this.persistLogs();
+        } catch (err) { /* ignore */ }
+      }
     }
+  }
+
+  /** Expose logs quickly in an alert for troubleshooting */
+  async showUploadLogs() {
+    // Present Ionic Alert with logs and an action to clear logs
+    const logs = this.uploadLogs.slice(0, 200).join('\n') || 'No recent upload logs.';
+    const alert = await this.alertCtrl.create({
+      header: 'Upload Logs',
+      message: `<pre style="white-space:pre-wrap;max-height:60vh;overflow:auto">${this.escapeHtml(logs)}</pre>`,
+      buttons: [
+        { text: 'Clear', role: 'destructive', handler: () => { this.clearLogs(); } },
+        { text: 'Close', role: 'cancel' }
+      ]
+    });
+    await alert.present();
+  }
+
+  /** Show detailed error info for a gallery item */
+  async showImageErrorDetails(img: any) {
+    if (!img || !img.inferenceError) {
+      const alert = await this.alertCtrl.create({ header: 'No error', message: 'No error info for this image.', buttons: ['OK'] });
+      await alert.present();
+      return;
+    }
+    const msg = `File: ${img.fileName || 'unknown'}\nError: ${img.inferenceErrorMessage || 'Unknown'}`;
+    const alert = await this.alertCtrl.create({ header: 'Image Error', message: this.escapeHtml(msg).replace(/\n/g, '<br/>'), buttons: ['OK'] });
+    await alert.present();
+  }
+
+  private scrollToStart() {
+    try {
+      const el = this.scrollContainer?.nativeElement;
+      if (el && typeof el.scrollTo === 'function') {
+        el.scrollTo({ left: 0, behavior: 'smooth' } as any);
+      }
+    } catch (e) { /* ignore */ }
+  }
+
+  /** Push a message into uploadLogs and persist them */
+  private pushLog(msg: string) {
+    try {
+      const ts = new Date().toISOString();
+      this.uploadLogs.unshift(`[${ts}] ${msg}`);
+      // keep logs at reasonable length
+      if (this.uploadLogs.length > 1000) this.uploadLogs.length = 1000;
+      this.persistLogs();
+    } catch (e) { console.warn('pushLog failed', e); }
+  }
+
+  private persistLogs() {
+    try { localStorage.setItem('uploadLogs', JSON.stringify(this.uploadLogs)); } catch (e) { /* ignore */ }
+  }
+
+  private loadPersistedLogs() {
+    try {
+      const raw = localStorage.getItem('uploadLogs');
+      if (raw) this.uploadLogs = JSON.parse(raw) as string[];
+    } catch (e) { /* ignore */ }
+  }
+
+  private escapeHtml(s: string) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+  private async showToast(msg: string, duration = 3000) {
+    try {
+      const t = await this.toastCtrl.create({ message: msg, duration, position: 'bottom' });
+      await t.present();
+    } catch (e) { console.warn('showToast failed', e); }
+  }
+
+  private clearLogs() {
+    this.uploadLogs = [];
+    try { localStorage.removeItem('uploadLogs'); } catch (e) { /* ignore */ }
   }
 
 }

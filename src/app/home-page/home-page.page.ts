@@ -2,9 +2,10 @@ import { Component, OnInit } from '@angular/core';
 import { Router } from '@angular/router';
 import { FormBuilder, FormGroup, Validators } from '@angular/forms';
 import { AuthService } from '../services/auth.service';
-import { NavController } from '@ionic/angular';
+import { NavController, AlertController, ToastController } from '@ionic/angular';
 import { User } from 'firebase/auth';
 import { Auth3Service } from '../services/auth3.service';
+import { ImageStorageService } from '../services/image-storage.service';
 
 @Component({
   selector: 'app-home-page',
@@ -17,7 +18,16 @@ export class HomePagePage implements OnInit {
   firstName: string | null = null;
   lastName: string | null = null;
 
-  constructor(private formBuilder: FormBuilder, private router: Router, private authService: AuthService, private navCtrl: NavController, private auth3: Auth3Service) {
+  constructor(
+    private formBuilder: FormBuilder,
+    private router: Router,
+    private authService: AuthService,
+    private navCtrl: NavController,
+    private auth3: Auth3Service,
+    private imageStorage: ImageStorageService,
+    private alertCtrl: AlertController,
+    private toastCtrl: ToastController
+  ) {
 
   }
 
@@ -98,6 +108,31 @@ this.lastName = profile['lastName'];
   goToUploadImage() {
     this.router.navigate(['/upload-image-page']);
     console.log('pdf 3 page');
+  }
+
+  /** Prompt and clear stored images used in testing */
+  async confirmClearStorage() {
+    const alert = await this.alertCtrl.create({
+      header: 'Clear stored images',
+      message: 'This will remove all stored test images. Are you sure?',
+      buttons: [
+        { text: 'Cancel', role: 'cancel' },
+        {
+          text: 'Clear',
+          handler: async () => {
+            try {
+              await this.imageStorage.clear();
+              const t = await this.toastCtrl.create({ message: 'Stored images cleared', duration: 1500, color: 'success' });
+              await t.present();
+            } catch (e) {
+              const t = await this.toastCtrl.create({ message: 'Failed to clear storage', duration: 1500, color: 'danger' });
+              await t.present();
+            }
+          }
+        }
+      ]
+    });
+    await alert.present();
   }
 
 

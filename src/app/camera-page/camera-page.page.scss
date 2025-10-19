@@ -145,13 +145,23 @@ form, input, optgroup, select {
 .bottom-top-row { display:flex; justify-content:space-between; padding:6px 8px; }
 .function-btn { background:#fff; border:1px solid #ddd; padding:8px 12px; border-radius:16px; box-shadow:none; }
 
-.bottom-bottom-row { display:flex; align-items:center; justify-content:space-between; padding:8px 2.5px; }
+.bottom-bottom-row { display:flex; align-items:center; justify-content:space-between; padding:8px 1.0px; position: relative; }
 
 /* Spinner on left */
-.spinner-container-rect { margin-left:6px; }
+.spinner-container-rect { margin-left:-5px; 
+position: absolute;
+  left: calc(0% + 10px);    /* center + 40px to the right */
+  transform: translateX(-50%); /* center the element on its midpoint */
+  bottom: 8px;               /* match your bottom spacing */
+  z-index: 50;}
 
 /* Large centered shutter */
-.shutter-btn { width:84px; height:84px; border-radius:50%; background:#000; border:6px solid #fff; box-shadow:0 6px 20px rgba(0,0,0,0.35); margin:0 12px; }
+.shutter-btn { width:84px; height:84px; border-radius:50%; background:#000; border:6px solid #fff; box-shadow:0 6px 20px rgba(0,0,0,0.35); margin:0 12px;
+position: absolute;
+  left: calc(45% + 0px);    /* center + 40px to the right */
+  transform: translateX(-50%); /* center the element on its midpoint */
+  bottom: 8px;               /* match your bottom spacing */
+  z-index: 50;   }
 
 .thumbnail-scroll { display:flex; gap:10px; align-items:center; max-width:110px; }
 .thumbnail { width:56px; height:56px; border-radius:8px; object-fit:cover; border:2px solid #fff; box-shadow:0 6px 18px rgba(0,0,0,0.12); }

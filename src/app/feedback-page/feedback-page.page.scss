@@ -115,6 +115,7 @@
   border-bottom: 2px solid #e0e0e0;
   border-radius: 0 0 8px 8px;
   box-shadow: 0px 2px 8px rgba(0, 0, 0, 0.1);
+  margin-top: 15px;
 
   .top-title {
     font-size: 10px;
@@ -129,14 +130,14 @@
 
 .scroll-wrapper {
   position: relative;
-  top: 60px; /* Push down under fixed top bar */
+  top: 90px; /* Push down under fixed top bar */
   background-color: #008799;
   display: flex;
   flex-direction: column;
   align-items: center;
   overflow-x: auto;
   padding: 10px 0;
-  height: 490px;
+  height: 530px;
   transition: height 0.3s ease;
 
   &.shrink {
@@ -183,7 +184,7 @@
 }
 
 .login-form {
-  margin-top: 20px;
+  margin-top: 50px;
   position: relative;
   z-index: 5;
   max-width: 100%;
@@ -319,9 +320,9 @@
 }
 
 .image-title {
-  margin-top: 30px;
+  margin-top: 50px;
   font-weight: 600;
-  font-size: 0.8rem;
+  font-size: 1rem;
   color: black;
   text-align: center;
   padding-bottom: 10px;
