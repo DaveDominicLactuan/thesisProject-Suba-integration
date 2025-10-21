@@ -83,4 +83,13 @@ togglePasswordVisibility() {
     console.log('camera page');
   }
 
+  goBack() {
+    try {
+      // navigate back to landing page or previous history
+      this.router.navigateByUrl('/landing-page');
+    } catch (e) {
+      window.history.back();
+    }
+  }
+
 }

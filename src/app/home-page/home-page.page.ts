@@ -90,7 +90,7 @@ this.lastName = profile['lastName'];
   }
 
   gopdfPage2() {
-    this.router.navigate(['/upload-image-page2']);
+    this.router.navigate(['/upload-image-page3']);
     console.log('pdf 2 page');
   }
 

@@ -1,22 +1,12 @@
-// .camera-feed {
-// 	position: absolute;
-// 	top: 0;
-// 	left: 0;
-// 	width: 100%;
-// 	height: 100%;
-// 	object-fit: cover;
-// 	z-index: 1;
-// }
-
-// .camera-feed {
-// 	position: absolute;
-// 	top: 0;
-// 	left: 0;
-// 	width: 0%;
-// 	height: 0%;
-// 	object-fit: cover;
-// 	// z-index: 0;
-// }
+.camera-feed {
+	position: absolute;
+	top: 0;
+	left: 0;
+	width: 100%;
+	height: 100%;
+	object-fit: cover;
+	z-index: 1;
+}
 
 .image-preview {
 	position: absolute;
@@ -59,14 +49,12 @@ form, input, optgroup, select {
 		color: inherit;
 }
 
-// .camera-live {
-// 	position: relative;
-// 	width: 0%;
-// 	height: 0%;
-// 	// width: 100%;
-// 	// height: 100%;
-// 	overflow: hidden;
-// }
+.camera-live {
+	position: relative;
+	width: 100%;
+	height: 100%;
+	overflow: hidden;
+}
 
 .overlay {
 	position: absolute;
@@ -106,43 +94,54 @@ form, input, optgroup, select {
 
 /* Bottom Bar Container */
 .bottom-bar {
-  position: fixed;
-  bottom: 8px;
-  left: 8px;
-  right: 8px;
-  background: #f0f0f0;
-  border-radius: 16px;
-  padding: 12px;
-  z-index: 20;
-  box-shadow: 0 6px 18px rgba(0,0,0,0.12);
+	position: absolute;
+	bottom: 0;
+	width: 100%;
+	// background: white;
+	background: rgba(52, 102, 160, 0.771);
+	border-radius: 0 0 0 0;
+	padding: 10px 20px;
+	z-index: 20;
 }
 
+/* Top Row inside Bottom Bar (4 function buttons) */
 .bottom-top-row {
-  display: flex;
-  justify-content: space-around; /* spread the three action blocks evenly */
-  margin-bottom: 6px;
-  align-items: center;
-  padding: 6px 4px;
+	display: flex;
+	justify-content: space-between;
+	margin-bottom: 10px;
 }
 
 .function-btn {
-  background: white;
-  border: 1px solid #ddd;
-  padding: 8px 12px;
-  border-radius: 10px;
-  font-size: 14px;
-  color: #333;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
+	background: transparent;
+	border: 2px solid #ccc;
+	padding: 6px 12px;
+	border-radius: 12px;
+	font-size: 14px;
+	color: black;
 }
 
-/* New stacked icon-above-label action styles */
-.function-btns { display:flex; gap:12px; }
-.func-action { display:flex; flex-direction:column; align-items:center; gap:6px; cursor:pointer; }
-.icon-btn { width:56px; height:48px; display:flex; align-items:center; justify-content:center; padding:6px; border-radius:10px; background:#fff; border:1px solid #e6e6e6; }
-.action-icon { font-size:20px; }
-.action-label { font-size:12px; font-weight:600; color:#000; text-align:center; }
+/* Bottom Row (Shutter + 2 Side Buttons) */
+.bottom-bottom-row {
+	display: flex;
+	justify-content: space-around;
+	align-items: center;
+}
+
+.shutter-btn {
+	width: 70px;
+	height: 70px;
+	border-radius: 50%;
+	background-color: #0099ff;
+	border: 4px solid white;
+	box-shadow: 0 0 6px rgba(0, 0, 0, 0.2);
+}
+
+.side-btn {
+	background: transparent;
+	border: none;
+	font-size: 22px;
+	cursor: pointer;
+}
 
 
 .face-status-indicator {
@@ -207,53 +206,6 @@ form, input, optgroup, select {
 	border-radius: 6px;
 	border: 2px solid #fff;
 	box-shadow: 0 0 4px rgba(0, 0, 0, 0.3);
-}
-
-
-.thumbnail-scroll2 {
-		display: flex;
-		flex-direction: row;
-		align-items: center;
-		justify-content: flex-start;
-		overflow-x: auto;
-		gap: 24px;
-		padding: 24px 32px;
-		min-height: 520px;
-		width: 100%;
-		max-width: 100vw;
-		box-sizing: border-box;
-		margin: 0 auto;
-		z-index: 5;
-		position: absolute;
-		top: 5%;
-		left: 5%;
-
-
-
-	&::-webkit-scrollbar {
-		height: 6px;
-	}
-	&::-webkit-scrollbar-thumb {
-		background-color: #ccc;
-		border-radius: 3px;
-	}
-	&::-webkit-scrollbar-track {
-		background: transparent;
-	}
-}
-
-.thumbnail2 {
-		display: block;
-		margin: 0 12px;
-		max-width: 100%;
-		max-height: 180px;
-		width: 160px;
-		height: auto;
-		object-fit: contain;
-		border-radius: 6px;
-		border: 2px solid #fff;
-		box-shadow: 0 0 4px rgba(0, 0, 0, 0.3);
-		flex-shrink: 1;
 }
 
 .spinner-container-rect {
@@ -330,15 +282,14 @@ form, input, optgroup, select {
 	background: red;
 	color: white;
 	font-weight: bold;
-		font-size: 18px;
-		color: #aaa;
-		text-align: center;
-		padding: 24px;
-		max-width: 100px;
-		margin: 0 auto;
+	font-size: 10px;
+	width: 15px;
+	height: 15px;
+	border-radius: 50%;
+	display: flex;
 	align-items: center;
 	justify-content: center;
-	z-index: 1;
+	z-index: 2;
 
 	&.green {
 		background: rgb(9, 188, 18);

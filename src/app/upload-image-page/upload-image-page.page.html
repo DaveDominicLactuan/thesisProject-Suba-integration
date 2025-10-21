@@ -1,7 +1,4 @@
-<!-- 📸 Live Camera Preview Container -->
 
-    <!-- 🎥 Live Camera Feed -->
-    
 
   <!-- 🔝 Top Bar -->
   <div class="top-bar">
@@ -11,43 +8,29 @@
 
   <!-- Gallery + toggle (copied from feedback-page for quick testing) -->
   <div class="top-bar">
-    <div class="toggle-wrapper">
+    <!-- <div class="toggle-wrapper">
       <label class="switch">
         <input type="checkbox" [(ngModel)]="showWithBoxes" (change)="detectCenterImage()" />
         <span class="slider round"></span>
       </label>
       <span class="toggle-label">{{ showWithBoxes ? 'With Boxes' : 'Original' }}</span>
-    </div>
+    </div> -->
     <!-- helpful small title showing current selection -->
     <div class="top-title">{{ selectedImageTitle }}</div>
     <div class="gallery-controls">
       <button class="control-btn" (click)="loadTestAssets()">Load Test Assets</button>
       <button class="control-btn" (click)="loadStoredImages()">Load Stored Images</button>
-        <button class="control-btn" (click)="toggleDebugPanel()">Debug</button>
-        <button class="control-btn" (click)="triggerFileInput()">Upload Images</button>
-        <button class="control-btn" (click)="pickImagesMobile()">Pick Images (Mobile)</button>
+      <button class="control-btn" (click)="toggleDebugPanel()">Debug</button>
+      <button class="control-btn" (click)="triggerFileInput()">Upload Images</button>
+      <button class="control-btn" (click)="pickImagesMobile()">Pick Images (Mobile)</button>
     </div>
   </div>
 
   <div *ngIf="capturedImages.length === 0" class="thumbnail-placeholder">📸</div>
+  <div *ngIf="capturedImages.length > 0" class="thumbnail-scroll2">
+    <img *ngFor="let img of capturedImages" [src]="img" class="thumbnail2" />
+  </div>
 
-      <div *ngIf="capturedImages.length > 0" class="thumbnail-scroll2">
-        <img *ngFor="let img of capturedImages" [src]="img" class="thumbnail2" />
-      </div>
-
-  <!-- Scrollable image gallery (assets/test images) -->
-  <!-- To disable test-assets, set includeTestAssets = false in the page TS or comment out this block. -->
-  <!-- <div class="scroll-wrapper" *ngIf="imagePaths && imagePaths.length > 0">
-    <div class="image-scroll" #scrollContainer (scroll)="onScroll($event)">
-      <img
-        *ngFor="let img of imagePaths"
-        [src]="showWithBoxes ? img.withBoxes : img.original"
-        [class.selected]="(showWithBoxes ? img.withBoxes : img.original) === selectedImage"
-        (click)="onImageClick(img)"
-        class="image-item"
-      />
-    </div>
-  </div> -->
 
   <!-- Debug panel (overlay) -->
   <div class="debug-panel" *ngIf="showDebugPanel">
@@ -66,57 +49,50 @@
     <!-- Hidden multi-file input used by Upload Images button -->
     <input type="file" #fileInput accept="image/*" multiple style="display:none" (change)="onFileSelected($event)" />
 
-  <!-- 🔽 Bottom Bar -->
+  <!-- Bottom rounded action bar reworked to have two sections like camera-page (top + bottom) -->
   <div class="bottom-bar">
-    
+    <!-- Top section: keep existing controls here (spinner + action buttons) -->
     <div class="bottom-top-row">
-     
+      <!-- Images processed block (spinner on top, label below) -->
+      <div class="func-action" (click)="goToFeedBackPage()">
+        <div class="spinner-container-rect">
+          <svg *ngIf="photosProcessed < photosTaken" class="rect-spinner" width="70" height="40">
+            <rect x="2" y="2" width="66" height="36" rx="12" ry="12" class="rect-spinner-path" />
+          </svg>
+          <div class="center-value-rect">{{ photosProcessed }}/{{ photosTaken }}</div>
+          <div class="red-circle" [ngClass]="{ 'green': photosProcessed === photosTaken, 'red': photosProcessed < photosTaken }"></div>
+        </div>
+        <div class="action-label">Images Processed</div>
+      </div>
 
-<div class="spinner-container-rect" (click)="goToFeedBackPage()">
-  <svg *ngIf="photosProcessed < photosTaken" class="rect-spinner" width="70" height="40">
-    <rect
-      x="2"
-      y="2"
-      width="66"
-      height="36"
-      rx="12"
-      ry="12"
-      class="rect-spinner-path"
-    />
-  </svg>
-  <div class="center-value-rect">
-    {{ photosProcessed }}/{{ photosTaken }}
-  </div>
-  <div 
-    class="red-circle"
-    [ngClass]="{
-      'green': photosProcessed === photosTaken,
-      'red': photosProcessed < photosTaken
-    }">
-  </div>
-</div>
+      <!-- Upload and Finish blocks (now siblings of the spinner block for even spacing) -->
+      <div class="func-action" (click)="pickImagesMobile()">
+        <button class="function-btn icon-btn" aria-label="Upload Image">
+          <span class="action-icon">⬆️</span>
+        </button>
+        <div class="action-label">Upload Image</div>
+      </div>
 
-    <!-- Bottom Section (Shutter + Thumbnails + Settings) -->
-    <div class="bottom-bottom-row">
+      <div class="func-action" (click)="goToFeedBackPage()">
+        <button class="function-btn icon-btn" aria-label="Finish Session">
+          <span class="action-icon">✔️</span>
+        </button>
+        <div class="action-label">Finish Session</div>
+      </div>
+
       <div *ngIf="capturedImages.length === 0" class="thumbnail-placeholder">📸</div>
 
       <div *ngIf="capturedImages.length > 0" class="thumbnail-scroll">
         <img *ngFor="let img of capturedImages" [src]="img" class="thumbnail" />
       </div>
-
-      <!-- 🔘 Capture Button -->
-      <button class="shutter-btn" (click)="takePicture()"></button>
-
-      <!-- ⚙️ Settings Button -->
-      <button class="side-btn" (click)="toggleCamera()">🔁</button>
+      
     </div>
 
-    <input type="file" accept="image/*" (change)="onFileSelected($event)" />
-
-    <div *ngIf="lastPrediction">
-      <p>Type: {{ lastPrediction.type }}</p>
-      <p>Shape: {{ lastPrediction.shape }}</p>
-      <p>Severity: {{ lastPrediction.severity }}</p>
+    <!-- Bottom section: empty placeholder to match camera-page's two-section layout (for future controls) -->
+    <div class="bottom-bottom-row" style="display:flex;justify-content:center;align-items:center;padding-top:8px;">
+      <!-- Intentionally left blank for upload-image specific controls if needed -->
     </div>
   </div>
-</div>
+
+  <!-- </ion-content>
+</div> -->
