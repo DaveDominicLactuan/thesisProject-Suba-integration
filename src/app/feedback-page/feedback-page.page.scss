@@ -115,6 +115,7 @@
   border-bottom: 2px solid #e0e0e0;
   border-radius: 0 0 8px 8px;
   box-shadow: 0px 2px 8px rgba(0, 0, 0, 0.1);
+  margin-top: 8%;
 
   .top-title {
     font-size: 10px;
@@ -129,7 +130,7 @@
 
 .scroll-wrapper {
   position: relative;
-  top: 60px; /* Push down under fixed top bar */
+  top: 11%; /* Push down under fixed top bar */
   background-color: #008799;
   display: flex;
   flex-direction: column;
@@ -183,7 +184,7 @@
 }
 
 .login-form {
-  margin-top: 20px;
+  margin-top: 50px;
   position: relative;
   z-index: 5;
   max-width: 100%;
@@ -191,6 +192,10 @@
   background-color: #fff;
   border-radius: 15px;
   padding: 30px;
+  padding-top: 15px;
+  padding-left: 20px;
+  padding-right: 20px;
+  padding-bottom: 20px;
   box-shadow: 0px 5px 20px rgba(0, 0, 0, 0.1);
   background:
     linear-gradient(#fffdfd, #fffdfd) padding-box,

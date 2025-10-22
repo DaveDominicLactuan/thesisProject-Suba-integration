@@ -5,17 +5,17 @@
     <button class="top-btn left" (click)="goToHomePage()">✖</button>
     <button class="top-btn right" (click)="goToFeedBackPage()">↻</button>
   </div>
-
-  <!-- Gallery + toggle (copied from feedback-page for quick testing) -->
+<!-- 
+   Gallery + toggle (copied from feedback-page for quick testing) 
   <div class="top-bar">
-    <!-- <div class="toggle-wrapper">
+    <div class="toggle-wrapper">
       <label class="switch">
         <input type="checkbox" [(ngModel)]="showWithBoxes" (change)="detectCenterImage()" />
         <span class="slider round"></span>
       </label>
       <span class="toggle-label">{{ showWithBoxes ? 'With Boxes' : 'Original' }}</span>
-    </div> -->
-    <!-- helpful small title showing current selection -->
+    </div>
+     helpful small title showing current selection 
     <div class="top-title">{{ selectedImageTitle }}</div>
     <div class="gallery-controls">
       <button class="control-btn" (click)="loadTestAssets()">Load Test Assets</button>
@@ -24,9 +24,9 @@
       <button class="control-btn" (click)="triggerFileInput()">Upload Images</button>
       <button class="control-btn" (click)="pickImagesMobile()">Pick Images (Mobile)</button>
     </div>
-  </div>
+  </div> -->
 
-  <div *ngIf="capturedImages.length === 0" class="thumbnail-placeholder">📸</div>
+  <div *ngIf="capturedImages.length === 0" class="thumbnail-placeholder"></div>
   <div *ngIf="capturedImages.length > 0" class="thumbnail-scroll2">
     <img *ngFor="let img of capturedImages" [src]="img" class="thumbnail2" />
   </div>
@@ -80,11 +80,11 @@
         <div class="action-label">Finish Session</div>
       </div>
 
-      <div *ngIf="capturedImages.length === 0" class="thumbnail-placeholder">📸</div>
+      <!-- <div *ngIf="capturedImages.length === 0" class="thumbnail-placeholder">📸</div>
 
       <div *ngIf="capturedImages.length > 0" class="thumbnail-scroll">
         <img *ngFor="let img of capturedImages" [src]="img" class="thumbnail" />
-      </div>
+      </div> -->
       
     </div>
 

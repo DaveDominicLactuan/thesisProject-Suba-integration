@@ -92,4 +92,9 @@ togglePasswordVisibility() {
     }
   }
 
+  // Keep a small shim so templates can call onBack() like the registration page does.
+  onBack() {
+    this.goBack();
+  }
+
 }

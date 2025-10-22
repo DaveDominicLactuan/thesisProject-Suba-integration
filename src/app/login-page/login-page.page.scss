@@ -2,7 +2,7 @@
 .background {
   --background: none;
   // background: linear-gradient(to bottom, #1ecbe1, #eaeaea);
-  background-color: #008799;
+  background-color: #5797a0;
   height: 100vh;
   width: 100vw;
   overflow: hidden;
@@ -49,12 +49,24 @@
   transform: translateX(-50%);
 }
 
+/* back button (copied from registration page for consistent styling) */
+.back-btn {
+  position: absolute;
+  top: 4px;
+  background: none;
+  border: none;
+  font-size: 28px;
+  color: #008799;
+  cursor: pointer;
+  z-index: 3;
+}
+
 
 
 .login-form {
 //   max-width: 270px;
 max-width: 90%;
-width: 500px;
+width: 520px;
   // min-height: 420px;
   height: 450px;
   margin: auto;
@@ -76,6 +88,7 @@ margin: 20px auto 30px auto;
   font-size: 24px;
   font-weight: bold;
   margin-bottom: 10px;
+  margin-top: 30px;
   color: black;
 //   justify-content: center;
 //   align-items: center;

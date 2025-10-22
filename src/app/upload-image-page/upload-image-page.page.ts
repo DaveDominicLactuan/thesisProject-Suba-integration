@@ -73,9 +73,9 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
     private crackDetectionService: CrackDetectionService,
     private imageStorage: ImageStorageService
   ) {
-    this.requestCameraPermission();
-    // Preload test assets if requested
-    if (this.includeTestAssets) this.loadTestAssets();
+    // this.requestCameraPermission();
+    // // Preload test assets if requested
+    // if (this.includeTestAssets) this.loadTestAssets();
   }
 
   ngAfterViewInit() {
@@ -84,35 +84,35 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
 
   /** Initialize live camera feed */
   async initCamera() {
-    if (Capacitor.getPlatform() === 'android' || Capacitor.getPlatform() === 'ios') {
-      const permissions = await Camera.requestPermissions();
-      if (permissions.camera !== 'granted') {
-        // user denied camera
-        return;
-      }
-    }
+    // if (Capacitor.getPlatform() === 'android' || Capacitor.getPlatform() === 'ios') {
+    //   const permissions = await Camera.requestPermissions();
+    //   if (permissions.camera !== 'granted') {
+    //     // user denied camera
+    //     return;
+    //   }
+    // }
 
-    if (this.mediaStream) {
-      this.mediaStream.getTracks().forEach(track => track.stop());
-      this.mediaStream = null;
-    }
+    // if (this.mediaStream) {
+    //   this.mediaStream.getTracks().forEach(track => track.stop());
+    //   this.mediaStream = null;
+    // }
 
-    try {
-      const constraints: MediaStreamConstraints = { video: { facingMode: 'environment' }, audio: false };
-      this.mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
-      const videoEl = this.videoRef.nativeElement;
-      videoEl.srcObject = this.mediaStream;
-      await new Promise<void>(resolve => {
-        videoEl.onloadedmetadata = () => {
-          videoEl.play().catch(()=>{});
-          resolve();
-        };
-      });
-      console.log('✅ Live camera preview started');
-    } catch (error) {
-      console.error('Camera access error:', error);
-      alert('Failed to access camera. Please check permissions and device compatibility.');
-    }
+    // try {
+    //   const constraints: MediaStreamConstraints = { video: { facingMode: 'environment' }, audio: false };
+    //   this.mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
+    //   const videoEl = this.videoRef.nativeElement;
+    //   videoEl.srcObject = this.mediaStream;
+    //   await new Promise<void>(resolve => {
+    //     videoEl.onloadedmetadata = () => {
+    //       videoEl.play().catch(()=>{});
+    //       resolve();
+    //     };
+    //   });
+    //   console.log('✅ Live camera preview started');
+    // } catch (error) {
+    //   console.error('Camera access error:', error);
+    //   alert('Failed to access camera. Please check permissions and device compatibility.');
+    // }
   }
 
   /** Capture a frame, preprocess, run inference, and save result */
