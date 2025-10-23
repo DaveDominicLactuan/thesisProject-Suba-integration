@@ -547,5 +547,18 @@ goToSecondPage() {
 
 
   
+  
+  goBack() {
+    try {
+      this.router.navigateByUrl('/home-page');
+    } catch (e) {
+      window.history.back();
+    }
+  }
+
+  onBack() {
+    this.goBack();
+  }
+
 }
 

@@ -11,15 +11,21 @@
     </div> -->
 
     <div class="top-bar">
-  <div class="toggle-wrapper">
-    <label class="switch">
-      <input type="checkbox" [(ngModel)]="showWithBoxes" (change)="detectCenterImage()" />
-      <span class="slider round"></span>
-    </label>
-    <span class="toggle-label">{{ showWithBoxes ? 'With Boxes' : 'Original' }}</span>
-  </div>
-  <!-- <div class="top-title">{{ selectedImageTitle }}</div> -->
-</div>
+      <button class="back-btn" type="button" (click)="onBack()">
+        <img src="assets/back.png" alt="Back" class="back-icon" />
+      </button>
+
+      <!-- center label showing current toggle state -->
+      <span class="top-title">{{ showWithBoxes ? 'With Boxes' : 'Original' }}</span>
+
+      <!-- toggle control placed on the right side -->
+      <div class="toggle-wrapper">
+        <label class="switch">
+          <input type="checkbox" [(ngModel)]="showWithBoxes" (change)="detectCenterImage()" />
+          <span class="slider round"></span>
+        </label>
+      </div>
+    </div>
 
     <!-- Scrollable image gallery -->
     <div class="scroll-wrapper">

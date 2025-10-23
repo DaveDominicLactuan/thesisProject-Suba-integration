@@ -1,6 +1,4 @@
 .home-page {
-  // --background: #fff;
-  // --background-color: #008799;
   --background: #008799;
 
   .greeting {
@@ -8,14 +6,13 @@
     justify-content: space-between;
     align-items: center;
     padding: 16px;
-    // background-color:#f0f0f0 ;
+    margin-top: 4%;
 
     h1 {
       font-size: 1.5rem;
       color: black;
       font-weight: bold;
       margin: 0;
-
     }
 
     .profile-avatar {
@@ -31,68 +28,101 @@
     }
   }
 
- .main-buttons {
-  display: flex;
-  justify-content: space-between;
-  padding: 16px;
-  gap: 10px;
-
-  .big-btn {
+  .main-buttons {
     display: flex;
-    flex-direction: column;
-    align-items: flex-start;
-    justify-content: flex-start;
-    // width: 100px;
+    justify-content: space-between;
     padding: 16px;
-    border-radius: 20px;
-    color: white;
-    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.05);
-    flex: 1;
-
-    ion-icon {
-      font-size: 24px;
-      margin-bottom: 10px;
-    }
-
-    h2 {
-      font-size: 1.2rem;
-      font-weight: bold;
-      margin: 0 0 6px 0;
-    }
-
-    p {
-      font-size: 0.8rem;
-      margin: 0;
-    }
-  }
-
-  .grammar {
-    background: #f96857;
-    flex: 1;
-    min-height: 160px;
-    min-width: 100px;
-  }
-
-  .right-column {
-    display: flex;
-    flex-direction: column;
     gap: 10px;
-    flex: 1;
 
-    .lessons {
-      background: #ffd655;
-      min-height: 75px;
-      min-width: 100px
+    .big-btn {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      justify-content: flex-start;
+      padding: 16px;
+      border-radius: 20px;
+      color: white;
+      box-shadow: 0 4px 8px rgba(0, 0, 0, 0.05);
+      flex: 1;
+
+      ion-icon {
+        font-size: 24px;
+        margin-bottom: 10px;
+      }
+
+      /* general small icon */
+      .big-icon {
+        width: 24px;
+        height: 24px;
+        object-fit: contain;
+        margin-bottom: 10px;
+        display: block;
+      }
+
+      /* larger camera icon */
+      .big-icon1 {
+        width: 64px;
+        height: 64px;
+        object-fit: contain;
+        margin-bottom: 5px;
+        display: block;
+      }
+
+      /* medium upload icon */
+      .big-icon2 {
+        width: 30px;
+        height: 30px;
+        object-fit: contain;
+        margin-bottom: 5px;
+        display: block;
+      }
+
+      h2 {
+        font-size: 1.2rem;
+        font-weight: bold;
+        margin: 8px 0 0 0;
+      }
+
+      p {
+        font-size: 0.8rem;
+        margin: 0;
+      }
+
+      /* make specific big-btn titles black when desired */
+      .dark-text {
+        color: #000000;
+      }
     }
 
-    .tests {
-      background: #6bd6cd;
-      min-height: 75px;
-      min-width: 100px
+    .grammar {
+      background: #f96857;
+      flex: 1;
+      min-height: 160px;
+      min-width: 100px;
+    }
+
+    .right-column {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      flex: 1;
+
+      .lessons {
+        background: #ffd655;
+        // min-height: 75px;
+        // min-width: 100px;
+        min-height: 158.2px;
+        min-width: 109.06px;
+      }
+
+      .tests {
+        background: #6bd6cd;
+        min-height: 75px;
+        min-width: 100px;
+   
+      }
     }
   }
-}
-
 
   .recommendation-header {
     display: flex;
@@ -129,6 +159,7 @@
 
     .course-card {
       width: 160px;
+
       img {
         width: 100%;
         border-top-left-radius: 10px;
@@ -164,6 +195,7 @@
   left: 0;
   right: 0;
   height: 60px;
+  width: 100%;
   background-color: #ffffff;
   border-top: 1px solid #ddd;
   display: flex;

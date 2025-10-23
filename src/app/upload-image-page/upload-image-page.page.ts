@@ -266,6 +266,19 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
     this.mediaStream?.getTracks().forEach(track => track.stop());
   }
 
+  goBack() {
+    try {
+      this.router.navigateByUrl('/home-page');
+    } catch (e) {
+      window.history.back();
+    }
+  }
+
+  // shim so templates can call onBack()
+  onBack() {
+    this.goBack();
+  }
+
   /**
    * Load a few images from assets for quick testing of the gallery UI.
    * To disable, set includeTestAssets = false in the class or remove these entries.

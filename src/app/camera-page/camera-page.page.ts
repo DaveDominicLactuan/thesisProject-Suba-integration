@@ -364,6 +364,19 @@ export class CameraPagePage implements AfterViewInit {
     this.mediaStream?.getTracks().forEach(track => track.stop());
   }
 
+  goBack() {
+    try {
+      this.router.navigateByUrl('/home-page');
+    } catch (e) {
+      window.history.back();
+    }
+  }
+
+  // shim so templates can call onBack()
+  onBack() {
+    this.goBack();
+  }
+
   async drawBoxesOnImage(Base64: string, boxes: BoundingBox[]): Promise<string> {
     const img = new Image();
     img.src = Base64;

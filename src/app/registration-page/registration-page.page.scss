@@ -141,7 +141,7 @@ width: 500px;
   padding: 17px;
   box-shadow: 0px 5px 20px rgba(0, 0, 0, 0.1);
   position: relative;
-  top: 5%;
+  top: 2%;
 //   margin-top: 10px;
   margin-bottom: 200px;
 // margin: 20px auto 30px auto; 
@@ -189,6 +189,13 @@ width: 500px;
   z-index: 3;
 }
 
+.back-icon {
+  width: 24px;
+  height: 24px;
+  display: block;
+  margin-top: 15px
+}
+
 .login-subtitle {
   font-size: 14px;
   color: #666;
@@ -200,6 +207,7 @@ width: 500px;
   font-size: 24px;
   font-weight: bold;
   margin-bottom: 10px;
+  margin-top: 50px;
   color: black;
 //   justify-content: center;
 //   align-items: center;

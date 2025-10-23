@@ -158,7 +158,7 @@ position: absolute;
 /* Large centered shutter */
 .shutter-btn { width:84px; height:84px; border-radius:50%; background:#000; border:6px solid #fff; box-shadow:0 6px 20px rgba(0,0,0,0.35); margin:0 12px;
 position: absolute;
-  left: calc(45% + 0px);    /* center + 40px to the right */
+  left: calc(47% + 0px);    /* center + 40px to the right */
   transform: translateX(-50%); /* center the element on its midpoint */
   bottom: 8px;               /* match your bottom spacing */
   z-index: 50;   }
@@ -548,4 +548,22 @@ position: absolute;
 @keyframes spin {
   0% { transform: rotate(0deg); }
   100% { transform: rotate(360deg); }
+}
+
+/* Back button styling for preview overlay (copied from login page) */
+.back-btn {
+  position: absolute;
+  top: 4px;
+  background: none;
+  border: none;
+  font-size: 28px;
+  color: #008799;
+  cursor: pointer;
+  z-index: 31;
+}
+
+.back-icon {
+  width: 28px;
+  height: 28px;
+  display: block;
 }
