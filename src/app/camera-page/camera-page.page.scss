@@ -238,6 +238,20 @@ position: absolute;
   color: black;
 }
 
+  /* Ensure small icon images inside function buttons stay contained */
+  .function-btn {
+    overflow: hidden; /* prevent image spill */
+  }
+
+  .function-btn .action-icon {
+    display: inline-block;
+    width: 20px;
+    height: 20px;
+    object-fit: contain;
+    vertical-align: middle;
+    margin-left: 6px;
+  }
+
 /* Bottom Row (Shutter + 2 Side Buttons) */
 .bottom-bottom-row {
   display: flex;

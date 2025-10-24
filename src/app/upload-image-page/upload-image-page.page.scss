@@ -165,6 +165,27 @@ form, input, optgroup, select {
 .action-icon { font-size:20px; }
 .action-label { font-size:12px; font-weight:600; color:#000; text-align:center; }
 
+/* Ensure image icons inside function buttons stay contained */
+.function-btn {
+	overflow: hidden; /* prevent image spill */
+	padding: 8px; /* tighten padding to match icon size */
+	width: 56px; /* consistent square button for icon */
+	height: 48px;
+}
+
+.function-btn .action-icon {
+	display: block;
+	width: 28px;
+	height: 28px;
+	object-fit: contain;
+}
+
+/* Also ensure icons inside the icon-btn variant are constrained */
+.icon-btn .action-icon {
+  width: 24px;
+  height: 24px;
+}
+
 
 .face-status-indicator {
 	display: flex;

@@ -90,7 +90,7 @@
 
       /* make specific big-btn titles black when desired */
       .dark-text {
-        color: #000000;
+        color: #ffffff;
       }
     }
 
@@ -109,14 +109,15 @@
 
       .lessons {
         background: #ffd655;
-        // min-height: 75px;
-        // min-width: 100px;
-        min-height: 158.2px;
-        min-width: 109.06px;
+        min-height: 75px;
+        min-width: 100px;
+        // min-height: 158.2px;
+        // min-width: 109.06px;
       }
 
       .tests {
         background: #6bd6cd;
+        // min-height: 100px;
         min-height: 75px;
         min-width: 100px;
    

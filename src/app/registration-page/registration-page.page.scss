@@ -196,6 +196,26 @@ width: 500px;
   margin-top: 15px
 }
 
+
+.back-btn.role-selected  {
+  position: absolute;
+  top: 4px;
+  left: 18px;
+  background: none;
+  border: none;
+  font-size: 28px;
+  color: #008799;
+  cursor: pointer;
+  z-index: 3;
+}
+
+.back-icon.role-selected  {
+  width: 24px;
+  height: 24px;
+  display: block;
+  margin-top: 15px
+}
+
 .login-subtitle {
   font-size: 14px;
   color: #666;
