@@ -54,8 +54,9 @@ const routes: Routes = [
   {
     path: 'pdf-page-test03',
     loadChildren: () => import('./pdf-page-test03/pdf-page-test03.module').then( m => m.PdfPageTest03PageModule)
-  },  {
-<<<<<<< Updated upstream
+  },
+  {
+
     path: 'upload-image-page',
     loadChildren: () => import('./upload-image-page/upload-image-page.module').then( m => m.UploadImagePagePageModule)
   },
@@ -66,10 +67,11 @@ const routes: Routes = [
   {
     path: 'upload-image-page3',
     loadChildren: () => import('./upload-image-page3/upload-image-page3.module').then( m => m.UploadImagePage3PageModule)
-=======
+  },
+  {
     path: 'camera-page2',
     loadChildren: () => import('./camera-page2/camera-page2.module').then( m => m.CameraPage2PageModule)
->>>>>>> Stashed changes
+
   },
 
 ];
