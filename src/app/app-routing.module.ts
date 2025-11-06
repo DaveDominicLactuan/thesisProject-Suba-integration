@@ -72,7 +72,11 @@ const routes: Routes = [
     path: 'camera-page2',
     loadChildren: () => import('./camera-page2/camera-page2.module').then( m => m.CameraPage2PageModule)
 
+  },  {
+    path: 'feedback-page2',
+    loadChildren: () => import('./feedback-page2/feedback-page2.module').then( m => m.FeedbackPage2PageModule)
   },
+
 
 ];
 

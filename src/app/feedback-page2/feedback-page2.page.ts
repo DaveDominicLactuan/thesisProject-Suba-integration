@@ -16,12 +16,12 @@ interface DisplayImage {
 }
 
 @Component({
-  selector: 'app-feedback-page',
-  templateUrl: './feedback-page.page.html',
-  styleUrls: ['./feedback-page.page.scss'],
+  selector: 'app-feedback-page2',
+  templateUrl: './feedback-page2.page.html',
+  styleUrls: ['./feedback-page2.page.scss'],
   standalone: false
 })
-export class FeedbackPagePage implements OnInit {
+export class FeedbackPage2Page implements OnInit {
   message: string = '';
   selectedImage: string = '';
 selectedImageTitle: string = '';
@@ -623,11 +623,7 @@ goToSecondPage() {
   
   
   goBack() {
-    try {
-      this.router.navigateByUrl('/home-page');
-    } catch (e) {
       window.history.back();
-    }
   }
 
   onBack() {

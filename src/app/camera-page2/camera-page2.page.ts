@@ -2,7 +2,7 @@ import { Component, OnDestroy, AfterViewInit, ElementRef, ViewChild } from '@ang
 import { DomSanitizer } from '@angular/platform-browser';
 import { Router } from '@angular/router';
 import { Platform } from '@ionic/angular';
-import { Camera } from '@capacitor/camera';
+import { Camera, CameraResultType, CameraSource } from '@capacitor/camera';
 import { Capacitor } from '@capacitor/core';
 import { CrackDetectionService } from '../services/crack-detection.service';
 import { ImageStorageService, StoredImage } from '../services/image-storage.service';
@@ -30,6 +30,7 @@ interface ScaledBox {
 
 console.log('CameraPagePage component file loaded');
 
+
 @Component({
   selector: 'app-camera-page2',
   templateUrl: './camera-page2.page.html',
@@ -39,6 +40,7 @@ console.log('CameraPagePage component file loaded');
 export class CameraPage2Page implements AfterViewInit {
   @ViewChild('video') videoRef!: ElementRef<HTMLVideoElement>;
   @ViewChild('canvas') canvasRef!: ElementRef<HTMLCanvasElement>;
+  @ViewChild('uploadInput') uploadInputRef!: ElementRef<HTMLInputElement>;
 
   imagePreview: string | null = null;
   capturedImages: string[] = [];
@@ -49,12 +51,238 @@ export class CameraPage2Page implements AfterViewInit {
   photosTaken = 0;
   photosProcessed = 0;
   savedImage: StoredImage | null = null;
+  selectedThumbSrc: string | null = null;
+  selectedImageTitle: string = '';
   lastPrediction: { type: string; shape: string; severity: string } | null = null;
 
   scaledBoxes = [];
 
   get countdown() {
     return this.photosTaken - this.photosProcessed;
+  }
+
+  triggerFileInput() {
+    try {
+      this.uploadInputRef.nativeElement.click();
+    } catch (e) {
+      console.warn('triggerFileInput failed', e);
+    }
+  }
+
+  async processFile(file: File) {
+    const reader = new FileReader();
+    const dataUrl: string = await new Promise((resolve, reject) => {
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+    await this.processDataUrl(dataUrl, file.name);
+  }
+
+  /**
+   * Mobile image picker — attempts to use Capacitor Photos API and forwards result to processDataUrl
+   * Mirrors the behaviour in upload-image-page.pickImagesMobile
+   */
+  async pickImagesMobile() {
+    try {
+      const photo = await Camera.getPhoto({
+        quality: 80,
+        allowEditing: false,
+        resultType: CameraResultType.Base64,
+        source: CameraSource.Photos
+      });
+
+      if (photo && photo.base64String) {
+        const dataUrl = `data:image/jpeg;base64,${photo.base64String}`;
+        const filename = this.generateFilename();
+        // reuse existing processing pipeline
+        await this.processDataUrl(dataUrl, filename);
+      } else {
+        console.warn('pickImagesMobile: no photo returned');
+      }
+    } catch (e) {
+      console.warn('pickImagesMobile failed', e);
+    }
+  }
+
+  async processDataUrl(dataUrl: string, filename: string) {
+    // mimic upload-image-page behaviour: preprocess, run inference, store
+    // this.imagePreview = dataUrl;
+    this.capturedImages.unshift(dataUrl);
+    this.photosTaken++;
+    this.isProcessing = true;
+
+    let prediction: any = null;
+    try {
+      const tensor = await this.preprocessImage(dataUrl);
+      // guard inference with timeout to avoid device hangs
+      const inferenceTimeoutMs = 20_000; // 20s
+      try {
+        prediction = await Promise.race([
+          this.crackDetectionService.runInference(tensor),
+          new Promise((_, rej) => setTimeout(() => rej(new Error('inference-timeout')), inferenceTimeoutMs))
+        ]);
+      } catch (infErr) {
+        console.warn('Inference error/timeout during upload processing', infErr);
+        prediction = null;
+      }
+    } catch (e) {
+      console.warn('Inference failed during upload processing', e);
+    }
+
+    const entry: StoredImage = {
+      original: dataUrl,
+      timestamp: new Date().toISOString(),
+      filename,
+      prediction: prediction || undefined
+    };
+    await this.imageStorage.addImage(entry);
+    // update UI
+    this.photosProcessed++;
+    this.isProcessing = false;
+  }
+
+  toggleFlash() {
+    // stub — native flash control would require plugin access
+    console.log('toggleFlash pressed (stub)');
+  }
+
+  openMore() {
+    // stub for 'more' menu
+    console.log('openMore pressed (stub)');
+  }
+
+  /**
+   * Show a simple overlay/modal used for quick tests.
+   * Mirrors the behaviour implemented on home-page.showTestOverlay()
+   */
+  showTestOverlay() {
+    try {
+      // Avoid creating multiple overlays
+      if (document.getElementById('test-overlay')) return;
+
+      const overlay = document.createElement('div');
+      overlay.id = 'test-overlay';
+      overlay.style.position = 'fixed';
+      overlay.style.top = '0';
+      overlay.style.left = '0';
+      overlay.style.width = '100%';
+      overlay.style.height = '100%';
+      overlay.style.background = 'rgba(0,0,0,0.6)';
+      overlay.style.zIndex = '99999';
+      overlay.style.display = 'flex';
+      overlay.style.flexDirection = 'column';
+      overlay.style.alignItems = 'center';
+      overlay.style.justifyContent = 'center';
+
+      const box = document.createElement('div');
+      box.style.background = '#fff';
+      box.style.padding = '12px';
+      box.style.borderRadius = '8px';
+      box.style.minWidth = '280px';
+      box.style.maxWidth = '92vw';
+      box.style.boxShadow = '0 6px 18px rgba(0,0,0,0.2)';
+      box.style.display = 'flex';
+      box.style.flexDirection = 'column';
+      box.style.alignItems = 'center';
+      box.style.gap = '12px';
+      box.style.overflow = 'hidden';
+
+      const title = document.createElement('div');
+      title.textContent = this.selectedImageTitle || 'No Image Selected';
+      title.style.fontWeight = '600';
+      title.style.marginBottom = '4px';
+
+      const thumbContainer = document.createElement('div');
+      thumbContainer.style.width = '100%';
+      thumbContainer.style.boxSizing = 'border-box';
+      thumbContainer.style.display = 'flex';
+      thumbContainer.style.justifyContent = 'center';
+      thumbContainer.style.overflow = 'hidden';
+
+      const thumbScroll = document.createElement('div');
+      thumbScroll.className = 'thumbnail-scroll2';
+      thumbScroll.style.display = 'flex';
+      thumbScroll.style.flexDirection = 'row';
+      thumbScroll.style.alignItems = 'center';
+      thumbScroll.style.justifyContent = 'flex-start';
+      thumbScroll.style.overflowX = 'auto';
+      thumbScroll.style.gap = '16px';
+      thumbScroll.style.padding = '12px';
+      thumbScroll.style.width = '100%';
+      thumbScroll.style.maxHeight = '60vh';
+      thumbScroll.style.boxSizing = 'border-box';
+
+      if (!this.capturedImages || this.capturedImages.length === 0) {
+        const placeholder = document.createElement('div');
+        placeholder.textContent = 'No thumbnails available';
+        placeholder.style.padding = '18px';
+        placeholder.style.color = '#666';
+        thumbScroll.appendChild(placeholder);
+      } else {
+        this.capturedImages.forEach((src, idx) => {
+          const img = document.createElement('img');
+          img.src = src;
+          img.className = 'thumbnail2';
+          img.style.display = 'block';
+          img.style.maxWidth = '85%';
+          img.style.maxHeight = '60vh';
+          img.style.objectFit = 'contain';
+          img.style.borderRadius = '6px';
+          img.style.border = src === this.selectedThumbSrc ? '3px solid #2ecc71' : '2px solid #fff';
+          img.style.boxShadow = '0 0 6px rgba(0,0,0,0.12)';
+          img.style.cursor = 'pointer';
+          img.dataset['index'] = String(idx);
+          img.onclick = () => {
+            this.selectedThumbSrc = src;
+            this.selectedImageTitle = `Captured ${idx + 1}`;
+            title.textContent = this.selectedImageTitle;
+            this.detectCenterThumbnail();
+          };
+          thumbScroll.appendChild(img);
+        });
+      }
+
+      thumbContainer.appendChild(thumbScroll);
+
+      const deleteBtn = document.createElement('button');
+      deleteBtn.textContent = 'Delete Selected Image';
+      deleteBtn.style.alignSelf = 'stretch';
+      deleteBtn.style.padding = '10px';
+      deleteBtn.style.border = 'none';
+      deleteBtn.style.background = '#ff4d4d';
+      deleteBtn.style.color = '#fff';
+      deleteBtn.style.borderRadius = '6px';
+      deleteBtn.onclick = () => {
+        this.deleteSelectedImage();
+        overlay.remove();
+      };
+
+      const closeBtn = document.createElement('button');
+      closeBtn.textContent = 'Close';
+      closeBtn.style.alignSelf = 'stretch';
+      closeBtn.style.padding = '10px';
+      closeBtn.style.border = 'none';
+      closeBtn.style.background = '#ddd';
+      closeBtn.style.color = '#111';
+      closeBtn.style.borderRadius = '6px';
+      closeBtn.onclick = () => overlay.remove();
+
+      box.appendChild(title);
+      box.appendChild(thumbContainer);
+      box.appendChild(deleteBtn);
+      box.appendChild(closeBtn);
+      overlay.appendChild(box);
+
+      overlay.addEventListener('click', (ev) => {
+        if (ev.target === overlay) overlay.remove();
+      });
+
+      document.body.appendChild(overlay);
+      this.detectCenterThumbnail();
+    } catch (e) {
+      console.warn('showTestOverlay failed', e);
+    }
   }
 
   constructor(
@@ -123,7 +351,7 @@ export class CameraPage2Page implements AfterViewInit {
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
       const dataUrl = canvas.toDataURL('image/png');
-      this.imagePreview = dataUrl;
+      // this.imagePreview = dataUrl;
       this.capturedImages.unshift(dataUrl);
 
   // Preprocess → inference → save
@@ -234,7 +462,7 @@ export class CameraPage2Page implements AfterViewInit {
   }
 
   closePreview() {
-    this.imagePreview = null;
+    // this.imagePreview = null;
   }
 
   toggleCamera() {
@@ -298,6 +526,19 @@ export class CameraPage2Page implements AfterViewInit {
     this.mediaStream?.getTracks().forEach(track => track.stop());
   }
 
+  goBack() {
+    try {
+      this.router.navigateByUrl('/home-page');
+    } catch (e) {
+      window.history.back();
+    }
+  }
+
+  // shim so templates can call onBack()
+  onBack() {
+    this.goBack();
+  }
+
   async drawBoxesOnImage(Base64: string, boxes: BoundingBox[]): Promise<string> {
     const img = new Image();
     img.src = Base64;
@@ -346,11 +587,98 @@ export class CameraPage2Page implements AfterViewInit {
     this.lastPrediction = prediction;
   }
 
-  onFileSelected(event: Event) {
+  async onFileSelected(event: Event) {
     const input = event.target as HTMLInputElement;
-    if (input.files && input.files[0]) {
-      this.testWithLocalImage(input.files[0]);
+    if (!input || !input.files || input.files.length === 0) return;
+
+    const fileArray = Array.from(input.files);
+
+    // Immediately update counters so UI shows the spinner/count right away
+    this.photosTaken += fileArray.length;
+    this.isProcessing = true;
+
+    // yield to the event loop so the spinner can render before heavy work
+    await new Promise(resolve => setTimeout(resolve, 20));
+
+    for (const f of fileArray) {
+      try {
+        // reuse existing processFile flow which reads, preprocesses, runs inference and stores
+        await this.processFile(f);
+      } catch (e) {
+        console.warn('Error processing selected file', e);
+        // ensure spinner can clear if something went wrong
+        this.photosProcessed++;
+      }
+    }
+
+    // Clear the input value so selecting the same file(s) again will trigger change event
+    try { input.value = ''; } catch (e) { /* ignore */ }
+
+    // turn off processing if everything finished
+    if (this.photosProcessed >= this.photosTaken) this.isProcessing = false;
+  }
+
+  detectCenterThumbnail() {
+    const container = document.querySelector('.thumbnail-scroll2') as HTMLElement | null;
+    if (!container) return;
+    const images = container.querySelectorAll('img');
+    if (!images || images.length === 0) return;
+
+    const containerRect = container.getBoundingClientRect();
+    const centerX = containerRect.left + containerRect.width / 2;
+
+    let closestImg: HTMLImageElement | null = null;
+    let closestDistance = Infinity;
+
+    images.forEach(i => {
+      const rect = i.getBoundingClientRect();
+      const imgCenter = rect.left + rect.width / 2;
+      const distance = Math.abs(centerX - imgCenter);
+      if (distance < closestDistance) {
+        closestDistance = distance;
+        closestImg = i as HTMLImageElement;
+      }
+    });
+
+    if (!closestImg) return;
+    const imgEl: any = closestImg;
+    const src = (imgEl && (imgEl.src || (imgEl.getAttribute && imgEl.getAttribute('src')))) || '';
+    this.selectedThumbSrc = src;
+
+    // Try to find a title from capturedImages
+    const idx = this.capturedImages.indexOf(src);
+    const title = idx >= 0 ? `Captured ${idx + 1}` : src;
+
+    this.selectedImageTitle = title;
+    console.log('[CameraPage2] Center thumbnail selected:', { title, src });
+  }
+
+  deleteSelectedImage() {
+    const src = this.selectedThumbSrc || '';
+    if (!src) {
+      console.warn('[CameraPage2] deleteSelectedImage: no image selected');
+      alert('No image selected to delete');
+      return;
+    }
+
+    const idx = this.capturedImages.indexOf(src);
+    if (idx === -1) {
+      console.warn('[CameraPage2] deleteSelectedImage: image not found in capturedImages');
+      alert('Selected image not found');
+      return;
+    }
+
+    const confirmMsg = `Delete image "${src}"? This action cannot be undone.`;
+    if (!confirm(confirmMsg)) return;
+
+    try {
+      this.capturedImages.splice(idx, 1);
+      this.selectedThumbSrc = null;
+      this.selectedImageTitle = '';
+      console.log(`[CameraPage2] deleteSelectedImage: removed ${src}. Remaining images: ${this.capturedImages.length}`);
+    } catch (err) {
+      console.error('[CameraPage2] deleteSelectedImage failed', err);
+      alert('Failed to delete image. See console for details.');
     }
   }
 }
-

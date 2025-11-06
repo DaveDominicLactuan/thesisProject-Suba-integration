@@ -2,7 +2,7 @@ import { Component, OnDestroy, AfterViewInit, ElementRef, ViewChild } from '@ang
 import { DomSanitizer } from '@angular/platform-browser';
 import { Router } from '@angular/router';
 import { Platform } from '@ionic/angular';
-import { Camera } from '@capacitor/camera';
+import { Camera, CameraResultType, CameraSource } from '@capacitor/camera';
 import { Capacitor } from '@capacitor/core';
 import { CrackDetectionService } from '../services/crack-detection.service';
 import { ImageStorageService, StoredImage } from '../services/image-storage.service';
@@ -76,9 +76,35 @@ export class CameraPagePage implements AfterViewInit {
     await this.processDataUrl(dataUrl, file.name);
   }
 
+  /**
+   * Mobile image picker — attempts to use Capacitor Photos API and forwards result to processDataUrl
+   * Mirrors the behaviour in upload-image-page.pickImagesMobile
+   */
+  async pickImagesMobile() {
+    try {
+      const photo = await Camera.getPhoto({
+        quality: 80,
+        allowEditing: false,
+        resultType: CameraResultType.Base64,
+        source: CameraSource.Photos
+      });
+
+      if (photo && photo.base64String) {
+        const dataUrl = `data:image/jpeg;base64,${photo.base64String}`;
+        const filename = this.generateFilename();
+        // reuse existing processing pipeline
+        await this.processDataUrl(dataUrl, filename);
+      } else {
+        console.warn('pickImagesMobile: no photo returned');
+      }
+    } catch (e) {
+      console.warn('pickImagesMobile failed', e);
+    }
+  }
+
   async processDataUrl(dataUrl: string, filename: string) {
     // mimic upload-image-page behaviour: preprocess, run inference, store
-    this.imagePreview = dataUrl;
+    // this.imagePreview = dataUrl;
     this.capturedImages.unshift(dataUrl);
     this.photosTaken++;
     this.isProcessing = true;
@@ -189,7 +215,7 @@ export class CameraPagePage implements AfterViewInit {
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
       const dataUrl = canvas.toDataURL('image/png');
-      this.imagePreview = dataUrl;
+      // this.imagePreview = dataUrl;
       this.capturedImages.unshift(dataUrl);
 
   // Preprocess → inference → save
@@ -300,7 +326,7 @@ export class CameraPagePage implements AfterViewInit {
   }
 
   closePreview() {
-    this.imagePreview = null;
+    // this.imagePreview = null;
   }
 
   toggleCamera() {

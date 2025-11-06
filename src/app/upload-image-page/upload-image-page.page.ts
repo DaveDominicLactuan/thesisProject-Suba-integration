@@ -33,6 +33,7 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
   @ViewChild('video') videoRef!: ElementRef<HTMLVideoElement>;
   @ViewChild('canvas') canvasRef!: ElementRef<HTMLCanvasElement>;
   @ViewChild('fileInput') fileInputRef!: ElementRef<HTMLInputElement>;
+  @ViewChild('thumbScroll') thumbScrollRef!: ElementRef<HTMLElement>;
 
   imagePreview: string | null = null;
   capturedImages: string[] = [];
@@ -61,6 +62,8 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
   selectedStatusMessage: string = '';
 
   scaledBoxes: ScaledBox[] = [];
+  selectedThumbSrc: string | null = null;
+  private _thumbScrollTimeout: any = null;
 
   get countdown() {
     return this.photosTaken - this.photosProcessed;
@@ -79,7 +82,11 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
   }
 
   ngAfterViewInit() {
-    this.platform.ready().then(() => this.initCamera());
+    this.platform.ready().then(async () => {
+      await this.initCamera();
+      // initialize counters from storage
+      await this.updatePhotoCounts();
+    });
   }
 
   /** Initialize live camera feed */
@@ -135,7 +142,9 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
 
       const dataUrl = canvas.toDataURL('image/png');
       this.imagePreview = dataUrl;
-      this.capturedImages.unshift(dataUrl);
+  this.capturedImages.unshift(dataUrl);
+  // allow DOM to update and then detect center thumbnail
+  setTimeout(() => this.detectCenterThumbnail(), 60);
 
       // Preprocess → inference → save
       const imageTensor = await this.preprocessImage(dataUrl);
@@ -306,6 +315,8 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
         fileName: s.filename,
         rawPrediction: s.prediction,
       })).concat(this.imagePaths);
+      // refresh counters after loading stored images
+      await this.updatePhotoCounts();
     } catch (e) {
       console.warn('loadStoredImages failed', e);
     }
@@ -316,6 +327,124 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
     if (this.showDebugPanel) {
       // populate debug panel with last prediction
       this.selectedPrediction = this.lastPrediction || null;
+    }
+  }
+
+  onThumbnailScroll(event: any) {
+    // debounce so the UI isn't overloaded while scrolling
+    try { clearTimeout(this._thumbScrollTimeout); } catch (e) {}
+    this._thumbScrollTimeout = setTimeout(() => this.detectCenterThumbnail(), 100);
+  }
+
+  detectCenterThumbnail() {
+    const container = this.thumbScrollRef?.nativeElement as HTMLElement | undefined;
+    if (!container) return;
+    const images = container.querySelectorAll('img');
+    if (!images || images.length === 0) return;
+
+    const containerRect = container.getBoundingClientRect();
+    const centerX = containerRect.left + containerRect.width / 2;
+
+    let closestImg: HTMLImageElement | null = null;
+    let closestDistance = Infinity;
+
+    images.forEach(i => {
+      const rect = i.getBoundingClientRect();
+      const imgCenter = rect.left + rect.width / 2;
+      const distance = Math.abs(centerX - imgCenter);
+      if (distance < closestDistance) {
+        closestDistance = distance;
+        closestImg = i as HTMLImageElement;
+      }
+    });
+
+    if (!closestImg) return;
+    const imgEl: any = closestImg;
+    const src = (imgEl && (imgEl.src || (imgEl.getAttribute && imgEl.getAttribute('src')))) || '';
+    this.selectedThumbSrc = src;
+
+    // Try to find a title from imagePaths (stored images) else fallback to a captured index
+    const matched = this.imagePaths.find((p: any) => p.original === src || p.withBoxes === src);
+    let title = '';
+    if (matched) {
+      title = matched.fileName ?? '';
+    } else {
+      const idx = this.capturedImages.indexOf(src);
+      title = idx >= 0 ? `Captured ${idx + 1}` : src;
+    }
+
+    this.selectedImageTitle = title;
+    console.log('[UploadImagePage] Center thumbnail selected:', { title, src });
+  }
+
+  /**
+   * Refresh photosTaken/photosProcessed counters from persistent storage.
+   */
+  async updatePhotoCounts() {
+    try {
+      const all: StoredImage[] = await this.imageStorage.getAllImages();
+      this.photosTaken = Array.isArray(all) ? all.length : 0;
+      // Count images that have a prediction or explicit hasPrediction flag
+      this.photosProcessed = Array.isArray(all) ? all.filter(i => !!(i.prediction) || !!(i.hasPrediction)).length : 0;
+      console.log('[UploadImagePage] updatePhotoCounts:', { photosTaken: this.photosTaken, photosProcessed: this.photosProcessed });
+    } catch (e) {
+      console.warn('updatePhotoCounts failed', e);
+    }
+  }
+
+  /**
+   * Delete the currently-selected thumbnail/image from storage and UI.
+   */
+  async deleteSelectedImage() {
+    const src = this.selectedThumbSrc || this.selectedImage || '';
+    if (!src) {
+      console.warn('[UploadImagePage] deleteSelectedImage: no image selected');
+      alert('No image selected to delete');
+      return;
+    }
+
+    // find in imagePaths (stored images) first
+    const idx = this.imagePaths.findIndex((p: any) => p.original === src || p.withBoxes === src);
+    const capturedIdx = this.capturedImages.indexOf(src);
+
+    const filename = idx !== -1 ? (this.imagePaths[idx].fileName ?? '(unnamed)') : (capturedIdx !== -1 ? `Captured ${capturedIdx + 1}` : src);
+    const confirmMsg = `Delete image "${filename}"? This action cannot be undone.`;
+    if (!confirm(confirmMsg)) return;
+
+    try {
+      // attempt to remove from persistent storage (if present)
+      try {
+        const removed = await this.imageStorage.removeImageByOriginal(src as string);
+        if (removed) console.log('[UploadImagePage] removed from storage');
+      } catch (e) {
+        console.warn('[UploadImagePage] removeImageByOriginal failed or not present', e);
+      }
+
+      // remove from in-memory lists
+      if (idx !== -1) this.imagePaths.splice(idx, 1);
+      if (capturedIdx !== -1) this.capturedImages.splice(capturedIdx, 1);
+
+      // update counters after deletion
+      await this.updatePhotoCounts();
+
+      // reset selection to first available thumbnail
+      if (this.capturedImages.length > 0) {
+        // pick center or first
+        setTimeout(() => this.detectCenterThumbnail(), 60);
+      } else if (this.imagePaths.length > 0) {
+        const first = this.imagePaths[0];
+        this.selectedThumbSrc = this.showWithBoxes ? first.withBoxes : first.original;
+        this.selectedImageTitle = first.fileName ?? '';
+      } else {
+        // nothing left
+        this.selectedThumbSrc = null;
+        this.selectedImageTitle = '';
+      }
+
+      console.log(`[UploadImagePage] deleteSelectedImage: removed ${filename}. Remaining capturedImages: ${this.capturedImages.length}, stored images: ${this.imagePaths.length}`);
+    } catch (err) {
+      console.error('[UploadImagePage] deleteSelectedImage failed', err);
+      alert('Failed to delete image. See console for details.');
     }
   }
 
@@ -445,6 +574,8 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
     // Update UI
     this.imagePreview = dataUrl;
     this.capturedImages.unshift(dataUrl);
+  // detect center thumbnail after UI update
+  setTimeout(() => this.detectCenterThumbnail(), 60);
     this.photosTaken++;
     this.isProcessing = true;
 
@@ -470,11 +601,20 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
       };
       await this.imageStorage.addImage(entry);
       this.imagePaths.unshift({ original: entry.original, withBoxes: entry.original, fileName: entry.filename, rawPrediction: entry.prediction });
+      // keep counters in sync with persistent storage
+      await this.updatePhotoCounts();
     } finally {
       this.isProcessing = false;
       this.photosProcessed++;
     }
   }
+
+  onFileSelected2(event: Event) {
+      const input = event.target as HTMLInputElement;
+      if (input.files && input.files[0]) {
+        this.testWithLocalImage(input.files[0]);
+      }
+    }
 
 }
 

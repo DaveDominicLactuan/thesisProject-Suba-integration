@@ -10,7 +10,7 @@
   </p>
 </h1>
 
-    <ion-avatar class="profile-avatar">
+    <ion-avatar class="profile-avatar" (click)="showTestOverlay()" title="Open test overlay" style="cursor:pointer;">
       <img src="assets/engIcon.png" alt="Profile" />
     </ion-avatar>
   </div>
@@ -25,7 +25,7 @@
   </div>
 
   <div class="right-column">
-    <div class="big-btn lessons"  (click)="gopdfPage2()">
+    <div class="big-btn lessons"  (click)="goToCameraPahge2()">
       <!-- <ion-icon name="reader-outline"></ion-icon>
       <h2>Upload Image 2</h2> -->
       <!-- <p>20 × 8 words</p> -->

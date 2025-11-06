@@ -48,4 +48,19 @@ export class ImageStorageService {
     this.images = [];
     await this._storage?.remove(this.STORAGE_KEY);
   }
+
+  /** Remove a single image by its original data URL or identifier
+   * Returns true if an image was removed, false otherwise
+   */
+  async removeImageByOriginal(original: string): Promise<boolean> {
+    const before = this.images.length;
+    this.images = this.images.filter(img => img.original !== original);
+    const after = this.images.length;
+    if (after < before) {
+      await this._storage?.set(this.STORAGE_KEY, this.images);
+      console.log(`🗑️ Removed image. Remaining images: ${this.images.length}`);
+      return true;
+    }
+    return false;
+  }
 }
