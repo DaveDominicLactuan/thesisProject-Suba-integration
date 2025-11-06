@@ -46,13 +46,12 @@
       <button class="shutter-btn" (click)="takePicture()"></button>
 
       <!-- Thumbnails on the right -->
-      <div *ngIf="capturedImages.length === 0" class="thumbnail-placeholder"></div>
-      <div *ngIf="capturedImages.length > 0" class="thumbnail-scroll">
+      <div *ngIf="capturedImages.length === 0" class="thumbnail-placeholder" (click)="showTestOverlay()"></div>
+      <div *ngIf="capturedImages.length > 0" class="thumbnail-scroll" (click)="showTestOverlay()">
         <img *ngFor="let img of capturedImages" [src]="img" class="thumbnail" />
       </div>
 
-      <!-- Overlay Trigger Button -->
-      <button class="overlay-btn" (click)="showTestOverlay()">Open Overlay</button>
+   
 
       <!-- hidden file input used by Upload Image -->
       <input #uploadInput type="file" accept="image/*" multiple style="display:none" (change)="onFileSelected($event)" />

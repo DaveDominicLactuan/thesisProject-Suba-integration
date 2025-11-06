@@ -213,6 +213,14 @@ export class CameraPage2Page implements AfterViewInit {
       thumbScroll.style.maxHeight = '60vh';
       thumbScroll.style.boxSizing = 'border-box';
 
+      const updateThumbnails = () => {
+        const thumbnails = thumbScroll.querySelectorAll('img.thumbnail2');
+        thumbnails.forEach((img) => {
+          const imageElement = img as HTMLImageElement; // Cast to HTMLImageElement
+          imageElement.style.border = imageElement.src === this.selectedThumbSrc ? '3px solid #2ecc71' : '2px solid #fff';
+        });
+      };
+
       if (!this.capturedImages || this.capturedImages.length === 0) {
         const placeholder = document.createElement('div');
         placeholder.textContent = 'No thumbnails available';
@@ -237,7 +245,7 @@ export class CameraPage2Page implements AfterViewInit {
             this.selectedThumbSrc = src;
             this.selectedImageTitle = `Captured ${idx + 1}`;
             title.textContent = this.selectedImageTitle;
-            this.detectCenterThumbnail();
+            updateThumbnails();
           };
           thumbScroll.appendChild(img);
         });
@@ -279,7 +287,8 @@ export class CameraPage2Page implements AfterViewInit {
       });
 
       document.body.appendChild(overlay);
-      this.detectCenterThumbnail();
+      this.detectCenterThumbnail(); // Detect center thumbnail when overlay is opened
+      updateThumbnails();
     } catch (e) {
       console.warn('showTestOverlay failed', e);
     }
@@ -621,8 +630,8 @@ export class CameraPage2Page implements AfterViewInit {
   detectCenterThumbnail() {
     const container = document.querySelector('.thumbnail-scroll2') as HTMLElement | null;
     if (!container) return;
-    const images = container.querySelectorAll('img');
-    if (!images || images.length === 0) return;
+    const images = container.querySelectorAll('img') as NodeListOf<HTMLImageElement>;
+    if (images.length === 0) return;
 
     const containerRect = container.getBoundingClientRect();
     const centerX = containerRect.left + containerRect.width / 2;
@@ -630,26 +639,24 @@ export class CameraPage2Page implements AfterViewInit {
     let closestImg: HTMLImageElement | null = null;
     let closestDistance = Infinity;
 
-    images.forEach(i => {
-      const rect = i.getBoundingClientRect();
+    images.forEach((img) => {
+      const rect = img.getBoundingClientRect();
       const imgCenter = rect.left + rect.width / 2;
       const distance = Math.abs(centerX - imgCenter);
       if (distance < closestDistance) {
         closestDistance = distance;
-        closestImg = i as HTMLImageElement;
+        closestImg = img;
       }
     });
 
     if (!closestImg) return;
-    const imgEl: any = closestImg;
-    const src = (imgEl && (imgEl.src || (imgEl.getAttribute && imgEl.getAttribute('src')))) || '';
-    this.selectedThumbSrc = src;
-
-    // Try to find a title from capturedImages
+    const src = (closestImg as HTMLImageElement).src;
     const idx = this.capturedImages.indexOf(src);
     const title = idx >= 0 ? `Captured ${idx + 1}` : src;
 
+    this.selectedThumbSrc = src;
     this.selectedImageTitle = title;
+
     console.log('[CameraPage2] Center thumbnail selected:', { title, src });
   }
 

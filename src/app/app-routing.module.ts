@@ -76,6 +76,10 @@ const routes: Routes = [
     path: 'feedback-page2',
     loadChildren: () => import('./feedback-page2/feedback-page2.module').then( m => m.FeedbackPage2PageModule)
   },
+  {
+    path: 'session-page',
+    loadChildren: () => import('./session-page/session-page.module').then( m => m.SessionPagePageModule)
+  },
 
 
 ];
