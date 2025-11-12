@@ -28,9 +28,12 @@
     </div>
   </div> -->
 
-  <div *ngIf="capturedImages.length === 0" class="thumbnail-placeholder"></div>
-  <div *ngIf="capturedImages.length > 0" class="thumbnail-scroll2" #thumbScroll (scroll)="onThumbnailScroll($event)">
-    <img *ngFor="let img of capturedImages" [src]="img" class="thumbnail2" [style.border]="selectedThumbSrc===img ? '3px solid #2ecc71' : 'none'" />
+  <div *ngIf="imagePaths.length === 0 && capturedImages.length === 0" class="thumbnail-placeholder"></div>
+  <div *ngIf="imagePaths.length > 0" class="thumbnail-scroll2" #thumbScroll (scroll)="onThumbnailScroll($event)">
+    <img *ngFor="let img of imagePaths" [src]="img.original" class="thumbnail2" [style.border]="selectedThumbSrc===img.original ? '3px solid #2ecc71' : 'none'" (click)="onStoredThumbClick(img)" />
+  </div>
+  <div *ngIf="imagePaths.length === 0 && capturedImages.length > 0" class="thumbnail-scroll2" #thumbScroll (scroll)="onThumbnailScroll($event)">
+    <img *ngFor="let img of capturedImages" [src]="img" class="thumbnail2" [style.border]="selectedThumbSrc===img ? '3px solid #2ecc71' : 'none'" (click)="onStoredThumbClick({ original: img, withBoxes: img, fileName: '' })" />
   </div>
 
 

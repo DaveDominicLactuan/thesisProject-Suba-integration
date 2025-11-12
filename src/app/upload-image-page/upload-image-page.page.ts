@@ -37,6 +37,8 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
 
   imagePreview: string | null = null;
   capturedImages: string[] = [];
+  // authoritative list of stored images pulled from ImageStorageService
+  storedImages: StoredImage[] = [];
   usingFrontCamera = false;
   mediaStream: MediaStream | null = null;
   extraText: string | null = null;
@@ -79,6 +81,17 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
     // this.requestCameraPermission();
     // // Preload test assets if requested
     // if (this.includeTestAssets) this.loadTestAssets();
+    // subscribe to current image selection so this page reacts when user selects a session/image elsewhere
+    try {
+      this.imageStorage.getCurrentImage$().subscribe(img => {
+        if (img) {
+          this.selectedThumbSrc = img.withBoxes ?? img.original;
+          this.selectedImageTitle = img.filename ?? '';
+        }
+      });
+    } catch (e) {
+      // ignore if observable not present
+    }
   }
 
   ngAfterViewInit() {
@@ -87,6 +100,19 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
       // initialize counters from storage
       await this.updatePhotoCounts();
     });
+  }
+
+  /** Called when a stored-image thumbnail is clicked */
+  onStoredThumbClick(img: any) {
+    try {
+      if (this.imageStorage && typeof this.imageStorage.selectImageByOriginal === 'function') {
+        this.imageStorage.selectImageByOriginal(img.original);
+      }
+    } catch (e) {
+      console.warn('onStoredThumbClick: selectImage failed', e);
+    }
+    this.selectedThumbSrc = img.withBoxes ?? img.original;
+    this.selectedImageTitle = img.fileName ?? '';
   }
 
   /** Initialize live camera feed */
@@ -126,7 +152,7 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
   async takePicture() {
     // Ensure UI shows processing state immediately
     this.isProcessing = true;
-    this.photosTaken++;
+    // photosTaken will be derived from storage after save so don't increment here
     // track whether inference was invoked and whether it succeeded
     let inferenceCalled = false;
     let inferenceSucceeded = false;
@@ -146,35 +172,83 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
   // allow DOM to update and then detect center thumbnail
   setTimeout(() => this.detectCenterThumbnail(), 60);
 
-      // Preprocess → inference → save
-      const imageTensor = await this.preprocessImage(dataUrl);
-      // call the backend/model
-      let prediction = null;
+      // Wrap preprocess → inference → save into a cancellable-timeout-aware sequence
+      const work = async () => {
+        const imageTensor = await this.preprocessImage(dataUrl);
+        // call the backend/model
+        let prediction = null;
+        try {
+          inferenceCalled = true;
+          prediction = await this.crackDetectionService.runInference(imageTensor);
+          inferenceSucceeded = !!prediction;
+        } catch (e) {
+          console.error('Inference error', e);
+        }
+
+        const now = new Date().toISOString();
+
+        // derive filename based on current stored images count so photosTaken reflects storage
+        let storedCount = 0;
+        try {
+          const all = await this.imageStorage.getAllImages();
+          storedCount = Array.isArray(all) ? all.length : 0;
+        } catch (e) {
+          // fallback to local counter if storage call fails
+          storedCount = this.photosTaken || 0;
+        }
+
+        const filename = this.generateFilename(storedCount + 1);
+
+        const entry: StoredImage = {
+          original: dataUrl,
+          timestamp: now,
+          filename,
+          prediction: prediction || undefined,
+          hasPrediction: !!prediction,
+          statusMessage: prediction ? 'Prediction succeeded' : (inferenceCalled ? 'Prediction failed' : 'No prediction')
+        };
+        await this.imageStorage.addImage(entry);
+        // synchronize counters from storage so UI reflects actual stored count
+        await this.updatePhotoCounts();
+        this.savedImage = entry;
+        this.lastPrediction = prediction;
+
+        this.photosProcessed++;
+        return entry;
+      };
+
       try {
-        inferenceCalled = true;
-        prediction = await this.crackDetectionService.runInference(imageTensor);
-        inferenceSucceeded = !!prediction;
-      } catch (e) {
-        console.error('Inference error', e);
+        // overall timeout: 10s
+        await Promise.race([work(), new Promise((_, rej) => setTimeout(() => rej(new Error('processing-timeout')), 10_000))]);
+      } catch (err: any) {
+        if (err && err.message === 'processing-timeout') {
+          console.warn('[UploadImagePage] takePicture processing timed out');
+          // Persist fallback entry indicating timeout
+          try {
+            let storedCount = 0;
+            try { const all = await this.imageStorage.getAllImages(); storedCount = Array.isArray(all) ? all.length : 0; } catch (e) { storedCount = this.photosTaken || 0; }
+            const filename = this.generateFilename(storedCount + 1);
+            const entry: StoredImage = {
+              original: dataUrl,
+              timestamp: new Date().toISOString(),
+              filename,
+              prediction: undefined,
+              hasPrediction: false,
+              statusMessage: inferenceCalled ? 'Prediction failed' : 'No prediction'
+            };
+            await this.imageStorage.addImage(entry);
+            await this.updatePhotoCounts();
+            this.photosProcessed++;
+          } catch (e) {
+            console.warn('[UploadImagePage] Failed to persist fallback entry after timeout', e);
+          }
+        } else {
+          console.error('Failed during takePicture work:', err);
+        }
       }
 
-      const now = new Date().toISOString();
-      const filename = this.generateFilename();
-
-      const entry: StoredImage = {
-        original: dataUrl,
-        timestamp: now,
-        filename,
-        prediction: prediction || undefined
-      };
-      await this.imageStorage.addImage(entry); // persists via @ionic/storage
-  this.savedImage = entry;
-  this.lastPrediction = prediction;
-
-      this.photosProcessed++;
-
-      // Keep console.log before clearing isProcessing so callers/UI see processing until logging completes
-      console.log('✅ Prediction stored:', prediction);
+  // Keep console.log before clearing isProcessing so callers/UI see processing until logging completes
+  console.log('✅ Prediction stored:', this.lastPrediction);
       // Print all currently stored images to verify persistence
       try {
         const all = await this.imageStorage.getAllImages();
@@ -264,11 +338,13 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
     }
   }
 
-  generateFilename(): string {
+  // allow passing an explicit index (useful when deriving name from storage)
+  generateFilename(count?: number): string {
     const now = new Date();
     const hh = String(now.getHours()).padStart(2, '0');
     const mm = String(now.getMinutes()).padStart(2, '0');
-    return `P${this.photosTaken}${hh}${mm}.jpg`;
+    const idx = typeof count === 'number' ? count : this.photosTaken;
+    return `P${idx}${hh}${mm}.jpg`;
   }
 
   ngOnDestroy() {
@@ -384,8 +460,12 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
     try {
       const all: StoredImage[] = await this.imageStorage.getAllImages();
       this.photosTaken = Array.isArray(all) ? all.length : 0;
-      // Count images that have a prediction or explicit hasPrediction flag
-      this.photosProcessed = Array.isArray(all) ? all.filter(i => !!(i.prediction) || !!(i.hasPrediction)).length : 0;
+  // Count images that have an explicit successful prediction status
+  this.photosProcessed = Array.isArray(all) ? all.filter(i => (i.statusMessage === 'Prediction succeeded')).length : 0;
+      // store authoritative copy for thumbnails
+      this.storedImages = Array.isArray(all) ? all.slice() : [];
+      // populate imagePaths from stored images (replace current list)
+      this.imagePaths = this.storedImages.map((s: StoredImage) => ({ original: s.original, withBoxes: s.original, fileName: s.filename, rawPrediction: s.prediction }));
       console.log('[UploadImagePage] updatePhotoCounts:', { photosTaken: this.photosTaken, photosProcessed: this.photosProcessed });
     } catch (e) {
       console.warn('updatePhotoCounts failed', e);
@@ -412,19 +492,23 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
     if (!confirm(confirmMsg)) return;
 
     try {
-      // attempt to remove from persistent storage (if present)
+      // attempt to remove from persistent storage (if present) via canonical API
+      const svc: any = this.imageStorage as any;
+      let removed = false;
       try {
-        const removed = await this.imageStorage.removeImageByOriginal(src as string);
-        if (removed) console.log('[UploadImagePage] removed from storage');
+        // Call the canonical delete API on the ImageStorageService
+        removed = await (this.imageStorage as any).deleteImage(src);
       } catch (e) {
-        console.warn('[UploadImagePage] removeImageByOriginal failed or not present', e);
+        console.warn('[UploadImagePage] persistent remove attempt failed', e);
       }
 
-      // remove from in-memory lists
-      if (idx !== -1) this.imagePaths.splice(idx, 1);
-      if (capturedIdx !== -1) this.capturedImages.splice(capturedIdx, 1);
+      // If persistent removal wasn't possible, remove locally from imagePaths
+      if (!removed) {
+        if (idx !== -1) this.imagePaths.splice(idx, 1);
+        if (capturedIdx !== -1) this.capturedImages.splice(capturedIdx, 1);
+      }
 
-      // update counters after deletion
+      // update counters after deletion and refresh authoritative storedImages/imagePaths
       await this.updatePhotoCounts();
 
       // reset selection to first available thumbnail
@@ -551,7 +635,11 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
       const photo = await Camera.getPhoto({ quality: 80, allowEditing: false, resultType: CameraResultType.Base64, source: CameraSource.Photos });
       if (photo && photo.base64String) {
         const dataUrl = `data:image/jpeg;base64,${photo.base64String}`;
-        await this.processDataUrl(dataUrl, `mobile-${Date.now()}.jpg`);
+        try {
+          await Promise.race([this.processDataUrl(dataUrl, `mobile-${Date.now()}.jpg`), new Promise((_, rej) => setTimeout(() => rej(new Error('processing-timeout')), 10_000))]);
+        } catch (e) {
+          console.warn('[UploadImagePage] pickImagesMobile: processing failed or timed out', e);
+        }
       }
     } catch (e) {
       console.warn('pickImagesMobile failed', e);
@@ -579,33 +667,73 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
     this.photosTaken++;
     this.isProcessing = true;
 
-    let prediction: any = null;
     let inferenceCalled = false;
     let inferenceSucceeded = false;
 
-    try {
+    const doWork = async () => {
+      let prediction: any = null;
       try {
         inferenceCalled = true;
         const tensor = await this.preprocessImage(dataUrl);
-        prediction = await this.crackDetectionService.runInference(tensor);
-        inferenceSucceeded = !!prediction;
-      } catch (inner) {
-        console.warn('Inference error in processDataUrl', inner);
+        // internal guard for inference (optional longer guard)
+        try {
+          prediction = await this.crackDetectionService.runInference(tensor);
+          inferenceSucceeded = !!prediction;
+        } catch (infErr) {
+          console.warn('Inference error in processDataUrl', infErr);
+        }
+      } catch (err) {
+        console.warn('Preprocess failed in processDataUrl', err);
       }
 
       const entry: StoredImage = {
         original: dataUrl,
         timestamp: new Date().toISOString(),
         filename,
-        prediction: prediction || undefined
+        prediction: prediction || undefined,
+        hasPrediction: !!prediction,
+        statusMessage: prediction ? 'Prediction succeeded' : (inferenceCalled ? 'Prediction failed' : 'No prediction')
       };
+
       await this.imageStorage.addImage(entry);
       this.imagePaths.unshift({ original: entry.original, withBoxes: entry.original, fileName: entry.filename, rawPrediction: entry.prediction });
       // keep counters in sync with persistent storage
       await this.updatePhotoCounts();
+      this.photosProcessed++;
+      return entry;
+    };
+
+    try {
+      // overall timeout: 10s
+      await Promise.race([doWork(), new Promise((_, rej) => setTimeout(() => rej(new Error('processing-timeout')), 10_000))]);
+    } catch (err: any) {
+      if (err && err.message === 'processing-timeout') {
+        console.warn('[UploadImagePage] processDataUrl overall timeout');
+        // Persist fallback entry indicating failure/no-prediction
+        try {
+          let storedCount = 0;
+          try { const all = await this.imageStorage.getAllImages(); storedCount = Array.isArray(all) ? all.length : 0; } catch (e) { storedCount = this.photosTaken || 0; }
+          const fallbackFilename = this.generateFilename(storedCount + 1);
+          const entry: StoredImage = {
+            original: dataUrl,
+            timestamp: new Date().toISOString(),
+            filename: fallbackFilename,
+            prediction: undefined,
+            hasPrediction: false,
+            statusMessage: inferenceCalled ? 'Prediction failed' : 'No prediction'
+          };
+          await this.imageStorage.addImage(entry);
+          this.imagePaths.unshift({ original: entry.original, withBoxes: entry.original, fileName: entry.filename, rawPrediction: entry.prediction });
+          await this.updatePhotoCounts();
+          this.photosProcessed++;
+        } catch (e) {
+          console.warn('[UploadImagePage] Failed to persist fallback entry after timeout', e);
+        }
+      } else {
+        console.warn('processDataUrl failed', err);
+      }
     } finally {
       this.isProcessing = false;
-      this.photosProcessed++;
     }
   }
 

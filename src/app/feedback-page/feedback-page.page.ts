@@ -191,7 +191,15 @@ showWithBoxes: boolean = false;
     // If images exist, pre-fill selection from the first one so dropdowns show
     // prediction values even if the DOM hasn't been centered yet.
     if (this.imagePaths.length > 0) {
-      const first = this.imagePaths[0];
+      // If a session-selected image exists, prefer that one
+      const svcSelected = (this.imageStorageService as any).getSelectedImage ? (this.imageStorageService as any).getSelectedImage() : null;
+      let first = this.imagePaths[0];
+      if (svcSelected) {
+        const matchedSel = this.imagePaths.find(p => p.original === svcSelected.original || p.withBoxes === svcSelected.original);
+        if (matchedSel) first = matchedSel;
+        // clear selection after applied so it doesn't persist unexpectedly
+        if ((this.imageStorageService as any).clearSelectedImage) (this.imageStorageService as any).clearSelectedImage();
+      }
       this.selectedImage = this.showWithBoxes ? first.withBoxes : first.original;
       this.selectedPrediction = first.rawPrediction ?? {};
       this.selectedStatusMessage = first.statusMessage ?? '';
@@ -570,9 +578,9 @@ goToSecondPage() {
     if (!confirm(confirmMsg)) return;
 
     try {
-      const removed = await this.imageStorageService.removeImageByOriginal(original);
+      const removed = await (this.imageStorageService as any).deleteImage(original);
       if (!removed) {
-        console.warn('[FeedbackPage] deleteSelectedImage: removeImageByOriginal reported nothing removed');
+        console.warn('[FeedbackPage] deleteSelectedImage: deleteImage reported nothing removed');
       }
 
       // remove from in-memory display list and update selection
@@ -632,6 +640,72 @@ goToSecondPage() {
 
   onBack() {
     this.goBack();
+  }
+
+  /**
+   * Save the currently-selected StoredImage (or the service current image) as a session,
+   * update the storage entry, show a confirmation popup and navigate to home.
+   */
+  async saveCurrentStoredImageAndGoHome() {
+    try {
+      // Try service current image first
+      let entry: any = undefined;
+      try {
+        entry = (this.imageStorageService as any).getCurrentImage ? (this.imageStorageService as any).getCurrentImage() : undefined;
+      } catch (e) {
+        // ignore
+      }
+
+      // Fallback: try to locate via selectedImage path in the display list
+      if (!entry && this.selectedImage) {
+        const found = this.imagePaths.find(p => p.original === this.selectedImage || p.withBoxes === this.selectedImage);
+        if (found) {
+          entry = {
+            original: found.original,
+            withBoxes: found.withBoxes,
+            boxes: [],
+            faceDetected: false,
+            faceData: [],
+            timestamp: new Date().toISOString(),
+            detectionMessage: found.detectionMessage ?? '',
+            filename: found.fileName,
+            rawPrediction: found.rawPrediction,
+            statusMessage: 'Saved as session'
+          };
+        }
+      }
+
+      if (!entry) {
+        alert('No image selected to save. Please select an image first.');
+        return;
+      }
+
+      // mark entry as saved session and persist to service
+      entry.statusMessage = entry.statusMessage ?? 'Saved as session';
+      if ((this.imageStorageService as any).setEntryForImage) {
+        (this.imageStorageService as any).setEntryForImage(entry.original, entry);
+      } else if ((this.imageStorageService as any).createAndAdd) {
+        await (this.imageStorageService as any).createAndAdd(entry);
+      }
+
+      // also create a simple session grouping with this image (name with timestamp)
+      try {
+        const sessionName = `Session ${new Date().toLocaleString()}`;
+        if ((this.imageStorageService as any).createSession) {
+          (this.imageStorageService as any).createSession(sessionName, [entry.original]);
+        }
+      } catch (e) {
+        // ignore session creation failures
+        console.warn('Failed to create session', e);
+      }
+
+      // Show confirmation and navigate home
+      alert('Session saved successfully');
+      this.router.navigate(['/home-page']);
+    } catch (err) {
+      console.error('Failed to save session', err);
+      alert('Failed to save session. See console for details.');
+    }
   }
 
 }

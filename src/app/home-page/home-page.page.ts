@@ -17,6 +17,7 @@ export class HomePagePage implements OnInit {
   userName: string | null = null;
   firstName: string | null = null;
   lastName: string | null = null;
+  sessions: any[] = [];
 
   constructor(private formBuilder: FormBuilder, private router: Router, private authService: AuthService, private navCtrl: NavController, private auth3: Auth3Service, private imageStorage: ImageStorageService) {
 
@@ -55,6 +56,13 @@ this.lastName = profile['lastName'];
   } catch (error) {
     console.error(error);
   }
+  // load sessions from image storage service
+  try {
+    const s = (this.imageStorage.getSessions && typeof this.imageStorage.getSessions === 'function') ? this.imageStorage.getSessions() : [];
+    this.sessions = Array.isArray(s) ? s.slice() : [];
+  } catch (e) {
+    console.warn('Failed to load sessions', e);
+  }
 }
 
   recommendedCourses = [
@@ -80,7 +88,7 @@ this.lastName = profile['lastName'];
     console.log('camera page');
   }
   
-  goToCameraPahge2() {
+  goToCameraPage2() {
     this.router.navigate(['/camera-page2']);
     console.log('camera page');
   }
@@ -100,11 +108,31 @@ this.lastName = profile['lastName'];
     console.log('pdf 2 page');
   }
 
+  goSessionPage() {
+    this.router.navigate(['/session-page']);
+    console.log('pdf 2 page');
+  }
+
+  async goToSession(session: any) {
+    // pick the first image in session and select it in the service, then open camera page
+    try {
+      if (session && session.imageKeys && session.imageKeys.length > 0) {
+        const key = session.imageKeys[0];
+        if (this.imageStorage && typeof this.imageStorage.selectImageByOriginal === 'function') {
+          this.imageStorage.selectImageByOriginal(key);
+        }
+      }
+    } catch (e) { console.warn('goToSession warning', e); }
+    this.router.navigate(['/camera-page2']);
+  }
+
 
   goToUploadImage() {
     this.router.navigate(['/upload-image-page']);
     console.log('pdf 3 page');
   }
+
+
 
   /**
    * Clear all stored images after a confirmation prompt.

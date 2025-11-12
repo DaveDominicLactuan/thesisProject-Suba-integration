@@ -25,8 +25,7 @@
           <span class="slider round"></span>
         </label>
       </div>
-      <!-- Delete selected image button -->
-      <button class="top-btn right" (click)="deleteSelectedImage()" title="Delete selected image">🗑️</button>
+      <!-- Delete selected image button was moved below (left of the image title) -->
     </div>
 
     <!-- Scrollable image gallery -->
@@ -42,12 +41,15 @@
       </div>
     </div>
 
-    <hr />
-
     <!-- Form metadata section -->
     <div class="login-form">
-      <!-- <h2 class="login-title">Hello {{ message }}</h2> -->
-      <div class="image-title">{{ selectedImageTitle }}</div>
+      <!-- Wrapper keeps the title in the same visual position; delete button is placed to its left -->
+      <div class="image-title-wrapper">
+        <button class="delete-left-btn" type="button" (click)="deleteSelectedImage()" title="Delete selected image">
+          <img src="assets/Trash.png" alt="Delete" class="trash-icon" />
+        </button>
+        <div class="image-title">{{ selectedImageTitle }}</div>
+      </div>
 
       <div class="form-group">
         <label for="dropdown1">Type of Crack</label>
@@ -99,7 +101,8 @@
       <!-- <button class="sign-in-button" (click)="getAllEntries()">Submit</button>
       <button class="sign-in-button" (click)="testApi()">Test API</button> -->
       <!-- <button class="sign-in-button" (click)="gopdfPage()">Proceed to PDF</button> -->
-          <button class="sign-in-button" (click)="gopdfPage()"></button>
+          <!-- Save current StoredImage as a session, then navigate home -->
+          <button class="sign-in-button" (click)="saveCurrentStoredImageAndGoHome()">Save Session</button>
     </div>
   </ion-content>
 </div>

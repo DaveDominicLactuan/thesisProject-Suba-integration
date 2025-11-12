@@ -44,6 +44,8 @@ export class CameraPage2Page implements AfterViewInit {
 
   imagePreview: string | null = null;
   capturedImages: string[] = [];
+  // authoritative list of images stored via ImageStorageService
+  storedImages: StoredImage[] = [];
   usingFrontCamera = false;
   mediaStream: MediaStream | null = null;
   extraText: string | null = null;
@@ -95,8 +97,13 @@ export class CameraPage2Page implements AfterViewInit {
       if (photo && photo.base64String) {
         const dataUrl = `data:image/jpeg;base64,${photo.base64String}`;
         const filename = this.generateFilename();
-        // reuse existing processing pipeline
-        await this.processDataUrl(dataUrl, filename);
+        // reuse existing processing pipeline with a 10s overall timeout
+        try {
+          await this.processDataUrl(dataUrl, filename);
+        } catch (e) {
+          // processDataUrl handles its own timeout/cleanup, but catch here to avoid unhandled rejections
+          console.warn('[CameraPage2] pickImagesMobile: processing failed or timed out', e);
+        }
       } else {
         console.warn('pickImagesMobile: no photo returned');
       }
@@ -107,39 +114,95 @@ export class CameraPage2Page implements AfterViewInit {
 
   async processDataUrl(dataUrl: string, filename: string) {
     // mimic upload-image-page behaviour: preprocess, run inference, store
-    // this.imagePreview = dataUrl;
     this.capturedImages.unshift(dataUrl);
-    this.photosTaken++;
+    // photosTaken will be synchronized with storage after save; do not increment locally here
     this.isProcessing = true;
 
-    let prediction: any = null;
-    try {
-      const tensor = await this.preprocessImage(dataUrl);
-      // guard inference with timeout to avoid device hangs
-      const inferenceTimeoutMs = 20_000; // 20s
-      try {
-        prediction = await Promise.race([
-          this.crackDetectionService.runInference(tensor),
-          new Promise((_, rej) => setTimeout(() => rej(new Error('inference-timeout')), inferenceTimeoutMs))
-        ]);
-      } catch (infErr) {
-        console.warn('Inference error/timeout during upload processing', infErr);
-        prediction = null;
-      }
-    } catch (e) {
-      console.warn('Inference failed during upload processing', e);
-    }
+    // Track whether inference was started so if we timeout we can choose the proper status message
+    let inferenceAttempted = false;
 
-    const entry: StoredImage = {
-      original: dataUrl,
-      timestamp: new Date().toISOString(),
-      filename,
-      prediction: prediction || undefined
+    const doWork = async () => {
+      let prediction: any = null;
+      try {
+        const tensor = await this.preprocessImage(dataUrl);
+        // guard inference with timeout to avoid device hangs
+        const inferenceTimeoutMs = 20_000; // 20s (internal inference guard)
+        try {
+          inferenceAttempted = true;
+          prediction = await Promise.race([
+            this.crackDetectionService.runInference(tensor),
+            new Promise((_, rej) => setTimeout(() => rej(new Error('inference-timeout')), inferenceTimeoutMs))
+          ]);
+        } catch (infErr) {
+          console.warn('Inference error/timeout during upload processing', infErr);
+          prediction = null;
+        }
+      } catch (e) {
+        console.warn('Inference failed during upload processing', e);
+      }
+
+      const entry: StoredImage = {
+        original: dataUrl,
+        timestamp: new Date().toISOString(),
+        filename,
+        prediction: prediction || undefined,
+        hasPrediction: !!prediction,
+        statusMessage: prediction ? 'Prediction succeeded' : (inferenceAttempted ? 'Prediction failed' : 'No prediction')
+      };
+
+      await this.imageStorage.addImage(entry);
+      // update UI counters
+      this.photosProcessed++;
+      await this.updatePhotoCounts();
+      return entry;
     };
-    await this.imageStorage.addImage(entry);
-    // update UI
-    this.photosProcessed++;
-    this.isProcessing = false;
+
+    // Overall processing timeout: 10s
+    const overallTimeoutMs = 10_000;
+    try {
+      await Promise.race([doWork(), new Promise((_, rej) => setTimeout(() => rej(new Error('processing-timeout')), overallTimeoutMs))]);
+    } catch (err: any) {
+      if (err && err.message === 'processing-timeout') {
+        console.warn('[CameraPage2] processDataUrl overall timeout');
+        // If we timed out, persist a fallback entry indicating failure/no-prediction
+        const entry: StoredImage = {
+          original: dataUrl,
+          timestamp: new Date().toISOString(),
+          filename,
+          prediction: undefined,
+          hasPrediction: false,
+          statusMessage: inferenceAttempted ? 'Prediction failed' : 'No prediction'
+        };
+        try {
+          await this.imageStorage.addImage(entry);
+          this.photosProcessed++;
+          await this.updatePhotoCounts();
+        } catch (e) {
+          console.warn('[CameraPage2] Failed to persist fallback entry after timeout', e);
+        }
+      } else {
+        console.warn('[CameraPage2] processDataUrl failed', err);
+      }
+    } finally {
+      this.isProcessing = false;
+    }
+  }
+
+  /**
+   * Synchronize photosTaken/photosProcessed from the ImageStorageService
+   */
+  async updatePhotoCounts() {
+    try {
+      const all: StoredImage[] = await this.imageStorage.getAllImages();
+      this.photosTaken = Array.isArray(all) ? all.length : 0;
+      // Count images that explicitly have a successful prediction status
+      this.photosProcessed = Array.isArray(all) ? all.filter(i => (i.statusMessage === 'Prediction succeeded')).length : 0;
+      // keep an authoritative local copy of stored images for thumbnail rendering
+      this.storedImages = Array.isArray(all) ? all.slice() : [];
+      console.log('[CameraPage2] updatePhotoCounts:', { photosTaken: this.photosTaken, photosProcessed: this.photosProcessed });
+    } catch (e) {
+      console.warn('[CameraPage2] updatePhotoCounts failed', e);
+    }
   }
 
   toggleFlash() {
@@ -302,10 +365,66 @@ export class CameraPage2Page implements AfterViewInit {
     private imageStorage: ImageStorageService
   ) {
     this.requestCameraPermission();
+    // subscribe to current image changes so UI can react when another page selects one
+    try {
+      this.imageStorage.getCurrentImage$().subscribe(img => {
+        if (img) {
+          // update selected thumbnail reference and title
+          this.selectedThumbSrc = img.withBoxes || img.original;
+          this.selectedImageTitle = img.filename ?? '';
+        }
+      });
+    } catch (e) {
+      // ignore if observable not available
+      console.warn('Failed to subscribe to ImageStorage current image', e);
+    }
   }
 
   ngAfterViewInit() {
     this.platform.ready().then(() => this.initCamera());
+    // load stored images from the shared ImageStorageService so thumbnails reflect persisted entries
+    this.loadStoredImages();
+  }
+
+  /** Called when user taps a stored-image thumbnail — select it as current in the service and update UI */
+  onStoredThumbClick(img: StoredImage) {
+    try {
+      this.imageStorage.selectImageByOriginal(img.original);
+    } catch (e) {
+      // ignore
+    }
+    this.selectedThumbSrc = img.withBoxes || img.original;
+    this.selectedImageTitle = img.filename ?? '';
+  }
+
+  /** Load all StoredImage entries from the ImageStorageService and update local list */
+  async loadStoredImages(): Promise<void> {
+    try {
+      // prefer async getter if available
+      if (typeof (this.imageStorage as any).getAllImages === 'function') {
+        const imgs = await (this.imageStorage as any).getAllImages();
+        if (Array.isArray(imgs)) {
+          this.storedImages = imgs;
+        }
+      } else if (typeof (this.imageStorage as any).getImages === 'function') {
+        const imgs = (this.imageStorage as any).getImages();
+        if (Array.isArray(imgs)) this.storedImages = imgs;
+      }
+      // ensure counts stay in sync
+      this.updatePhotoCounts();
+      // if a current image is set in the service, reflect it in the UI
+      try {
+        const cur = (this.imageStorage as any).getCurrentImage ? (this.imageStorage as any).getCurrentImage() : null;
+        if (cur) {
+          this.selectedThumbSrc = cur.withBoxes || cur.original;
+          this.selectedImageTitle = cur.filename ?? '';
+        }
+      } catch (e) {
+        // ignore
+      }
+    } catch (err) {
+      console.warn('loadStoredImages failed', err);
+    }
   }
 
   /** Initialize live camera feed */
@@ -345,7 +464,7 @@ export class CameraPage2Page implements AfterViewInit {
   async takePicture() {
     // Ensure UI shows processing state immediately
     this.isProcessing = true;
-    this.photosTaken++;
+    // photosTaken will be derived from storage after save so don't increment here
     // track whether inference was invoked and whether it succeeded
     let inferenceCalled = false;
     let inferenceSucceeded = false;
@@ -359,43 +478,89 @@ export class CameraPage2Page implements AfterViewInit {
       canvas.height = video.videoHeight;
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
+      const now = new Date().toISOString();
       const dataUrl = canvas.toDataURL('image/png');
-      // this.imagePreview = dataUrl;
       this.capturedImages.unshift(dataUrl);
 
-  // Preprocess → inference → save
-  const imageTensor = await this.preprocessImage(dataUrl);
-  // call the backend/model
-  let prediction = null;
-  try {
-    prediction = await this.crackDetectionService.runInference(imageTensor);
-    inferenceCalled = true;
-    inferenceSucceeded = true;
-  } catch (e) {
-    console.warn('Inference failed:', e);
-    inferenceCalled = true;
-    inferenceSucceeded = false;
-  }
+      // Wrap inference + save into a cancellable-timeout-aware sequence
+      const work = async () => {
+        // Preprocess → inference → save
+        const imageTensor = await this.preprocessImage(dataUrl);
+        // call the backend/model
+        let prediction = null;
+        try {
+          inferenceCalled = true;
+          prediction = await this.crackDetectionService.runInference(imageTensor);
+          inferenceSucceeded = true;
+        } catch (e) {
+          console.warn('Inference failed:', e);
+          inferenceSucceeded = false;
+        }
 
-      const now = new Date().toISOString();
-      const filename = this.generateFilename();
+        const nowInner = new Date().toISOString();
+        // derive filename based on current stored images count so photosTaken reflects storage
+        let storedCount = 0;
+        try {
+          const all = await this.imageStorage.getAllImages();
+          storedCount = Array.isArray(all) ? all.length : 0;
+        } catch (e) {
+          storedCount = this.photosTaken || 0;
+        }
 
-      const entry: StoredImage = {
-        original: dataUrl,
-        timestamp: now,
-        filename,
-        prediction: prediction || undefined,
-        hasPrediction: !!prediction,
-        statusMessage: inferenceSucceeded ? 'Prediction succeeded' : (inferenceCalled ? 'Prediction failed' : 'No prediction')
+        const filename = this.generateFilename(storedCount + 1);
+
+        const entry: StoredImage = {
+          original: dataUrl,
+          timestamp: nowInner,
+          filename,
+          prediction: prediction || undefined,
+          hasPrediction: !!prediction,
+          statusMessage: (inferenceCalled && inferenceSucceeded && prediction) ? 'Prediction succeeded' : (inferenceCalled ? 'Prediction failed' : 'No prediction')
+        };
+        await this.imageStorage.addImage(entry);
+        this.savedImage = entry;
+        this.lastPrediction = prediction;
+
+        this.photosProcessed++;
+        await this.updatePhotoCounts();
+        return entry;
       };
-      await this.imageStorage.addImage(entry); // persists via @ionic/storage
-      this.savedImage = entry;
-      this.lastPrediction = prediction;
 
-      this.photosProcessed++;
+      // Overall timeout for the inference+save sequence: 10s
+      try {
+        await Promise.race([work(), new Promise((_, rej) => setTimeout(() => rej(new Error('processing-timeout')), 10_000))]);
+      } catch (err: any) {
+        if (err && err.message === 'processing-timeout') {
+          console.warn('[CameraPage2] takePicture processing timed out');
+          // Persist a fallback entry indicating timeout (prediction failed or no prediction)
+          try {
+            let storedCount = 0;
+            try {
+              const all = await this.imageStorage.getAllImages();
+              storedCount = Array.isArray(all) ? all.length : 0;
+            } catch (e) { storedCount = this.photosTaken || 0; }
+            const filename = this.generateFilename(storedCount + 1);
+            const entry: StoredImage = {
+              original: dataUrl,
+              timestamp: now,
+              filename,
+              prediction: undefined,
+              hasPrediction: false,
+              statusMessage: inferenceCalled ? 'Prediction failed' : 'No prediction'
+            };
+            await this.imageStorage.addImage(entry);
+            this.photosProcessed++;
+            await this.updatePhotoCounts();
+          } catch (e) {
+            console.warn('[CameraPage2] Failed to store fallback entry after timeout', e);
+          }
+        } else {
+          console.error('Failed during takePicture work:', err);
+        }
+      }
 
       // Keep console.log before clearing isProcessing so callers/UI see processing until logging completes
-      console.log('✅ Prediction stored:', prediction);
+  console.log('✅ Prediction stored:', this.lastPrediction);
       // Print all currently stored images to verify persistence
       try {
         // getAllImages might be synchronous (returns array) or asynchronous in other implementations.
@@ -419,10 +584,10 @@ export class CameraPage2Page implements AfterViewInit {
       }
 
       // Set a user-facing message depending on whether inference ran/succeeded
-      if (inferenceCalled && inferenceSucceeded && prediction) {
-        // TypeScript can't infer that `prediction` is non-null from the booleans above,
+      if (inferenceCalled && inferenceSucceeded && this.lastPrediction) {
+        // TypeScript can't infer that `lastPrediction` is non-null from the booleans above,
         // so check explicitly before accessing properties.
-        const { type, shape, severity } = prediction;
+        const { type, shape, severity } = (this.lastPrediction as any);
         this.extraText = `✅ Inference: ${type}, ${shape}, ${severity}`;
       } else if (inferenceCalled && !inferenceSucceeded) {
         this.extraText = '⚠️ Inference was called but failed.';
@@ -524,11 +689,13 @@ export class CameraPage2Page implements AfterViewInit {
     }
   }
 
-  generateFilename(): string {
+  // allow passing an explicit index (useful when deriving name from storage)
+  generateFilename(count?: number): string {
     const now = new Date();
     const hh = String(now.getHours()).padStart(2, '0');
     const mm = String(now.getMinutes()).padStart(2, '0');
-    return `P${this.photosTaken}${hh}${mm}.jpg`;
+    const idx = typeof count === 'number' ? count : this.photosTaken;
+    return `P${idx}${hh}${mm}.jpg`;
   }
 
   ngOnDestroy() {
@@ -603,7 +770,14 @@ export class CameraPage2Page implements AfterViewInit {
     const fileArray = Array.from(input.files);
 
     // Immediately update counters so UI shows the spinner/count right away
-    this.photosTaken += fileArray.length;
+    try {
+      const all = await this.imageStorage.getAllImages();
+      const storedCount = Array.isArray(all) ? all.length : 0;
+      this.photosTaken = storedCount + fileArray.length;
+    } catch (e) {
+      // fallback to local increment if storage read fails
+      this.photosTaken += fileArray.length;
+    }
     this.isProcessing = true;
 
     // yield to the event loop so the spinner can render before heavy work
@@ -660,7 +834,7 @@ export class CameraPage2Page implements AfterViewInit {
     console.log('[CameraPage2] Center thumbnail selected:', { title, src });
   }
 
-  deleteSelectedImage() {
+  async deleteSelectedImage() {
     const src = this.selectedThumbSrc || '';
     if (!src) {
       console.warn('[CameraPage2] deleteSelectedImage: no image selected');
@@ -668,6 +842,35 @@ export class CameraPage2Page implements AfterViewInit {
       return;
     }
 
+    // If the selected thumbnail maps to a stored/persisted image, remove it via the ImageStorageService
+    const storedIdx = this.storedImages.findIndex(p => p.original === src || p.withBoxes === src);
+    if (storedIdx !== -1) {
+      const imgEntry = this.storedImages[storedIdx];
+      const filename = imgEntry.filename || imgEntry.timestamp || imgEntry.original || '(unnamed)';
+      const confirmMsg = `Delete stored image "${filename}"? This action cannot be undone.`;
+      if (!confirm(confirmMsg)) return;
+
+      try {
+        // Use the canonical delete API on the ImageStorageService
+        await (this.imageStorage as any).deleteImage(imgEntry.original);
+      } catch (err) {
+        console.warn('[CameraPage2] Failed to remove stored image via service', err);
+      }
+
+      // Refresh authoritative data so thumbnail strips update immediately
+      try {
+        await this.updatePhotoCounts();
+        await this.loadStoredImages();
+      } catch (e) {
+        console.warn('[CameraPage2] Error refreshing stored images after delete', e);
+      }
+
+      this.selectedThumbSrc = null;
+      this.selectedImageTitle = '';
+      return;
+    }
+
+    // Otherwise, treat it as a captured (in-memory) image
     const idx = this.capturedImages.indexOf(src);
     if (idx === -1) {
       console.warn('[CameraPage2] deleteSelectedImage: image not found in capturedImages');

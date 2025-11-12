@@ -1,14 +1,27 @@
 import { Injectable } from '@angular/core';
 import { Storage } from '@ionic/storage-angular';
+import { BehaviorSubject, Observable } from 'rxjs';
 
 export interface StoredImage {
   original: string; // Base64 image
+  withBoxes?: string;
+  boxes?: any[];
+  faceDetected?: boolean;
+  faceData?: any[];
   timestamp: string;
   filename: string;
   prediction?: { type: string; shape: string; severity: string };
   // New optional helpers for status/testing
   hasPrediction?: boolean;
   statusMessage?: string;
+  detectionMessage?: string;
+}
+
+export interface ImageSession {
+  id: string;
+  name: string;
+  imageKeys: string[];
+  created: string;
 }
 
 @Injectable({
@@ -17,7 +30,11 @@ export interface StoredImage {
 export class ImageStorageService {
   private _storage: Storage | null = null;
   private images: StoredImage[] = [];
+  private _currentImage: StoredImage | null = null;
+  private _currentImage$ = new BehaviorSubject<StoredImage | null>(null);
+  private sessions: ImageSession[] = [];
   private readonly STORAGE_KEY = 'stored_images';
+  private readonly SESSIONS_KEY = 'stored_image_sessions';
 
   constructor(private storage: Storage) {
     this.init();
@@ -28,6 +45,13 @@ export class ImageStorageService {
     this._storage = await this.storage.create();
     const saved = await this._storage.get(this.STORAGE_KEY);
     this.images = saved || [];
+    // load persisted sessions if present
+    try {
+      const savedSessions = await this._storage.get(this.SESSIONS_KEY);
+      this.sessions = Array.isArray(savedSessions) ? savedSessions : [];
+    } catch (e) {
+      this.sessions = [];
+    }
     console.log('📂 Loaded images from storage:', this.images.length);
   }
 
@@ -35,12 +59,104 @@ export class ImageStorageService {
   async addImage(image: StoredImage) {
     this.images.unshift(image);
     await this._storage?.set(this.STORAGE_KEY, this.images);
+    // update map selection if this was selected externally
+    if (this._currentImage && this._currentImage.original === image.original) {
+      this._currentImage = image;
+      this._currentImage$.next(this._currentImage);
+    }
     console.log(`📤 Image saved. Total stored images: ${this.images.length}`);
+  }
+
+  /** Persist sessions to storage */
+  private async persistSessions(): Promise<void> {
+    try {
+      await this._storage?.set(this.SESSIONS_KEY, this.sessions);
+    } catch (e) {
+      console.warn('Failed to persist sessions', e);
+    }
   }
 
   /** Return a copy of all images */
   getAllImages(): StoredImage[] {
     return [...this.images];
+  }
+
+  /** Async variant for compatibility */
+  async getAllImagesAsync(): Promise<StoredImage[]> {
+    return Promise.resolve(this.getAllImages());
+  }
+
+  /** Convenience: update or insert an entry by its original key */
+  setEntryForImage(imageKey: string, entry: StoredImage) {
+    const idx = this.images.findIndex(i => i.original === imageKey);
+    if (idx !== -1) this.images[idx] = entry;
+    else this.images.unshift(entry);
+    this._storage?.set(this.STORAGE_KEY, this.images);
+    // update current image subject if needed
+    if (this._currentImage && this._currentImage.original === imageKey) {
+      this._currentImage = entry;
+      this._currentImage$.next(this._currentImage);
+    }
+  }
+
+  /** Create a StoredImage and add it */
+  async createAndAdd(data: Partial<StoredImage>): Promise<StoredImage> {
+    const now = new Date().toISOString();
+    const si: StoredImage = {
+      original: data.original ?? '',
+      timestamp: data.timestamp ?? now,
+      filename: data.filename ?? '',
+      prediction: data.prediction,
+      hasPrediction: !!data.prediction,
+      statusMessage: data.statusMessage
+    };
+    await this.addImage(si);
+    return si;
+  }
+
+  /** Select a StoredImage by its original key and expose via observable */
+  selectImageByOriginal(original: string): StoredImage | undefined {
+    const found = this.images.find(i => i.original === original);
+    this._currentImage = found ?? null;
+    this._currentImage$.next(this._currentImage);
+    return found;
+  }
+
+  getCurrentImage(): StoredImage | null {
+    return this._currentImage;
+  }
+
+  getCurrentImage$(): Observable<StoredImage | null> {
+    return this._currentImage$.asObservable();
+  }
+
+  /** Sessions */
+  createSession(name: string, imageKeys: string[] = []): ImageSession {
+    const s: ImageSession = { id: `s-${Date.now()}`, name, imageKeys: [...imageKeys], created: new Date().toISOString() };
+    this.sessions.unshift(s);
+    // persist sessions
+    this.persistSessions();
+    return s;
+  }
+
+  getSessions(): ImageSession[] { return [...this.sessions]; }
+
+  getSession(id: string): ImageSession | undefined { return this.sessions.find(s => s.id === id); }
+
+  addImageToSession(sessionId: string, imageKey: string): boolean {
+    const s = this.sessions.find(x => x.id === sessionId);
+    if (!s) return false;
+    if (!s.imageKeys.includes(imageKey)) s.imageKeys.push(imageKey);
+    this.persistSessions();
+    return true;
+  }
+
+  removeSession(id: string): boolean {
+    const idx = this.sessions.findIndex(s => s.id === id);
+    if (idx === -1) return false;
+    this.sessions.splice(idx, 1);
+    this.persistSessions();
+    return true;
   }
 
   /** Clear all stored images */
@@ -62,5 +178,19 @@ export class ImageStorageService {
       return true;
     }
     return false;
+  }
+
+  /**
+   * Canonical delete API used by application pages.
+   * Delegates to removeImageByOriginal for backward compatibility.
+   * Returns true if removal succeeded, false otherwise.
+   */
+  async deleteImage(original: string): Promise<boolean> {
+    try {
+      return await this.removeImageByOriginal(original);
+    } catch (e) {
+      console.warn('[ImageStorageService] deleteImage failed', e);
+      return false;
+    }
   }
 }

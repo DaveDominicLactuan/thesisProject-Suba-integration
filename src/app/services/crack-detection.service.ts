@@ -1,4 +1,5 @@
 import { Injectable } from '@angular/core';
+import { BoundingBox } from '../image-storage.service';
 import { Capacitor } from '@capacitor/core';
 // We'll dynamically import onnxruntime-web at runtime so we can set wasmPaths
 // before the library attempts to load helper modules. This avoids module
@@ -39,7 +40,7 @@ export class CrackDetectionService {
       }
 
       // Build model path similarly. Use origin when available to ensure absolute URL in WebViews.
-      const modelPath = (isFileProtocol && !isCapacitorLocal) ? 'assets/onnx/crack_multihead_cnn.onnx' : `${origin}/assets/onnx/crack_multihead_cnn.onnx`;
+      const modelPath = (isFileProtocol && !isCapacitorLocal) ? 'assets/onnx/crack_multihead_cnn_with_mask.onnx' : `${origin}/assets/onnx/crack_multihead_cnn_with_mask.onnx`;
       console.log('[CrackDetectionService] modelPath =', modelPath, 'origin=', origin, 'isFileProtocol=', isFileProtocol, 'isCapacitorLocal=', isCapacitorLocal);
 
       // Try fetching model bytes first (works on both file:// and http when accessible).
@@ -99,5 +100,106 @@ export class CrackDetectionService {
   private argmax(arr: Float32Array | number[]): number {
     const nums = Array.from(arr); // avoid TS reduce error
     return nums.reduce((maxIdx, val, i) => val > nums[maxIdx] ? i : maxIdx, 0);
+  }
+
+  /**
+   * Convert a predicted mask array into bounding boxes.
+   * Accepts a flat array (row-major) or typed array of length width*height,
+   * or a 2D nested array (number[][]) where inner arrays are rows.
+   * Returns bounding boxes in {x,y,w,h} format filtered by minArea (pixels).
+   */
+  maskToBBoxes(mask: Float32Array | Uint8Array | number[] | number[][], width?: number, height?: number, threshold = 0.5, minArea = 10): BoundingBox[] {
+    // Normalize input to a flat Uint8 binary mask of 0/1 values
+    let w = width as number;
+    let h = height as number;
+    let flat: Uint8Array;
+
+    if (Array.isArray(mask) && mask.length > 0 && Array.isArray(mask[0])) {
+      // mask is number[][] rows
+      const rows = mask as number[][];
+      h = rows.length;
+      w = rows[0].length;
+      flat = new Uint8Array(w * h);
+      for (let y = 0; y < h; y++) {
+        const row = rows[y];
+        for (let x = 0; x < w; x++) {
+          flat[y * w + x] = (row[x] >= threshold) ? 1 : 0;
+        }
+      }
+    } else {
+      // 1D typed/number array
+      const arr = mask as Float32Array | Uint8Array | number[];
+      if ((w === undefined || h === undefined) && arr.length) {
+        // if only one dimension provided, try to infer square shape
+        if (!w || !h) {
+          const n = arr.length;
+          const side = Math.round(Math.sqrt(n));
+          if (side * side === n) {
+            w = side; h = side;
+          } else if (!w && height) {
+            h = height; w = Math.floor(n / h);
+          } else if (!h && width) {
+            w = width; h = Math.floor(n / w);
+          } else {
+            // fallback: treat as 1-row
+            w = n; h = 1;
+          }
+        }
+      }
+      flat = new Uint8Array(w * h);
+      for (let i = 0; i < Math.min(arr.length, w * h); i++) {
+        const val = (arr as any)[i];
+        flat[i] = (val >= threshold) ? 1 : 0;
+      }
+    }
+
+    const visited = new Uint8Array(w * h);
+    const boxes: BoundingBox[] = [];
+
+    // helper to push neighbor index
+    const pushIf = (idx: number, stack: number[]) => {
+      if (idx >= 0 && idx < flat.length && flat[idx] && !visited[idx]) stack.push(idx);
+    };
+
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const idx = y * w + x;
+        if (!flat[idx] || visited[idx]) continue;
+
+        // BFS / flood fill to find connected component
+        const stack = [idx];
+        let minX = x, maxX = x, minY = y, maxY = y;
+        let area = 0;
+
+        while (stack.length) {
+          const cur = stack.pop() as number;
+          if (visited[cur]) continue;
+          visited[cur] = 1;
+          const cy = Math.floor(cur / w);
+          const cx = cur % w;
+          area++;
+          if (cx < minX) minX = cx;
+          if (cx > maxX) maxX = cx;
+          if (cy < minY) minY = cy;
+          if (cy > maxY) maxY = cy;
+
+          // 4-neighbors
+          const left = cur - 1;
+          const right = cur + 1;
+          const up = cur - w;
+          const down = cur + w;
+          if (cx > 0) pushIf(left, stack);
+          if (cx < w - 1) pushIf(right, stack);
+          if (cy > 0) pushIf(up, stack);
+          if (cy < h - 1) pushIf(down, stack);
+        }
+
+        if (area >= minArea) {
+          boxes.push({ x: minX, y: minY, w: maxX - minX + 1, h: maxY - minY + 1 });
+        }
+      }
+    }
+
+    return boxes;
   }
 }

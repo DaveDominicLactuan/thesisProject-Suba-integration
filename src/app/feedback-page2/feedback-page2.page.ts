@@ -570,9 +570,9 @@ goToSecondPage() {
     if (!confirm(confirmMsg)) return;
 
     try {
-      const removed = await this.imageStorageService.removeImageByOriginal(original);
+      const removed = await (this.imageStorageService as any).deleteImage(original);
       if (!removed) {
-        console.warn('[FeedbackPage] deleteSelectedImage: removeImageByOriginal reported nothing removed');
+        console.warn('[FeedbackPage] deleteSelectedImage: deleteImage reported nothing removed');
       }
 
       // remove from in-memory display list and update selection

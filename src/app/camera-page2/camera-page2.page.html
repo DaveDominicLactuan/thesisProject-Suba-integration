@@ -45,10 +45,16 @@
       <!-- 🔘 Capture Button -->
       <button class="shutter-btn" (click)="takePicture()"></button>
 
-      <!-- Thumbnails on the right -->
-      <div *ngIf="capturedImages.length === 0" class="thumbnail-placeholder" (click)="showTestOverlay()"></div>
-      <div *ngIf="capturedImages.length > 0" class="thumbnail-scroll" (click)="showTestOverlay()">
-        <img *ngFor="let img of capturedImages" [src]="img" class="thumbnail" />
+      <!-- Thumbnails on the right (render from stored images) -->
+      <div *ngIf="storedImages.length === 0" class="thumbnail-placeholder" (click)="showTestOverlay()"></div>
+      <div *ngIf="storedImages.length > 0" class="thumbnail-scroll">
+        <img *ngFor="let img of storedImages"
+             [src]="img.original"
+             class="thumbnail"
+             [class.selected]="img.original === selectedThumbSrc"
+             (click)="onStoredThumbClick(img)"
+             [title]="img.filename || img.timestamp"
+        />
       </div>
 
    

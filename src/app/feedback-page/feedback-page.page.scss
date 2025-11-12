@@ -163,7 +163,7 @@
 
 .scroll-wrapper {
   position: relative;
-  top: 1%; /* Push down under fixed top bar */
+  top: -3%; /* Push down under fixed top bar */
   background-color: #008799;
   display: flex;
   flex-direction: column;
@@ -173,7 +173,7 @@
   overflow-x: hidden;
   overflow-y: visible;
   padding: 10px 0;
-  height: 520px;
+  height: 500px;
   transition: height 0.3s ease;
   box-sizing: border-box;
 
@@ -193,14 +193,14 @@
   height: 100%;
   justify-content: flex-start; /* keep items left-aligned for snapping */
   align-items: center; /* vertically center image items inside the scroll area */
-  padding: 0 20px; /* inset so large items don't touch the very edge */
+  padding: 10 2px; /* inset so large items don't touch the very edge */
   box-sizing: border-box;
 }
 
 
 .image-item {
   flex: 0 0 auto;
-  width: 80%;
+  width: 90%;
   max-width: calc(100% - 40px); /* never exceed available width minus padding */
   max-height: 100%; /* keep inside the parent's height */
   object-fit: contain; /* preserve aspect and avoid cropping */
@@ -209,6 +209,8 @@
   transition: transform 0.2s ease, width 0.3s ease, height 0.3s ease;
   margin: 0; /* gap handled by parent .image-scroll */
   box-sizing: border-box;
+  margin-left: 10px;
+  margin-right: 10px;
 
   /* when the outer scroll-wrapper shrinks, reduce the item's size a bit */
   .scroll-wrapper.shrink & {
@@ -220,6 +222,7 @@
 .login-form {
   margin-top: 50px;
   position: relative;
+  bottom: 1%;
   z-index: 5;
   max-width: 100%;
   width: 800px;
@@ -231,6 +234,7 @@
   padding-right: 20px;
   padding-bottom: 20px;
   box-shadow: 0px 5px 20px rgba(0, 0, 0, 0.1);
+  
   background:
     linear-gradient(#fffdfd, #fffdfd) padding-box,
     linear-gradient(to right, #ff512f, #f09819) border-box;
@@ -358,12 +362,44 @@
 }
 
 .image-title {
-  margin-top: 30px;
+  margin-top: 0px; /* moved top margin to wrapper so title stays visually the same when wrapped */
   font-weight: 600;
-  font-size: 0.8rem;
+  font-size: 0.95rem;
   color: black;
   text-align: center;
   padding-bottom: 10px;
+}
+
+/* wrapper to position a left-side delete button while keeping the title centered */
+.image-title-wrapper {
+  position: relative;
+  margin-top: 25px; /* preserve the original visual spacing of .image-title */
+  padding-bottom: 10px;
+}
+
+.delete-left-btn {
+  position: absolute;
+  right: 2px; /* positioned at right side of wrapper */
+  top: 10%;
+  transform: translateY(-50%);
+  background: #ff4d4d; /* red background */
+  border: 0.5px solid #000; /* thin black border */
+  border-radius: 0 10px 0 0; /* top-left corner rounded 10px only */
+  padding: 6px; /* spacing around icon */
+  font-size: 1.2rem;
+  line-height: 1;
+  cursor: pointer;
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.delete-left-btn .trash-icon {
+  display: block;
+  width: 25px;
+  height: 25px;
+  object-fit: contain;
 }
 
 

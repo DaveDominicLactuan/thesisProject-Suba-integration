@@ -18,16 +18,17 @@
   <!-- Big Action Boxes -->
  <!-- Big Action Boxes -->
 <div class="main-buttons">
-  <div class="big-btn grammar" (click)="goToHomePage()">
+  <div class="big-btn grammar" (click)="goToCameraPage2()">
     <img src="assets/Camera_White.png" alt="Camera" class="big-icon1" />
     <h2 class="dark-text">Start New Session</h2>
     <!-- <p>120 × 30 words</p> -->
   </div>
 
   <div class="right-column">
-    <div class="big-btn lessons"  (click)="goToCameraPahge2()">
-      <!-- <ion-icon name="reader-outline"></ion-icon>
-      <h2>Upload Image 2</h2> -->
+    <div class="big-btn lessons"  (click)="goSessionPage()">
+      <!-- <ion-icon name="reader-outline"></ion-icon> -->
+       <img src="assets/Session-White.png" alt="Upload" class="big-icon2" />
+      <h2>Previous Sessions</h2>
       <!-- <p>20 × 8 words</p> -->
     </div>
 
@@ -36,6 +37,17 @@
   <h2 class="dark-text">Upload Image</h2>
       <!-- <p>60 × 2 words</p> -->
     </div>
+  </div>
+</div>
+
+<!-- Sessions list -->
+<div class="sessions-list" *ngIf="sessions && sessions.length > 0" style="margin-top:18px;">
+  <h3 style="margin:8px 0 6px 0">Saved Sessions</h3>
+  <div style="display:flex;flex-direction:column;gap:8px;">
+    <button *ngFor="let s of sessions" class="session-btn" (click)="goToSession(s)" style="padding:10px;border-radius:8px;background:#fff;border:1px solid #eee;text-align:left;">
+      <div style="font-weight:600">{{ s.name }}</div>
+      <div style="font-size:12px;color:#666">{{ s.imageKeys?.length || 0 }} images • {{ s.created | date:'short' }}</div>
+    </button>
   </div>
 </div>
 
