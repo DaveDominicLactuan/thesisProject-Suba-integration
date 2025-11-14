@@ -18,6 +18,7 @@ export class HomePagePage implements OnInit {
   firstName: string | null = null;
   lastName: string | null = null;
   sessions: any[] = [];
+  lastSessionDisplayName: string | null = null;
 
   constructor(private formBuilder: FormBuilder, private router: Router, private authService: AuthService, private navCtrl: NavController, private auth3: Auth3Service, private imageStorage: ImageStorageService) {
 
@@ -48,22 +49,78 @@ export class HomePagePage implements OnInit {
 //     // });
 //   }
 
-async ngOnInit() {
+ngOnInit(): void {
+  // avoid making ngOnInit async (implements OnInit expects void)
+  // perform async initialization in a separate method
+  this.initialize();
+}
+
+/** Perform async initialization tasks */
+private async initialize(): Promise<void> {
   try {
     const profile = await this.auth3.getUserProfile();
-   this.firstName = profile['firstName'];
-this.lastName = profile['lastName'];
+    this.firstName = profile['firstName'];
+    this.lastName = profile['lastName'];
   } catch (error) {
     console.error(error);
   }
   // load sessions from image storage service
-  try {
-    const s = (this.imageStorage.getSessions && typeof this.imageStorage.getSessions === 'function') ? this.imageStorage.getSessions() : [];
-    this.sessions = Array.isArray(s) ? s.slice() : [];
-  } catch (e) {
-    console.warn('Failed to load sessions', e);
-  }
+  try { await this.loadSessions(); } catch (e) { console.warn('loadSessions failed during init', e); }
 }
+
+  // Called by Ionic when page becomes active — refresh sessions/counts
+  ionViewWillEnter() {
+    this.loadSessions();
+  }
+
+  /** Load sessions from ImageStorageService and compute image counts */
+  async loadSessions() {
+    try {
+      const s = (this.imageStorage.getSessions && typeof this.imageStorage.getSessions === 'function') ? this.imageStorage.getSessions() : [];
+      const sessionsRaw = Array.isArray(s) ? s.slice() : [];
+      // compute image counts by comparing session imageKeys with stored images
+      let allImages: any[] = [];
+      try {
+        // Prefer async or sync `getAllImages` when available
+        if (typeof (this.imageStorage as any).getAllImages === 'function') {
+          const res = (this.imageStorage as any).getAllImages();
+          allImages = (res && typeof (res as Promise<any>).then === 'function') ? await res : res;
+        } else if (typeof (this.imageStorage as any).getImages === 'function') {
+          const res = (this.imageStorage as any).getImages();
+          allImages = (res && typeof (res as Promise<any>).then === 'function') ? await res : res;
+        } else {
+          allImages = [];
+        }
+        if (!Array.isArray(allImages)) allImages = [];
+      } catch (e) {
+        // fallback to synchronous call if async attempt failed
+        try { allImages = (this.imageStorage as any).getImages ? (this.imageStorage as any).getImages() : []; } catch (ee) { allImages = []; }
+        if (!Array.isArray(allImages)) allImages = [];
+      }
+      this.sessions = sessionsRaw.map((sess: any) => {
+        const keys = Array.isArray(sess.imageKeys) ? sess.imageKeys : [];
+        const imageCount = keys.reduce((acc: number, k: string) => acc + (allImages.findIndex(ai => ai.original === k) !== -1 ? 1 : 0), 0);
+        return { ...sess, imageCount };
+      });
+      // if ImageStorageService recorded a last created session, show its name at top
+      try {
+        const lastName = (this.imageStorage as any).getLastCreatedSessionName ? (this.imageStorage as any).getLastCreatedSessionName() : null;
+        if (lastName && lastName.length > 0) {
+          this.lastSessionDisplayName = lastName;
+        } else if (this.sessions && this.sessions.length > 0) {
+          // placeholder: Session N where N is number of sessions
+          this.lastSessionDisplayName = `Session ${this.sessions.length}`;
+        } else {
+          this.lastSessionDisplayName = null;
+        }
+      } catch (e) {
+        this.lastSessionDisplayName = null;
+      }
+    } catch (e) {
+      console.warn('Failed to load sessions', e);
+      this.sessions = [];
+    }
+  }
 
   recommendedCourses = [
     {
@@ -126,6 +183,22 @@ this.lastName = profile['lastName'];
     this.router.navigate(['/camera-page2']);
   }
 
+  /** Delete a session and refresh list */
+  async deleteSession(session: any, ev?: Event) {
+    try {
+      if (ev) ev.stopPropagation();
+      if (!session || !session.id) return;
+      if (typeof (this.imageStorage as any).removeSession === 'function') {
+        const ok = confirm('Delete session "' + (session.name || session.id) + '"? This cannot be undone.');
+        if (!ok) return;
+        (this.imageStorage as any).removeSession(session.id);
+        await this.loadSessions();
+      }
+    } catch (e) {
+      console.warn('deleteSession failed', e);
+    }
+  }
+
 
   goToUploadImage() {
     this.router.navigate(['/upload-image-page']);
@@ -141,9 +214,14 @@ this.lastName = profile['lastName'];
     const ok = confirm('Clear all stored images? This cannot be undone.');
     if (!ok) return;
     try {
-      await this.imageStorage.clear();
+      // ImageStorageService in this workspace exposes `clearImages()`; use that if present.
+      if (typeof (this.imageStorage as any).clearImages === 'function') {
+        await (this.imageStorage as any).clearImages();
+      } else if (typeof (this.imageStorage as any).clear === 'function') {
+        // fallback for implementations that use `clear()`
+        await (this.imageStorage as any).clear();
+      }
       console.log('All stored images cleared');
-      // Optionally, you might want to show a UI notification or reload a list if present
       alert('All stored images cleared');
     } catch (err) {
       console.error('Failed to clear image storage', err);
@@ -221,10 +299,54 @@ this.lastName = profile['lastName'];
       document.body.removeChild(overlay);
     });
 
-    btn.addEventListener('click', () => {
-      // simple notification: alert (could be replaced with Ionic Toast/Notification)
+    // Delete storage button
+    btn2.addEventListener('click', () => {
       this.clearImageStorage();
-      document.body.removeChild(overlay);
+      if (document.getElementById('test-overlay')) document.body.removeChild(overlay);
+    });
+
+    // Test create session button: create a session populated with stored images and refresh list
+    const createSessionBtn = document.createElement('button');
+    createSessionBtn.innerText = 'Create Test Session';
+    createSessionBtn.style.padding = '10px 14px';
+    createSessionBtn.style.border = 'none';
+    createSessionBtn.style.borderRadius = '6px';
+    createSessionBtn.style.background = '#28a745';
+    createSessionBtn.style.color = '#fff';
+    createSessionBtn.style.cursor = 'pointer';
+    createSessionBtn.addEventListener('click', async () => {
+      try {
+        if (this.imageStorage && typeof (this.imageStorage as any).createTestSession === 'function') {
+          const s = (this.imageStorage as any).createTestSession('Test Session', true, 6);
+          // refresh local session view
+          try { await this.loadSessions(); } catch (e) {}
+          alert('Test session created: ' + s.id);
+        } else {
+          // Fallback: older ImageStorageService implementations may not provide
+          // createTestSession. Use available APIs to create a session from stored
+          // images (up to 6) so the UI button still works.
+          try {
+            let stored: any[] = [];
+            if (typeof (this.imageStorage as any).getAllImages === 'function') {
+              stored = await (this.imageStorage as any).getAllImages();
+            } else if (typeof (this.imageStorage as any).getImages === 'function') {
+              stored = (this.imageStorage as any).getImages();
+            } else {
+              stored = [];
+            }
+            const keys = Array.isArray(stored) ? stored.slice(0, 6).map((item: any) => item.original) : [];
+            const s = (typeof this.imageStorage.createSession === 'function') ? this.imageStorage.createSession('Test Session', keys) : null;
+            try { await this.loadSessions(); } catch (e) {}
+            alert(s ? ('Test session created: ' + (s as any).id) : 'Test session created (fallback)');
+          } catch (e) {
+            console.warn('fallback createTestSession failed', e);
+            alert('createTestSession not available on ImageStorageService');
+          }
+        }
+      } catch (err) {
+        console.warn('createTestSession failed', err);
+        alert('Failed to create test session. See console.');
+      }
     });
 
     close.addEventListener('click', () => {
@@ -244,6 +366,7 @@ this.lastName = profile['lastName'];
     btnRow.style.justifyContent = 'center';
     btnRow.appendChild(btn);
     btnRow.appendChild(btn2);
+    btnRow.appendChild(createSessionBtn);
     btnRow.appendChild(close);
     box.appendChild(btnRow);
     overlay.appendChild(box);

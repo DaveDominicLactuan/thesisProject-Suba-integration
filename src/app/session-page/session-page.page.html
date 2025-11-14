@@ -21,6 +21,20 @@
     </ion-avatar>
   </div>
 
+  <!-- Sessions list (from ImageStorageService) -->
+  <div class="sessions-list" *ngIf="sessions && sessions.length > 0" style="margin-top:12px;padding:0 16px;">
+    <h3 style="margin:8px 0 6px 0">Sessions</h3>
+    <div style="display:flex;flex-direction:column;gap:8px;">
+      <div *ngFor="let s of sessions" class="session-item" (click)="selectSession(s)" style="padding:10px;border-radius:8px;background:#fff;border:1px solid #eee;text-align:left;display:flex;justify-content:space-between;align-items:center;">
+        <div>
+          <div style="font-weight:600">{{ s.name }}</div>
+          <div style="font-size:12px;color:#666">{{ s.imageKeys.length || 0 }} images • {{ s.created | date:'short' }}</div>
+        </div>
+        <button class="delete-btn" (click)="deleteSession(s, $event)" style="background:transparent;border:none;color:#c00;font-weight:600;cursor:pointer;">Delete</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Big Action Boxes -->
  <!-- Big Action Boxes -->
 <div class="main-buttons">
@@ -75,21 +89,16 @@
   </div> -->
 </div>
 
-<!-- Stored images list (full-width cards) -->
-<div class="stored-list">
-  <h3 style="padding: 12px 16px 4px 16px; margin:0">Stored Sessions</h3>
-  <div *ngIf="storedImages.length === 0" style="padding:12px 16px;color:#666">No stored images</div>
-  <div *ngFor="let img of storedImages" class="stored-item">
-    <div class="stored-meta">
-      <div class="meta-left">
-        <div class="file-name">{{ img.filename || (img.timestamp) }}</div>
-        <div class="time">{{ img.timestamp }}</div>
+<!-- Sessions list -->
+<div class="sessions-list" *ngIf="sessions && sessions.length > 0" style="margin-top:18px;padding:0 16px;">
+  <h3 style="margin:8px 0 6px 0">Saved Sessions</h3>
+  <div style="display:flex;flex-direction:column;gap:8px;">
+    <div *ngFor="let s of sessions" class="session-item" (click)="goToSession(s)" style="padding:10px;border-radius:8px;background:#fff;border:1px solid #eee;text-align:left;display:flex;justify-content:space-between;align-items:center;">
+      <div>
+        <div style="font-weight:600">{{ s.name }}</div>
+        <div style="font-size:12px;color:#666">{{ s.imageKeys.length || 0 }} images • {{ s.created | date:'short' }}</div>
       </div>
-      <div class="meta-right">
-        <div class="objects">Objects: {{ getObjectsCount(img) }}</div>
-        <button class="small-btn delete" (click)="deleteStoredImage(img)">Delete</button>
-        <button class="small-btn select" (click)="selectStoredImage(img)">Select</button>
-      </div>
+      <button class="delete-btn" (click)="deleteSession(s, $event)" style="background:transparent;border:none;color:#c00;font-weight:600;cursor:pointer;">Delete</button>
     </div>
   </div>
 </div>

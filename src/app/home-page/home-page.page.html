@@ -41,13 +41,17 @@
 </div>
 
 <!-- Sessions list -->
-<div class="sessions-list" *ngIf="sessions && sessions.length > 0" style="margin-top:18px;">
+  <div class="sessions-list" *ngIf="sessions && sessions.length > 0" style="margin-top:18px;padding:0 16px;">
   <h3 style="margin:8px 0 6px 0">Saved Sessions</h3>
+  <div *ngIf="lastSessionDisplayName" style="margin-bottom:8px;font-weight:600;color:#222">Last session: {{ lastSessionDisplayName }}</div>
   <div style="display:flex;flex-direction:column;gap:8px;">
-    <button *ngFor="let s of sessions" class="session-btn" (click)="goToSession(s)" style="padding:10px;border-radius:8px;background:#fff;border:1px solid #eee;text-align:left;">
-      <div style="font-weight:600">{{ s.name }}</div>
-      <div style="font-size:12px;color:#666">{{ s.imageKeys?.length || 0 }} images • {{ s.created | date:'short' }}</div>
-    </button>
+    <div *ngFor="let s of sessions" class="session-item" (click)="goToSession(s)" style="padding:10px;border-radius:8px;background:#fff;border:1px solid #eee;text-align:left;display:flex;justify-content:space-between;align-items:center;">
+      <div>
+        <div style="font-weight:600">{{ s.name }}</div>
+        <div style="font-size:12px;color:#666">{{ s.imageKeys?.length || 0 }} images • {{ s.created | date:'short' }}</div>
+      </div>
+      <button class="delete-btn" (click)="deleteSession(s, $event)" style="background:transparent;border:none;color:#c00;font-weight:600;cursor:pointer;">Delete</button>
+    </div>
   </div>
 </div>
 

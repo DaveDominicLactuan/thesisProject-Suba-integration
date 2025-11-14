@@ -42,6 +42,9 @@ export class ImageStorageService {
   private entryMap: Map<string, StoredImage> = new Map();
   // simple in-memory session store
   private sessions: ImageSession[] = [];
+  // Track last created session for UI handoff between pages
+  private lastCreatedSessionId: string | null = null;
+  private lastCreatedSessionName: string | null = null;
 
   // Current selected image for session-level sharing (feedback page etc.)
   private _currentImage: StoredImage | null = null;
@@ -79,7 +82,26 @@ export class ImageStorageService {
         created: new Date().toISOString()
       };
       this.sessions.unshift(session);
+      // remember last created session
+      this.lastCreatedSessionId = session.id;
+      this.lastCreatedSessionName = session.name;
       return session;
+    }
+
+    /** Get the last created session's name (if any) */
+    getLastCreatedSessionName(): string | null {
+      return this.lastCreatedSessionName;
+    }
+
+    /** Get the last created session id (if any) */
+    getLastCreatedSessionId(): string | null {
+      return this.lastCreatedSessionId;
+    }
+
+    /** Manually set last created session (useful for cross-page handoff) */
+    setLastCreatedSession(id: string | null, name: string | null): void {
+      this.lastCreatedSessionId = id;
+      this.lastCreatedSessionName = name;
     }
 
     getSessions(): ImageSession[] {
@@ -95,6 +117,29 @@ export class ImageStorageService {
       if (!s) return false;
       if (!s.imageKeys.includes(imageKey)) s.imageKeys.push(imageKey);
       return true;
+    }
+
+    /**
+     * Create a quick test session populated with either existing stored images
+     * or synthetic placeholder keys. Useful for verifying session-page UI.
+     * - name: optional session name
+     * - includeStored: if true, add up to `count` actual stored image keys
+     * - count: maximum number of stored images to include
+     */
+    createTestSession(name = 'Test Session', includeStored = true, count = 6): ImageSession {
+      const keys: string[] = [];
+      if (includeStored && this.storedImages && this.storedImages.length > 0) {
+        for (let i = 0; i < Math.min(count, this.storedImages.length); i++) {
+          keys.push(this.storedImages[i].original);
+        }
+      } else {
+        // generate placeholder keys (these won't correspond to real images unless later added)
+        for (let i = 0; i < count; i++) {
+          keys.push(`placeholder-${Date.now()}-${i}`);
+        }
+      }
+      const s = this.createSession(name, keys);
+      return s;
     }
 
     removeSession(id: string): boolean {

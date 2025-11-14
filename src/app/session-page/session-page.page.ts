@@ -5,7 +5,7 @@ import { AuthService } from '../services/auth.service';
 import { NavController } from '@ionic/angular';
 import { User } from 'firebase/auth';
 import { Auth3Service } from '../services/auth3.service';
-import { ImageStorageService, StoredImage } from '../services/image-storage.service';
+import { ImageStorageService, StoredImage, ImageSession } from '../services/image-storage.service';
 
 @Component({
   selector: 'app-session-page',
@@ -19,6 +19,9 @@ export class SessionPagePage implements OnInit {
   lastName: string | null = null;
   // authoritative list of StoredImage items
   storedImages: StoredImage[] = [];
+  // session list and selected session
+  sessions: ImageSession[] = [];
+  selectedSession: ImageSession | null = null;
 
   constructor(private formBuilder: FormBuilder, private router: Router, private authService: AuthService, private navCtrl: NavController, private auth3: Auth3Service, private imageStorage: ImageStorageService) {
 
@@ -64,6 +67,7 @@ async ngOnInit() {
    this.firstName = profile['firstName'];
 this.lastName = profile['lastName'];
       // load stored images for the session page
+      await this.loadSessions();
       await this.loadStoredImages();
   } catch (error) {
     console.error(error);
@@ -80,14 +84,40 @@ this.lastName = profile['lastName'];
   /** Load images from the ImageStorageService and keep newest-first ordering */
   async loadStoredImages() {
     try {
-      const all = this.imageStorage.getAllImages();
-      // ImageStorageService stores newest-first (unshift), but ensure a copy
-      this.storedImages = Array.isArray(all) ? all.slice() : [];
+      const all = await this.imageStorage.getAllImages();
+      // If a session is selected, filter stored images to only those in the session
+      if (this.selectedSession && Array.isArray(this.selectedSession.imageKeys) && this.selectedSession.imageKeys.length > 0) {
+        this.storedImages = Array.isArray(all) ? all.filter(img => this.selectedSession!.imageKeys.includes(img.original)) : [];
+      } else {
+        // ImageStorageService stores newest-first (unshift), but ensure a copy
+        this.storedImages = Array.isArray(all) ? all.slice() : [];
+      }
       // already newest-first; if you need to sort explicitly by timestamp:
       // this.storedImages.sort((a,b) => b.timestamp.localeCompare(a.timestamp));
     } catch (e) {
       console.warn('[SessionPage] loadStoredImages failed', e);
       this.storedImages = [];
+    }
+  }
+
+  /** Load sessions from the ImageStorageService */
+  async loadSessions() {
+    try {
+      const s = (this.imageStorage && typeof (this.imageStorage.getSessions) === 'function') ? this.imageStorage.getSessions() : [];
+      this.sessions = Array.isArray(s) ? s.slice() : [];
+    } catch (e) {
+      console.warn('[SessionPage] loadSessions failed', e);
+      this.sessions = [];
+    }
+  }
+
+  /** Select a session and refresh displayed images to match it */
+  async selectSession(session: ImageSession) {
+    try {
+      this.selectedSession = session;
+      await this.loadStoredImages();
+    } catch (e) {
+      console.warn('[SessionPage] selectSession failed', e);
     }
   }
 
@@ -168,6 +198,38 @@ this.lastName = profile['lastName'];
     console.log('pdf 3 page');
   }
 
+  /** Navigate to a session: select its first image (if any) and open camera-page2 */
+  async goToSession(session: any) {
+    try {
+      if (session && session.imageKeys && session.imageKeys.length > 0) {
+        const key = session.imageKeys[0];
+        if (this.imageStorage && typeof this.imageStorage.selectImageByOriginal === 'function') {
+          this.imageStorage.selectImageByOriginal(key);
+        }
+      }
+    } catch (e) {
+      console.warn('goToSession warning', e);
+    }
+    this.router.navigate(['/camera-page2']);
+  }
+
+  /** Delete a session and refresh list */
+  async deleteSession(session: any, ev?: Event) {
+    try {
+      if (ev) ev.stopPropagation();
+      if (!session || !session.id) return;
+      if (typeof (this.imageStorage as any).removeSession === 'function') {
+        const ok = confirm('Delete session "' + (session.name || session.id) + '"? This cannot be undone.');
+        if (!ok) return;
+        (this.imageStorage as any).removeSession(session.id);
+        await this.loadSessions();
+        await this.loadStoredImages();
+      }
+    } catch (e) {
+      console.warn('deleteSession failed', e);
+    }
+  }
+
   /**
    * Clear all stored images after a confirmation prompt.
    */
@@ -175,9 +237,12 @@ this.lastName = profile['lastName'];
     const ok = confirm('Clear all stored images? This cannot be undone.');
     if (!ok) return;
     try {
-      await this.imageStorage.clear();
+      if (typeof (this.imageStorage as any).clearImages === 'function') {
+        await (this.imageStorage as any).clearImages();
+      } else if (typeof (this.imageStorage as any).clear === 'function') {
+        await (this.imageStorage as any).clear();
+      }
       console.log('All stored images cleared');
-      // Optionally, you might want to show a UI notification or reload a list if present
       alert('All stored images cleared');
     } catch (err) {
       console.error('Failed to clear image storage', err);
@@ -255,10 +320,10 @@ this.lastName = profile['lastName'];
       document.body.removeChild(overlay);
     });
 
-    btn.addEventListener('click', () => {
-      // simple notification: alert (could be replaced with Ionic Toast/Notification)
+    // Delete-storage handler should be attached to btn2 (Delete Image Storage)
+    btn2.addEventListener('click', () => {
       this.clearImageStorage();
-      document.body.removeChild(overlay);
+      if (document.getElementById('test-overlay')) document.body.removeChild(overlay);
     });
 
     close.addEventListener('click', () => {

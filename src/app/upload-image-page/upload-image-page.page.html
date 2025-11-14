@@ -28,6 +28,14 @@
     </div>
   </div> -->
 
+  <div class="session-controls" style="padding:12px 16px;display:flex;gap:8px;align-items:center;">
+    <select *ngIf="sessions && sessions.length > 0" (change)="onSessionSelect($event)" style="padding:6px;border-radius:6px;border:1px solid #ccc;">
+      <option value="">Choose session...</option>
+      <option *ngFor="let s of sessions" [value]="s.id">{{ s.name }} ({{ s.imageKeys?.length || 0 }})</option>
+    </select>
+    <button class="function-btn" (click)="createSessionFromSelection()" style="padding:8px 10px;border-radius:6px;background:#28a745;color:#fff;border:none;">Create Session</button>
+  </div>
+
   <div *ngIf="imagePaths.length === 0 && capturedImages.length === 0" class="thumbnail-placeholder"></div>
   <div *ngIf="imagePaths.length > 0" class="thumbnail-scroll2" #thumbScroll (scroll)="onThumbnailScroll($event)">
     <img *ngFor="let img of imagePaths" [src]="img.original" class="thumbnail2" [style.border]="selectedThumbSrc===img.original ? '3px solid #2ecc71' : 'none'" (click)="onStoredThumbClick(img)" />

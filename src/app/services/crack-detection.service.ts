@@ -88,12 +88,43 @@ export class CrackDetectionService {
   /** Convert raw ONNX output to class labels */
   private mapResults(results: Record<string, any>) {
     console.log("🧪 Raw results:", results);
-
-    return {
+    const out: any = {
       severity: SEVERITY_CLASSES[this.argmax(results['severity'].data as Float32Array)],
       shape: SHAPE_CLASSES[this.argmax(results['shape'].data as Float32Array)],
       type: TYPE_CLASSES[this.argmax(results['type'].data as Float32Array)]
     };
+
+    // If model produces a mask output (common name: 'mask'), extract bounding boxes
+    try {
+      const maskOutput = results['mask'] || results['masks'] || results['pred_mask'];
+      if (maskOutput && maskOutput.data) {
+        const data = maskOutput.data as Float32Array | number[];
+        const dims = Array.isArray(maskOutput.dims) ? maskOutput.dims as number[] : [];
+        // Infer H, W from dims (take last two dims)
+        let maskH = 0, maskW = 0;
+        if (dims.length >= 2) {
+          maskW = dims[dims.length - 1];
+          maskH = dims[dims.length - 2];
+        } else if ((data as any).length) {
+          const n = (data as any).length;
+          const side = Math.round(Math.sqrt(n));
+          if (side * side === n) { maskW = maskH = side; }
+        }
+
+        // Call maskToBBoxes with flat data and inferred dims
+        const boxes = this.maskToBBoxes(data as any, maskW || undefined, maskH || undefined, 0.5, 10);
+        out.boxes = boxes;
+        if (maskW && maskH) {
+          out.maskWidth = maskW;
+          out.maskHeight = maskH;
+        }
+      }
+    } catch (e) {
+      // ignore mask processing errors
+      console.warn('[CrackDetectionService] mask processing failed', e);
+    }
+
+    return out;
   }
 
   /** Safe argmax for Float32Array or number[] */

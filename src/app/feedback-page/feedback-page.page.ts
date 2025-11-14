@@ -688,24 +688,120 @@ goToSecondPage() {
         await (this.imageStorageService as any).createAndAdd(entry);
       }
 
-      // also create a simple session grouping with this image (name with timestamp)
+      // Prompt user for session name and allow Save or Cancel via custom overlay
       try {
-        const sessionName = `Session ${new Date().toLocaleString()}`;
-        if ((this.imageStorageService as any).createSession) {
-          (this.imageStorageService as any).createSession(sessionName, [entry.original]);
-        }
+        await this.showSaveSessionPrompt(entry);
       } catch (e) {
-        // ignore session creation failures
-        console.warn('Failed to create session', e);
+        console.warn('Session prompt failed', e);
       }
-
-      // Show confirmation and navigate home
-      alert('Session saved successfully');
-      this.router.navigate(['/home-page']);
     } catch (err) {
       console.error('Failed to save session', err);
       alert('Failed to save session. See console for details.');
     }
+  }
+
+  /** Show an overlay to name and save the session or cancel */
+  async showSaveSessionPrompt(entry: any): Promise<void> {
+    return new Promise((resolve) => {
+      // create overlay
+      const overlay = document.createElement('div');
+      overlay.style.position = 'fixed';
+      overlay.style.left = '0';
+      overlay.style.top = '0';
+      overlay.style.width = '100%';
+      overlay.style.height = '100%';
+      overlay.style.background = 'rgba(0,0,0,0.45)';
+      overlay.style.display = 'flex';
+      overlay.style.alignItems = 'center';
+      overlay.style.justifyContent = 'center';
+      overlay.style.zIndex = '9999';
+
+      const box = document.createElement('div');
+      box.style.background = '#fff';
+      box.style.padding = '18px';
+      box.style.borderRadius = '8px';
+      box.style.minWidth = '300px';
+      box.style.boxShadow = '0 6px 30px rgba(0,0,0,0.3)';
+
+      const title = document.createElement('div');
+      title.innerText = 'Save Session';
+      title.style.fontWeight = '700';
+      title.style.marginBottom = '8px';
+
+      const label = document.createElement('label');
+      label.innerText = 'Session name:';
+      label.style.display = 'block';
+      label.style.marginBottom = '6px';
+
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.placeholder = `Session ${new Date().toLocaleString()}`;
+      input.style.width = '100%';
+      input.style.padding = '8px';
+      input.style.marginBottom = '12px';
+      input.style.border = '1px solid #ccc';
+      input.style.borderRadius = '4px';
+
+      const btnRow = document.createElement('div');
+      btnRow.style.display = 'flex';
+      btnRow.style.justifyContent = 'flex-end';
+      btnRow.style.gap = '8px';
+
+      const cancelBtn = document.createElement('button');
+      cancelBtn.innerText = 'Cancel';
+      cancelBtn.style.padding = '8px 10px';
+      cancelBtn.style.border = 'none';
+      cancelBtn.style.background = '#aaa';
+      cancelBtn.style.color = '#fff';
+      cancelBtn.style.borderRadius = '6px';
+      cancelBtn.style.cursor = 'pointer';
+
+      const saveBtn = document.createElement('button');
+      saveBtn.innerText = 'Save';
+      saveBtn.style.padding = '8px 10px';
+      saveBtn.style.border = 'none';
+      saveBtn.style.background = '#3880ff';
+      saveBtn.style.color = '#fff';
+      saveBtn.style.borderRadius = '6px';
+      saveBtn.style.cursor = 'pointer';
+
+      cancelBtn.addEventListener('click', () => {
+        try { document.body.removeChild(overlay); } catch (e) {}
+        resolve();
+      });
+
+      saveBtn.addEventListener('click', async () => {
+        try {
+          const val = input.value && input.value.trim().length > 0 ? input.value.trim() : `Session ${new Date().toLocaleString()}`;
+          // create session via service and set last created name
+          if ((this.imageStorageService as any).createSession) {
+            const s = (this.imageStorageService as any).createSession(val, [entry.original]);
+            if ((this.imageStorageService as any).setLastCreatedSession) {
+              (this.imageStorageService as any).setLastCreatedSession(s.id, s.name);
+            }
+          }
+          try { document.body.removeChild(overlay); } catch (e) {}
+          alert('Session saved successfully');
+          this.router.navigate(['/home-page']);
+        } catch (ee) {
+          console.warn('Failed to save session via prompt', ee);
+          alert('Failed to create session. See console.');
+        }
+        resolve();
+      });
+
+      btnRow.appendChild(cancelBtn);
+      btnRow.appendChild(saveBtn);
+
+      box.appendChild(title);
+      box.appendChild(label);
+      box.appendChild(input);
+      box.appendChild(btnRow);
+      overlay.appendChild(box);
+      document.body.appendChild(overlay);
+      // focus input
+      setTimeout(() => input.focus(), 50);
+    });
   }
 
 }

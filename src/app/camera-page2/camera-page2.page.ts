@@ -58,6 +58,9 @@ export class CameraPage2Page implements AfterViewInit {
   lastPrediction: { type: string; shape: string; severity: string } | null = null;
 
   scaledBoxes = [];
+  // session management
+  sessions: any[] = [];
+  selectedSessionId: string | null = null;
 
   get countdown() {
     return this.photosTaken - this.photosProcessed;
@@ -149,6 +152,27 @@ export class CameraPage2Page implements AfterViewInit {
         hasPrediction: !!prediction,
         statusMessage: prediction ? 'Prediction succeeded' : (inferenceAttempted ? 'Prediction failed' : 'No prediction')
       };
+
+      // If the model returned bounding boxes, create a "withBoxes" image and attach boxes
+      try {
+        if (prediction && Array.isArray(prediction.boxes) && prediction.boxes.length > 0) {
+          const maskW = prediction.maskWidth || 128;
+          const maskH = prediction.maskHeight || 128;
+          const withBoxesDataUrl = await this.drawBoxesOnImage(dataUrl, prediction.boxes, maskW, maskH);
+          (entry as any).withBoxes = withBoxesDataUrl;
+          (entry as any).boxes = prediction.boxes;
+          (entry as any).detectionMessage = `Detected ${prediction.boxes.length} region(s)`;
+        } else {
+          (entry as any).withBoxes = dataUrl;
+          (entry as any).boxes = [];
+          (entry as any).detectionMessage = 'No boxes detected';
+        }
+      } catch (e) {
+        console.warn('[CameraPage2] Failed to create withBoxes image', e);
+        (entry as any).withBoxes = dataUrl;
+        (entry as any).boxes = [];
+        (entry as any).detectionMessage = 'Box rendering failed';
+      }
 
       await this.imageStorage.addImage(entry);
       // update UI counters
@@ -383,7 +407,55 @@ export class CameraPage2Page implements AfterViewInit {
   ngAfterViewInit() {
     this.platform.ready().then(() => this.initCamera());
     // load stored images from the shared ImageStorageService so thumbnails reflect persisted entries
-    this.loadStoredImages();
+    this.loadStoredImages().then(() => {
+      // load sessions after stored images are available
+      try { this.loadSessions(); } catch (e) { console.warn('loadSessions failed', e); }
+    });
+  }
+
+  async loadSessions() {
+    try {
+      const s = (this.imageStorage && typeof (this.imageStorage.getSessions) === 'function') ? this.imageStorage.getSessions() : [];
+      this.sessions = Array.isArray(s) ? s.slice() : [];
+    } catch (e) {
+      console.warn('[CameraPage] loadSessions failed', e);
+      this.sessions = [];
+    }
+  }
+
+  async createSessionFromSelection() {
+    try {
+      const name = prompt('Session name', 'New Session') || `Session ${Date.now()}`;
+      // prefer currently selected thumb, else include all stored images
+      let keys: string[] = [];
+      if (this.selectedThumbSrc) {
+        const found = this.storedImages.find(s => (s as any).withBoxes === this.selectedThumbSrc || s.original === this.selectedThumbSrc);
+        if (found) keys = [found.original];
+      }
+      if (keys.length === 0) keys = this.storedImages.map(i => i.original).filter(Boolean);
+      const s = (this.imageStorage && typeof (this.imageStorage.createSession) === 'function') ? this.imageStorage.createSession(name, keys) : null;
+      await this.loadSessions();
+      alert(s ? `Session created: ${(s as any).id}` : 'Session created (fallback)');
+    } catch (e) {
+      console.warn('[CameraPage] createSessionFromSelection failed', e);
+      alert('Failed to create session. See console.');
+    }
+  }
+
+  onSessionSelect(event: Event) {
+    try {
+      const val = (event.target as HTMLSelectElement).value;
+      this.selectedSessionId = val || null;
+      const s = this.sessions.find(x => x.id === val);
+      if (s) {
+        // select first image and update service
+        if (Array.isArray(s.imageKeys) && s.imageKeys.length > 0 && typeof (this.imageStorage.selectImageByOriginal) === 'function') {
+          this.imageStorage.selectImageByOriginal(s.imageKeys[0]);
+        }
+      }
+    } catch (e) {
+      console.warn('[CameraPage] onSessionSelect failed', e);
+    }
   }
 
   /** Called when user taps a stored-image thumbnail — select it as current in the service and update UI */
@@ -517,6 +589,28 @@ export class CameraPage2Page implements AfterViewInit {
           hasPrediction: !!prediction,
           statusMessage: (inferenceCalled && inferenceSucceeded && prediction) ? 'Prediction succeeded' : (inferenceCalled ? 'Prediction failed' : 'No prediction')
         };
+
+        // Render boxes (if any) and attach withBoxes data
+        try {
+          if (prediction && Array.isArray(prediction.boxes) && prediction.boxes.length > 0) {
+            const maskW = prediction.maskWidth || 128;
+            const maskH = prediction.maskHeight || 128;
+            const withBoxesDataUrl = await this.drawBoxesOnImage(dataUrl, prediction.boxes, maskW, maskH);
+            (entry as any).withBoxes = withBoxesDataUrl;
+            (entry as any).boxes = prediction.boxes;
+            (entry as any).detectionMessage = `Detected ${prediction.boxes.length} region(s)`;
+          } else {
+            (entry as any).withBoxes = dataUrl;
+            (entry as any).boxes = [];
+            (entry as any).detectionMessage = 'No boxes detected';
+          }
+        } catch (e) {
+          console.warn('[CameraPage2] Failed to render boxes for taken picture', e);
+          (entry as any).withBoxes = dataUrl;
+          (entry as any).boxes = [];
+          (entry as any).detectionMessage = 'Box rendering failed';
+        }
+
         await this.imageStorage.addImage(entry);
         this.savedImage = entry;
         this.lastPrediction = prediction;
@@ -715,23 +809,44 @@ export class CameraPage2Page implements AfterViewInit {
     this.goBack();
   }
 
-  async drawBoxesOnImage(Base64: string, boxes: BoundingBox[]): Promise<string> {
+  /**
+   * Draw bounding boxes on the supplied Base64 image and return a new Base64 image.
+   * Boxes are expected to be in mask coordinates; maskW/maskH indicate the mask resolution
+   * so boxes can be scaled to the image natural size.
+   */
+  async drawBoxesOnImage(Base64: string, boxes: BoundingBox[], maskW = 128, maskH = 128): Promise<string> {
     const img = new Image();
     img.src = Base64;
 
     const canvas = document.createElement('canvas');
-    canvas.width = 1280;
-    canvas.height = 720;
     const ctx = canvas.getContext('2d')!;
 
     return new Promise((resolve) => {
       img.onload = () => {
+        // Use actual image size so boxes are drawn in correct place
+        const imgW = img.naturalWidth || img.width || 1280;
+        const imgH = img.naturalHeight || img.height || 720;
+        canvas.width = imgW;
+        canvas.height = imgH;
         ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
         ctx.strokeStyle = 'red';
-        ctx.lineWidth = 3;
-        boxes.forEach(box => ctx.strokeRect(box.x, box.y, box.w, box.h));
+        ctx.lineWidth = Math.max(2, Math.round(Math.max(canvas.width, canvas.height) / 400));
+
+        const scaleX = maskW > 0 ? canvas.width / maskW : 1;
+        const scaleY = maskH > 0 ? canvas.height / maskH : 1;
+
+        boxes.forEach(box => {
+          const x = Math.round(box.x * scaleX);
+          const y = Math.round(box.y * scaleY);
+          const w = Math.round(box.w * scaleX);
+          const h = Math.round(box.h * scaleY);
+          ctx.strokeRect(x, y, w, h);
+        });
+
         resolve(canvas.toDataURL('image/jpeg'));
       };
+      // in case image is already cached
+      if (img.complete && img.naturalWidth) img.onload!(null as any);
     });
   }
 

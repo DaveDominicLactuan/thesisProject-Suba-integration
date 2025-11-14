@@ -66,6 +66,9 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
   scaledBoxes: ScaledBox[] = [];
   selectedThumbSrc: string | null = null;
   private _thumbScrollTimeout: any = null;
+  // sessions list for session selection UI
+  sessions: any[] = [];
+  selectedSessionId: string | null = null;
 
   get countdown() {
     return this.photosTaken - this.photosProcessed;
@@ -99,7 +102,70 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
       await this.initCamera();
       // initialize counters from storage
       await this.updatePhotoCounts();
+      // load available sessions
+      await this.loadSessions();
     });
+  }
+
+  /** Load sessions from ImageStorageService (sync API) */
+  async loadSessions() {
+    try {
+      const s = (this.imageStorage && typeof (this.imageStorage.getSessions) === 'function') ? this.imageStorage.getSessions() : [];
+      this.sessions = Array.isArray(s) ? s.slice() : [];
+    } catch (e) {
+      console.warn('[UploadImagePage] loadSessions failed', e);
+      this.sessions = [];
+    }
+  }
+
+  /** Create a new session from the current selection or all stored images */
+  async createSessionFromSelection() {
+    try {
+      const name = prompt('Session name', 'New Session') || `Session ${Date.now()}`;
+      // determine keys: prefer selected image, else all imagePaths
+      let keys: string[] = [];
+      if (this.selectedThumbSrc) {
+        // find matching entry in imagePaths
+        const found = this.imagePaths.find((p: any) => p.original === this.selectedThumbSrc || p.withBoxes === this.selectedThumbSrc);
+        if (found) keys = [found.original];
+      }
+      if (keys.length === 0) {
+        keys = this.imagePaths.map((p: any) => p.original).filter(Boolean);
+      }
+      const s = (this.imageStorage && typeof (this.imageStorage.createSession) === 'function') ? this.imageStorage.createSession(name, keys) : null;
+      await this.loadSessions();
+      alert(s ? `Session created: ${(s as any).id}` : 'Session created (fallback)');
+    } catch (e) {
+      console.warn('[UploadImagePage] createSessionFromSelection failed', e);
+      alert('Failed to create session. See console.');
+    }
+  }
+
+  /** Select an existing session and navigate to camera page with first image selected */
+  async selectSessionAndGo(s: any) {
+    try {
+      if (!s) return;
+      if (Array.isArray(s.imageKeys) && s.imageKeys.length > 0) {
+        const key = s.imageKeys[0];
+        if (this.imageStorage && typeof this.imageStorage.selectImageByOriginal === 'function') {
+          this.imageStorage.selectImageByOriginal(key);
+        }
+      }
+      this.router.navigate(['/camera-page2']);
+    } catch (e) {
+      console.warn('[UploadImagePage] selectSessionAndGo failed', e);
+    }
+  }
+
+  onSessionSelect(event: Event) {
+    try {
+      const val = (event.target as HTMLSelectElement).value;
+      this.selectedSessionId = val || null;
+      const s = this.sessions.find(x => x.id === val);
+      if (s) this.selectSessionAndGo(s);
+    } catch (e) {
+      console.warn('[UploadImagePage] onSessionSelect failed', e);
+    }
   }
 
   /** Called when a stored-image thumbnail is clicked */
@@ -387,7 +453,7 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
       const stored = await this.imageStorage.getAllImages();
       this.imagePaths = stored.map((s: StoredImage) => ({
         original: s.original,
-        withBoxes: s.original,
+        withBoxes: (s as any).withBoxes || s.original,
         fileName: s.filename,
         rawPrediction: s.prediction,
       })).concat(this.imagePaths);
@@ -465,7 +531,7 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
       // store authoritative copy for thumbnails
       this.storedImages = Array.isArray(all) ? all.slice() : [];
       // populate imagePaths from stored images (replace current list)
-      this.imagePaths = this.storedImages.map((s: StoredImage) => ({ original: s.original, withBoxes: s.original, fileName: s.filename, rawPrediction: s.prediction }));
+      this.imagePaths = this.storedImages.map((s: StoredImage) => ({ original: s.original, withBoxes: (s as any).withBoxes || s.original, fileName: s.filename, rawPrediction: s.prediction }));
       console.log('[UploadImagePage] updatePhotoCounts:', { photosTaken: this.photosTaken, photosProcessed: this.photosProcessed });
     } catch (e) {
       console.warn('updatePhotoCounts failed', e);
@@ -552,25 +618,41 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
     // console.log('gallery scrolled', event);
   }
 
-  async drawBoxesOnImage(Base64: string, boxes: BoundingBox[]): Promise<string> {
+  /**
+   * Draw bounding boxes on the supplied Base64 image and return a new Base64 image.
+   * Boxes are expected in mask coordinates; maskW/maskH indicate mask resolution so boxes
+   * can be scaled to the image natural size.
+   */
+  async drawBoxesOnImage(Base64: string, boxes: BoundingBox[], maskW = 128, maskH = 128): Promise<string> {
     const img = new Image();
     img.src = Base64;
 
     const canvas = document.createElement('canvas');
-    canvas.width = 1280;
-    canvas.height = 720;
     const ctx = canvas.getContext('2d')!;
 
     return new Promise((resolve) => {
       img.onload = () => {
+        const imgW = img.naturalWidth || img.width || 1280;
+        const imgH = img.naturalHeight || img.height || 720;
+        canvas.width = imgW;
+        canvas.height = imgH;
         ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-        ctx.lineWidth = 4;
+        ctx.lineWidth = Math.max(2, Math.round(Math.max(canvas.width, canvas.height) / 400));
         ctx.strokeStyle = 'red';
+
+        const scaleX = maskW > 0 ? canvas.width / maskW : 1;
+        const scaleY = maskH > 0 ? canvas.height / maskH : 1;
+
         boxes.forEach(b => {
-          ctx.strokeRect(b.x, b.y, b.w, b.h);
+          const x = Math.round(b.x * scaleX);
+          const y = Math.round(b.y * scaleY);
+          const w = Math.round(b.w * scaleX);
+          const h = Math.round(b.h * scaleY);
+          ctx.strokeRect(x, y, w, h);
         });
         resolve(canvas.toDataURL('image/png'));
       };
+      if (img.complete && img.naturalWidth) img.onload!(null as any);
     });
   }
 
@@ -695,8 +777,29 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
         statusMessage: prediction ? 'Prediction succeeded' : (inferenceCalled ? 'Prediction failed' : 'No prediction')
       };
 
+      // Create a withBoxes image if boxes are present
+      try {
+        if (prediction && Array.isArray(prediction.boxes) && prediction.boxes.length > 0) {
+          const maskW = prediction.maskWidth || 128;
+          const maskH = prediction.maskHeight || 128;
+          const withBoxesDataUrl = await this.drawBoxesOnImage(dataUrl, prediction.boxes, maskW, maskH);
+          (entry as any).withBoxes = withBoxesDataUrl;
+          (entry as any).boxes = prediction.boxes;
+          (entry as any).detectionMessage = `Detected ${prediction.boxes.length} region(s)`;
+        } else {
+          (entry as any).withBoxes = dataUrl;
+          (entry as any).boxes = [];
+          (entry as any).detectionMessage = 'No boxes detected';
+        }
+      } catch (e) {
+        console.warn('[UploadImagePage] Failed to render boxes', e);
+        (entry as any).withBoxes = dataUrl;
+        (entry as any).boxes = [];
+        (entry as any).detectionMessage = 'Box rendering failed';
+      }
+
       await this.imageStorage.addImage(entry);
-      this.imagePaths.unshift({ original: entry.original, withBoxes: entry.original, fileName: entry.filename, rawPrediction: entry.prediction });
+      this.imagePaths.unshift({ original: entry.original, withBoxes: (entry as any).withBoxes || entry.original, fileName: entry.filename, rawPrediction: entry.prediction });
       // keep counters in sync with persistent storage
       await this.updatePhotoCounts();
       this.photosProcessed++;
