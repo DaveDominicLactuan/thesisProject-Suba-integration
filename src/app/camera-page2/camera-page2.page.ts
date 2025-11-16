@@ -340,6 +340,7 @@ export class CameraPage2Page implements AfterViewInit {
       title.style.fontWeight = '600';
       title.style.marginBottom = '4px';
       title.style.color = 'black';
+      title.style.marginTop = '10px';
        
 
       const thumbContainer = document.createElement('div');
