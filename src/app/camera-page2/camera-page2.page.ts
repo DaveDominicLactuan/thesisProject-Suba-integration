@@ -1,4 +1,5 @@
 import { Component, OnDestroy, AfterViewInit, ElementRef, ViewChild } from '@angular/core';
+import { ActivatedRoute } from '@angular/router';
 import { DomSanitizer } from '@angular/platform-browser';
 import { Router } from '@angular/router';
 import { Platform } from '@ionic/angular';
@@ -61,6 +62,8 @@ export class CameraPage2Page implements AfterViewInit {
   // session management
   sessions: any[] = [];
   selectedSessionId: string | null = null;
+  // If a sessionId is passed via route query params, it will be stored here
+  routeSessionId?: string | null = null;
 
   get countdown() {
     return this.photosTaken - this.photosProcessed;
@@ -175,6 +178,15 @@ export class CameraPage2Page implements AfterViewInit {
       }
 
       await this.imageStorage.addImage(entry);
+      // also add to active session if one exists
+      try {
+        if (this.selectedSessionId && typeof (this.imageStorage.addImageToSession) === 'function') {
+          this.imageStorage.addImageToSession(this.selectedSessionId, entry.original);
+        }
+        await this.refreshDisplayedImages();
+      } catch (e) {
+        console.warn('[CameraPage2] Failed to add image to session or refresh display', e);
+      }
       // update UI counters
       this.photosProcessed++;
       await this.updatePhotoCounts();
@@ -199,6 +211,14 @@ export class CameraPage2Page implements AfterViewInit {
         };
         try {
           await this.imageStorage.addImage(entry);
+          try {
+            if (this.selectedSessionId && typeof (this.imageStorage.addImageToSession) === 'function') {
+              this.imageStorage.addImageToSession(this.selectedSessionId, entry.original);
+            }
+            await this.refreshDisplayedImages();
+          } catch (err) {
+            console.warn('[CameraPage2] Failed to add timeout fallback image to session', err);
+          }
           this.photosProcessed++;
           await this.updatePhotoCounts();
         } catch (e) {
@@ -217,12 +237,52 @@ export class CameraPage2Page implements AfterViewInit {
    */
   async updatePhotoCounts() {
     try {
-      const all: StoredImage[] = await this.imageStorage.getAllImages();
-      this.photosTaken = Array.isArray(all) ? all.length : 0;
-      // Count images that explicitly have a successful prediction status
-      this.photosProcessed = Array.isArray(all) ? all.filter(i => (i.statusMessage === 'Prediction succeeded')).length : 0;
-      // keep an authoritative local copy of stored images for thumbnail rendering
-      this.storedImages = Array.isArray(all) ? all.slice() : [];
+      const svc: any = this.imageStorage as any;
+      // If a session is active, compute counts from the session image keys
+      if (this.selectedSessionId) {
+        // ensure sessions are loaded
+        if (!this.sessions || this.sessions.length === 0) {
+          try { await this.loadSessions(); } catch (e) { /* ignore */ }
+        }
+        const session = this.sessions.find(s => s.id === this.selectedSessionId) || null;
+        if (!session || !Array.isArray(session.imageKeys)) {
+          this.photosTaken = 0;
+          this.photosProcessed = 0;
+          this.storedImages = [];
+        } else {
+          const keys: string[] = session.imageKeys.slice();
+          this.photosTaken = keys.length;
+          const imgs: StoredImage[] = [];
+          let processed = 0;
+          for (const k of keys) {
+            let entry: any = undefined;
+            if (typeof svc.getEntryForImage === 'function') {
+              // async or sync-friendly helper
+              const maybe = svc.getEntryForImage(k);
+              entry = (maybe && typeof (maybe as any).then === 'function') ? await maybe : maybe;
+            } else if (typeof svc.getEntry === 'function') {
+              const maybe = svc.getEntry(k);
+              entry = (maybe && typeof (maybe as any).then === 'function') ? await maybe : maybe;
+            } else if (typeof svc.getAllEntries === 'function') {
+              const all = await svc.getAllEntries();
+              entry = all ? all[k] : undefined;
+            }
+            if (entry) {
+              imgs.push(entry as StoredImage);
+              if (entry.statusMessage === 'Prediction succeeded') processed++;
+            }
+          }
+          this.photosProcessed = processed;
+          this.storedImages = imgs;
+        }
+      } else {
+        // No active session: fall back to global image list
+        const all: StoredImage[] = await this.imageStorage.getAllImages();
+        this.photosTaken = Array.isArray(all) ? all.length : 0;
+        // Count images that explicitly have a successful prediction status
+        this.photosProcessed = Array.isArray(all) ? all.filter(i => (i.statusMessage === 'Prediction succeeded')).length : 0;
+        this.storedImages = Array.isArray(all) ? all.slice() : [];
+      }
       console.log('[CameraPage2] updatePhotoCounts:', { photosTaken: this.photosTaken, photosProcessed: this.photosProcessed });
     } catch (e) {
       console.warn('[CameraPage2] updatePhotoCounts failed', e);
@@ -279,6 +339,8 @@ export class CameraPage2Page implements AfterViewInit {
       title.textContent = this.selectedImageTitle || 'No Image Selected';
       title.style.fontWeight = '600';
       title.style.marginBottom = '4px';
+      title.style.color = 'black';
+       
 
       const thumbContainer = document.createElement('div');
       thumbContainer.style.width = '100%';
@@ -340,33 +402,76 @@ export class CameraPage2Page implements AfterViewInit {
 
       thumbContainer.appendChild(thumbScroll);
 
+      // create a horizontal button row that reuses app styles
+      const btnRow = document.createElement('div');
+      btnRow.className = 'bottom-top-row';
+      btnRow.style.width = '100%';
+      btnRow.style.display = 'flex';
+      btnRow.style.justifyContent = 'space-between';
+
       const deleteBtn = document.createElement('button');
-      deleteBtn.textContent = 'Delete Selected Image';
-      deleteBtn.style.alignSelf = 'stretch';
-      deleteBtn.style.padding = '10px';
-      deleteBtn.style.border = 'none';
+      deleteBtn.className = 'function-btn';
+      deleteBtn.type = 'button';
       deleteBtn.style.background = '#ff4d4d';
       deleteBtn.style.color = '#fff';
-      deleteBtn.style.borderRadius = '6px';
+      deleteBtn.style.display = 'flex';
+      deleteBtn.style.alignItems = 'center';
+      deleteBtn.style.justifyContent = 'center';
+      deleteBtn.style.height = '40px';
+      deleteBtn.style.borderRadius = '10px';
+
+      // text + inline trash SVG icon
+      const deleteText = document.createTextNode('Delete Selected Image');
+      const deleteIcon = document.createElement('img');
+      deleteIcon.className = 'action-icon';
+      deleteIcon.style.width = '20px';
+      deleteIcon.style.height = '20px';
+      deleteIcon.style.marginLeft = '8px';
+      // use project asset for trash icon
+      deleteIcon.src = 'assets/Trash.png';
+      deleteBtn.appendChild(deleteText);
+      deleteBtn.appendChild(deleteIcon);
       deleteBtn.onclick = () => {
         this.deleteSelectedImage();
-        overlay.remove();
+        try { overlay.remove(); } catch (e) {}
       };
 
       const closeBtn = document.createElement('button');
-      closeBtn.textContent = 'Close';
-      closeBtn.style.alignSelf = 'stretch';
-      closeBtn.style.padding = '10px';
-      closeBtn.style.border = 'none';
+      closeBtn.className = 'function-btn';
+      closeBtn.type = 'button';
       closeBtn.style.background = '#ddd';
       closeBtn.style.color = '#111';
-      closeBtn.style.borderRadius = '6px';
-      closeBtn.onclick = () => overlay.remove();
+      closeBtn.style.display = 'flex';
+      closeBtn.style.alignItems = 'center';
+      closeBtn.style.justifyContent = 'center';
+      closeBtn.style.height = '40px';
+      closeBtn.style.borderRadius = '10px';
+
+      // text + inline check SVG icon for close
+      const closeText = document.createTextNode('Close');
+      const closeIcon = document.createElement('img');
+      closeIcon.className = 'action-icon';
+      closeIcon.style.width = '20px';
+      closeIcon.style.height = '20px';
+      closeIcon.style.marginLeft = '8px';
+
+      // use project asset for check/close icon
+      closeIcon.src = 'assets/Check_Black.png';
+      closeBtn.appendChild(closeText);
+      closeBtn.appendChild(closeIcon);
+      closeBtn.onclick = () => { try { overlay.remove(); } catch (e) {} };
+
+      // make buttons visually fill available space like in bottom-top-row
+      deleteBtn.style.flex = '1 1 auto';
+      closeBtn.style.flex = '1 1 auto';
+      deleteBtn.style.marginRight = '8px';
+
+      btnRow.appendChild(deleteBtn);
+      btnRow.appendChild(closeBtn);
 
       box.appendChild(title);
       box.appendChild(thumbContainer);
-      box.appendChild(deleteBtn);
-      box.appendChild(closeBtn);
+      box.appendChild(btnRow);
       overlay.appendChild(box);
 
       overlay.addEventListener('click', (ev) => {
@@ -386,7 +491,8 @@ export class CameraPage2Page implements AfterViewInit {
     private router: Router,
     private sanitizer: DomSanitizer,
     private crackDetectionService: CrackDetectionService,
-    private imageStorage: ImageStorageService
+    private imageStorage: ImageStorageService,
+    private route: ActivatedRoute
   ) {
     this.requestCameraPermission();
     // subscribe to current image changes so UI can react when another page selects one
@@ -406,11 +512,64 @@ export class CameraPage2Page implements AfterViewInit {
 
   ngAfterViewInit() {
     this.platform.ready().then(() => this.initCamera());
-    // load stored images from the shared ImageStorageService so thumbnails reflect persisted entries
-    this.loadStoredImages().then(() => {
-      // load sessions after stored images are available
-      try { this.loadSessions(); } catch (e) { console.warn('loadSessions failed', e); }
-    });
+    // initialize page: load images, sessions and create a new session for this visit
+    // read optional sessionId passed via navigation (when opening camera from Sessions list)
+    try { this.routeSessionId = this.route.snapshot.queryParamMap.get('sessionId'); } catch (e) { this.routeSessionId = null; }
+
+    this.loadStoredImages()
+      .then(() => this.loadSessions())
+      .then(async () => {
+        if (this.routeSessionId) {
+          // Use existing session instead of creating a new one
+          this.selectedSessionId = this.routeSessionId;
+          try { await this.refreshDisplayedImages(); } catch (e) { /* ignore */ }
+        } else {
+          // No session requested; create a new one for this camera visit
+          try { await this.createSessionOnEnter(); } catch (e) { /* ignore */ }
+        }
+      })
+      .catch(e => console.warn('[CameraPage2] initialization failed', e));
+  }
+
+  /** Create a new session for this camera visit and set it active */
+  async createSessionOnEnter() {
+    try {
+      const name = `Session ${new Date().toLocaleString()}`;
+      const s = (this.imageStorage && typeof (this.imageStorage.createSession) === 'function') ? this.imageStorage.createSession(name, []) : null;
+      if (s) {
+        this.selectedSessionId = (s as any).id;
+        try { (this.imageStorage as any).setLastCreatedSession((s as any).id, (s as any).name); } catch {}
+        await this.loadSessions();
+        await this.refreshDisplayedImages();
+      }
+    } catch (e) {
+      console.warn('[CameraPage2] createSessionOnEnter failed', e);
+    }
+  }
+
+  /** Refresh the `storedImages` array to match the active session (or show all if none) */
+  async refreshDisplayedImages() {
+    try {
+      if (this.selectedSessionId) {
+        const session = this.sessions.find(s => s.id === this.selectedSessionId);
+        if (session && Array.isArray(session.imageKeys) && session.imageKeys.length > 0) {
+          const imgs: StoredImage[] = [];
+          for (const k of session.imageKeys) {
+            const e = (this.imageStorage as any).getEntryForImage ? (this.imageStorage as any).getEntryForImage(k) : undefined;
+            if (e) imgs.push(e);
+          }
+          this.storedImages = imgs;
+        } else {
+          this.storedImages = [];
+        }
+      } else {
+        const all = await this.imageStorage.getAllImages();
+        this.storedImages = Array.isArray(all) ? all.slice() : [];
+      }
+    } catch (e) {
+      console.warn('[CameraPage2] refreshDisplayedImages failed', e);
+      try { this.storedImages = (await this.imageStorage.getAllImages()) || []; } catch { this.storedImages = []; }
+    }
   }
 
   async loadSessions() {
@@ -452,6 +611,8 @@ export class CameraPage2Page implements AfterViewInit {
         if (Array.isArray(s.imageKeys) && s.imageKeys.length > 0 && typeof (this.imageStorage.selectImageByOriginal) === 'function') {
           this.imageStorage.selectImageByOriginal(s.imageKeys[0]);
         }
+        // refresh displayed thumbnails to match session
+        try { this.refreshDisplayedImages(); } catch (e) { /* ignore */ }
       }
     } catch (e) {
       console.warn('[CameraPage] onSessionSelect failed', e);
@@ -612,6 +773,15 @@ export class CameraPage2Page implements AfterViewInit {
         }
 
         await this.imageStorage.addImage(entry);
+        // add to current session if present
+        try {
+          if (this.selectedSessionId && typeof (this.imageStorage.addImageToSession) === 'function') {
+            this.imageStorage.addImageToSession(this.selectedSessionId, entry.original);
+          }
+          await this.refreshDisplayedImages();
+        } catch (e) {
+          console.warn('[CameraPage2] Failed to add taken picture to session', e);
+        }
         this.savedImage = entry;
         this.lastPrediction = prediction;
 
@@ -643,6 +813,14 @@ export class CameraPage2Page implements AfterViewInit {
               statusMessage: inferenceCalled ? 'Prediction failed' : 'No prediction'
             };
             await this.imageStorage.addImage(entry);
+            try {
+              if (this.selectedSessionId && typeof (this.imageStorage.addImageToSession) === 'function') {
+                this.imageStorage.addImageToSession(this.selectedSessionId, entry.original);
+              }
+              await this.refreshDisplayedImages();
+            } catch (err) {
+              console.warn('[CameraPage2] Failed to add fallback taken picture to session', err);
+            }
             this.photosProcessed++;
             await this.updatePhotoCounts();
           } catch (e) {
@@ -743,8 +921,10 @@ export class CameraPage2Page implements AfterViewInit {
   }
 
   goToFeedBackPage() {
-    this.router.navigate(['/feedback-page']);
-    console.log('Navigating to Feedback page');
+    const params: any = {};
+    if (this.selectedSessionId) params.sessionId = this.selectedSessionId;
+    this.router.navigate(['/feedback-page'], { queryParams: params });
+    console.log('Navigating to Feedback page', params);
   }
 
   goToHomePage() {
@@ -976,6 +1156,9 @@ export class CameraPage2Page implements AfterViewInit {
       try {
         await this.updatePhotoCounts();
         await this.loadStoredImages();
+        // sessions might have been updated by delete; reload and refresh session view
+        await this.loadSessions();
+        await this.refreshDisplayedImages();
       } catch (e) {
         console.warn('[CameraPage2] Error refreshing stored images after delete', e);
       }

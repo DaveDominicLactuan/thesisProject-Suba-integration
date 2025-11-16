@@ -28,13 +28,13 @@
     </div>
   </div> -->
 
-  <div class="session-controls" style="padding:12px 16px;display:flex;gap:8px;align-items:center;">
+  <!-- <div class="session-controls" style="padding:12px 16px;display:flex;gap:8px;align-items:center;">
     <select *ngIf="sessions && sessions.length > 0" (change)="onSessionSelect($event)" style="padding:6px;border-radius:6px;border:1px solid #ccc;">
       <option value="">Choose session...</option>
       <option *ngFor="let s of sessions" [value]="s.id">{{ s.name }} ({{ s.imageKeys?.length || 0 }})</option>
     </select>
     <button class="function-btn" (click)="createSessionFromSelection()" style="padding:8px 10px;border-radius:6px;background:#28a745;color:#fff;border:none;">Create Session</button>
-  </div>
+  </div> -->
 
   <div *ngIf="imagePaths.length === 0 && capturedImages.length === 0" class="thumbnail-placeholder"></div>
   <div *ngIf="imagePaths.length > 0" class="thumbnail-scroll2" #thumbScroll (scroll)="onThumbnailScroll($event)">
@@ -46,7 +46,7 @@
 
 
   <!-- Debug panel (overlay) -->
-  <div class="debug-panel" *ngIf="showDebugPanel">
+  <!-- <div class="debug-panel" *ngIf="showDebugPanel">
     <div class="debug-content">
       <button class="debug-close" (click)="toggleDebugPanel()">✖</button>
       <h3>Selected Prediction</h3>
@@ -57,7 +57,7 @@
       <h4>Raw prediction object</h4>
       <pre>{{ selectedPrediction | json }}</pre>
     </div>
-  </div>
+  </div> -->
 
     <!-- Hidden multi-file input used by Upload Images button -->
     <input type="file" #fileInput accept="image/*" multiple style="display:none" (change)="onFileSelected($event)" />

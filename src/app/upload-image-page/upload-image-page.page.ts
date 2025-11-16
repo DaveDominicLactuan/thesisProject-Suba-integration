@@ -98,12 +98,12 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
   }
 
   ngAfterViewInit() {
-    this.platform.ready().then(async () => {
-      await this.initCamera();
-      // initialize counters from storage
-      await this.updatePhotoCounts();
-      // load available sessions
-      await this.loadSessions();
+    this.platform.ready().then(() => {
+      // initialize page: load images, sessions and create a new session for this visit
+      this.loadStoredImages()
+        .then(() => this.loadSessions())
+        .then(() => this.createSessionOnEnter())
+        .catch(e => console.warn('[UploadImagePage] initialization failed', e));
     });
   }
 
@@ -115,6 +115,48 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
     } catch (e) {
       console.warn('[UploadImagePage] loadSessions failed', e);
       this.sessions = [];
+    }
+  }
+
+  /** Create a new session for this visit and set it active */
+  async createSessionOnEnter() {
+    try {
+      const name = `Session ${new Date().toLocaleString()}`;
+      const s = (this.imageStorage && typeof (this.imageStorage.createSession) === 'function') ? this.imageStorage.createSession(name, []) : null;
+      if (s) {
+        this.selectedSessionId = (s as any).id;
+        try { (this.imageStorage as any).setLastCreatedSession((s as any).id, (s as any).name); } catch {}
+        await this.loadSessions();
+        await this.refreshDisplayedImages();
+      }
+    } catch (e) {
+      console.warn('[UploadImagePage] createSessionOnEnter failed', e);
+    }
+  }
+
+  /** Refresh the `imagePaths` array to match the active session (or show all if none) */
+  async refreshDisplayedImages() {
+    try {
+      if (this.selectedSessionId) {
+        const session = this.sessions.find(s => s.id === this.selectedSessionId);
+        if (session && Array.isArray(session.imageKeys) && session.imageKeys.length > 0) {
+          const imgs: any[] = [];
+          for (const k of session.imageKeys) {
+            const e = (this.imageStorage as any).getEntryForImage ? (this.imageStorage as any).getEntryForImage(k) : undefined;
+            if (e) imgs.push({ original: e.original, withBoxes: (e as any).withBoxes || e.original, fileName: e.filename, rawPrediction: e.prediction });
+          }
+          this.imagePaths = imgs.concat([]);
+        } else {
+          this.imagePaths = [];
+        }
+      } else {
+        // show all stored images
+        const stored = await this.imageStorage.getAllImages();
+        this.imagePaths = (Array.isArray(stored) ? stored.map((s: StoredImage) => ({ original: s.original, withBoxes: (s as any).withBoxes || s.original, fileName: s.filename, rawPrediction: s.prediction })) : []).concat([]);
+      }
+    } catch (e) {
+      console.warn('[UploadImagePage] refreshDisplayedImages failed', e);
+      try { const all = await this.imageStorage.getAllImages(); this.imagePaths = Array.isArray(all) ? all.map((s: StoredImage) => ({ original: s.original, withBoxes: (s as any).withBoxes || s.original, fileName: s.filename, rawPrediction: s.prediction })) : []; } catch { this.imagePaths = []; }
     }
   }
 
@@ -162,7 +204,10 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
       const val = (event.target as HTMLSelectElement).value;
       this.selectedSessionId = val || null;
       const s = this.sessions.find(x => x.id === val);
-      if (s) this.selectSessionAndGo(s);
+      if (s) {
+        this.selectSessionAndGo(s);
+        try { this.refreshDisplayedImages(); } catch (e) { /* ignore */ }
+      }
     } catch (e) {
       console.warn('[UploadImagePage] onSessionSelect failed', e);
     }
@@ -274,6 +319,15 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
           statusMessage: prediction ? 'Prediction succeeded' : (inferenceCalled ? 'Prediction failed' : 'No prediction')
         };
         await this.imageStorage.addImage(entry);
+        // also add to active session if one exists
+        try {
+          if (this.selectedSessionId && typeof (this.imageStorage.addImageToSession) === 'function') {
+            this.imageStorage.addImageToSession(this.selectedSessionId, entry.original);
+          }
+          await this.refreshDisplayedImages();
+        } catch (e) {
+          console.warn('[UploadImagePage] Failed to add taken picture to session', e);
+        }
         // synchronize counters from storage so UI reflects actual stored count
         await this.updatePhotoCounts();
         this.savedImage = entry;
@@ -380,8 +434,15 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
   }
 
   goToFeedBackPage() {
-    this.router.navigate(['/feedback-page']);
-    console.log('Navigating to Feedback page');
+    try {
+      const params: any = {};
+      if (this.selectedSessionId) params.sessionId = this.selectedSessionId;
+      this.router.navigate(['/feedback-page'], { queryParams: params });
+      console.log('Navigating to Feedback page', params);
+    } catch (e) {
+      console.warn('goToFeedBackPage navigation failed', e);
+      this.router.navigate(['/feedback-page']);
+    }
   }
 
   goToHomePage() {
@@ -576,6 +637,8 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
 
       // update counters after deletion and refresh authoritative storedImages/imagePaths
       await this.updatePhotoCounts();
+      // sessions may have changed; reload sessions and refresh session-scoped display
+      try { await this.loadSessions(); await this.refreshDisplayedImages(); } catch (e) { /* ignore */ }
 
       // reset selection to first available thumbnail
       if (this.capturedImages.length > 0) {
@@ -799,6 +862,15 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
       }
 
       await this.imageStorage.addImage(entry);
+      // also add to active session if one exists
+      try {
+        if (this.selectedSessionId && typeof (this.imageStorage.addImageToSession) === 'function') {
+          this.imageStorage.addImageToSession(this.selectedSessionId, entry.original);
+        }
+        await this.refreshDisplayedImages();
+      } catch (e) {
+        console.warn('[UploadImagePage] Failed to add upload to session or refresh display', e);
+      }
       this.imagePaths.unshift({ original: entry.original, withBoxes: (entry as any).withBoxes || entry.original, fileName: entry.filename, rawPrediction: entry.prediction });
       // keep counters in sync with persistent storage
       await this.updatePhotoCounts();
@@ -826,6 +898,14 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
             statusMessage: inferenceCalled ? 'Prediction failed' : 'No prediction'
           };
           await this.imageStorage.addImage(entry);
+          try {
+            if (this.selectedSessionId && typeof (this.imageStorage.addImageToSession) === 'function') {
+              this.imageStorage.addImageToSession(this.selectedSessionId, entry.original);
+            }
+            await this.refreshDisplayedImages();
+          } catch (e) {
+            console.warn('[UploadImagePage] Failed to add fallback upload to session', e);
+          }
           this.imagePaths.unshift({ original: entry.original, withBoxes: entry.original, fileName: entry.filename, rawPrediction: entry.prediction });
           await this.updatePhotoCounts();
           this.photosProcessed++;

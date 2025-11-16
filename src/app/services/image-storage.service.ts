@@ -159,6 +159,15 @@ export class ImageStorageService {
     return true;
   }
 
+  /** Update a session's name and persist changes */
+  updateSessionName(sessionId: string, newName: string): boolean {
+    const s = this.sessions.find(x => x.id === sessionId);
+    if (!s) return false;
+    s.name = newName;
+    this.persistSessions();
+    return true;
+  }
+
   /** Clear all stored images */
   async clear() {
     this.images = [];
@@ -174,6 +183,14 @@ export class ImageStorageService {
     const after = this.images.length;
     if (after < before) {
       await this._storage?.set(this.STORAGE_KEY, this.images);
+      // Also remove this image key from any sessions that reference it
+      let sessionsChanged = false;
+      for (const s of this.sessions) {
+        const prevLen = s.imageKeys.length;
+        s.imageKeys = s.imageKeys.filter(k => k !== original);
+        if (s.imageKeys.length !== prevLen) sessionsChanged = true;
+      }
+      if (sessionsChanged) await this.persistSessions();
       console.log(`🗑️ Removed image. Remaining images: ${this.images.length}`);
       return true;
     }
@@ -192,5 +209,10 @@ export class ImageStorageService {
       console.warn('[ImageStorageService] deleteImage failed', e);
       return false;
     }
+  }
+
+  /** Return a StoredImage entry by its image key (original or withBoxes) */
+  getEntryForImage(imageKey: string): StoredImage | undefined {
+    return this.images.find(i => i.original === imageKey || (i.withBoxes && i.withBoxes === imageKey));
   }
 }

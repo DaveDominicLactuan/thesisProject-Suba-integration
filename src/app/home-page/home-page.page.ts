@@ -180,7 +180,14 @@ private async initialize(): Promise<void> {
         }
       }
     } catch (e) { console.warn('goToSession warning', e); }
-    this.router.navigate(['/camera-page2']);
+    try {
+      const params: any = {};
+      if (session && session.id) params.sessionId = session.id;
+      this.router.navigate(['/camera-page2'], { queryParams: params });
+    } catch (e) {
+      console.warn('Navigation to camera page failed, falling back', e);
+      this.router.navigate(['/camera-page2']);
+    }
   }
 
   /** Delete a session and refresh list */

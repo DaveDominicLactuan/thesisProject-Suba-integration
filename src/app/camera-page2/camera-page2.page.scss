@@ -212,9 +212,10 @@ position: absolute;
 /* Bottom Bar Container */
 .bottom-bar {
   position: absolute;
-  bottom: 0;
+  bottom: 0%;
   left: 0;
   width: 100%;
+  height: 170px;
   // background: white;
   background: rgba(52, 102, 160, 0.771);
   border-radius: 0 0 0 0;

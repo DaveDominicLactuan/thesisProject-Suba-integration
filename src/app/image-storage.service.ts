@@ -46,6 +46,10 @@ export class ImageStorageService {
   private lastCreatedSessionId: string | null = null;
   private lastCreatedSessionName: string | null = null;
 
+  // persistence keys
+  private SESSIONS_KEY = 'app_image_sessions_v1';
+  private LAST_SESSION_KEY = 'app_last_session_v1';
+
   // Current selected image for session-level sharing (feedback page etc.)
   private _currentImage: StoredImage | null = null;
   private _currentImage$ = new BehaviorSubject<StoredImage | null>(null);
@@ -61,6 +65,31 @@ export class ImageStorageService {
         this._currentImage$.next(this._currentImage);
       }
       return Promise.resolve();
+    }
+
+    constructor() {
+      // attempt to load persisted sessions and last session info
+      try {
+        const raw = localStorage.getItem(this.SESSIONS_KEY);
+        if (raw) {
+          const parsed = JSON.parse(raw) as ImageSession[];
+          if (Array.isArray(parsed)) this.sessions = parsed;
+        }
+      } catch (e) {
+        console.warn('[ImageStorageService] failed to load persisted sessions', e);
+        this.sessions = [];
+      }
+
+      try {
+        const lastRaw = localStorage.getItem(this.LAST_SESSION_KEY);
+        if (lastRaw) {
+          const obj = JSON.parse(lastRaw) as { id?: string; name?: string };
+          this.lastCreatedSessionId = obj?.id ?? null;
+          this.lastCreatedSessionName = obj?.name ?? null;
+        }
+      } catch (e) {
+        // ignore
+      }
     }
   
     // ✅ Get all stored images (sync)
@@ -85,6 +114,8 @@ export class ImageStorageService {
       // remember last created session
       this.lastCreatedSessionId = session.id;
       this.lastCreatedSessionName = session.name;
+      this.persistSessions();
+      try { localStorage.setItem(this.LAST_SESSION_KEY, JSON.stringify({ id: session.id, name: session.name })); } catch {}
       return session;
     }
 
@@ -102,6 +133,7 @@ export class ImageStorageService {
     setLastCreatedSession(id: string | null, name: string | null): void {
       this.lastCreatedSessionId = id;
       this.lastCreatedSessionName = name;
+      try { localStorage.setItem(this.LAST_SESSION_KEY, JSON.stringify({ id: id, name: name })); } catch {}
     }
 
     getSessions(): ImageSession[] {
@@ -146,7 +178,16 @@ export class ImageStorageService {
       const idx = this.sessions.findIndex(s => s.id === id);
       if (idx === -1) return false;
       this.sessions.splice(idx, 1);
+      this.persistSessions();
       return true;
+    }
+
+    private persistSessions(): void {
+      try {
+        localStorage.setItem(this.SESSIONS_KEY, JSON.stringify(this.sessions));
+      } catch (e) {
+        console.warn('[ImageStorageService] persistSessions failed', e);
+      }
     }
   
     // ✅ Clear all stored data

@@ -1,5 +1,5 @@
 import { Component, OnInit, ViewChild, ElementRef, AfterViewInit } from '@angular/core';
-import { Router } from '@angular/router';
+import { Router, ActivatedRoute } from '@angular/router';
 import { ApiService } from '../api.service';
 import { ImageStorageService, StoredImage } from '../services/image-storage.service';
 import { CameraPreview, CameraPreviewOptions } from '@awesome-cordova-plugins/camera-preview/ngx';
@@ -44,7 +44,10 @@ showWithBoxes: boolean = false;
 
 
 
-  constructor(private router: Router, private api: ApiService, private imageStorageService: ImageStorageService, private cameraPreview: CameraPreview) { }
+  // routeSessionId holds session id passed via query param from Camera page
+  routeSessionId?: string | null = null;
+
+  constructor(private router: Router, private route: ActivatedRoute, private api: ApiService, private imageStorageService: ImageStorageService, private cameraPreview: CameraPreview) { }
 
   ngOnInit() {
     this.api.getHelloTest().subscribe((res: any) => {
@@ -116,6 +119,9 @@ showWithBoxes: boolean = false;
   
 
   @ViewChild('scrollContainer', { static: false }) scrollContainer!: ElementRef;
+  // Session support
+  sessions: any[] = [];
+  selectedSessionId?: string | null = null;
  
     name: string = '';
     storedEntries: { image: string; title: string; dropdown1: string; dropdown2: string; dropdown3: string; extraText: string }[] = [];
@@ -147,136 +153,143 @@ showWithBoxes: boolean = false;
     console.warn('CameraPreview.stopCamera ignored in ngAfterViewInit (not available on web):', e);
   }
 
-  this.api.getHelloTest().subscribe((res: any) => {
-    this.message = res.message;
-  });
-
+    // Initialize sessions then refresh the displayed images from the active session
     setTimeout(() => {
-    this.imagePaths = this.imageStorageService.getAllImages().map((img: StoredImage) => {
-  // Build friendly display strings from stored prediction or statusMessage
-  const prediction = img.prediction;
-  const predType = prediction?.type ?? '';
-  const predShape = prediction?.shape ?? '';
-  const predSeverity = prediction?.severity ?? '';
+      // If a session id was passed via query param from Camera, prefer it
+      try { this.routeSessionId = this.route.snapshot.queryParamMap.get('sessionId'); } catch (e) { this.routeSessionId = null; }
+      this.loadSessions()
+        .then(() => this.refreshDisplayedImages())
+        .then(() => {
+          // Print stored images + prediction-derived display strings for debugging
+          this.debugLogStoredImages();
+          // Try to detect the centered image (will update again when DOM ready)
+          this.detectCenterImage();
+        })
+        .catch(err => console.warn('[FeedbackPage] failed to initialize sessions/images', err));
+    }, 500);
+      }
 
-  const detectionMessage = img.statusMessage && img.statusMessage.length > 0
-    ? img.statusMessage
-    : (predType || predSeverity) ? `${predType}${predSeverity ? ' — ' + predSeverity : ''}` : '';
 
-  const detectionResult = img.statusMessage && img.statusMessage.length > 0
-    ? img.statusMessage
-    : (predShape || predSeverity) ? `${predShape}${predSeverity ? ' — ' + predSeverity : ''}` : '';
+  /** Load sessions from the storage service and pick an active session */
+  async loadSessions(): Promise<void> {
+    const svc: any = this.imageStorageService as any;
+    try {
+      let sessions: any[] = [];
+      if (typeof svc.getSessions === 'function') {
+        sessions = await svc.getSessions();
+      } else if (typeof svc.getAllSessions === 'function') {
+        sessions = await svc.getAllSessions();
+      } else if (Array.isArray((svc as any).sessions)) {
+        sessions = (svc as any).sessions;
+      } else if (typeof svc.getAll === 'function') {
+        // Some implementations return an object containing sessions
+        const all = await svc.getAll();
+        sessions = all.sessions || all.SESSIONS || [];
+      }
+      this.sessions = sessions || [];
+      // Prefer an active session created by the Camera page if available.
+      // Try several common APIs/fields to remain compatible with different service implementations.
+      let lastSessionId: string | null = null;
+      try {
+        if (typeof svc.getLastCreatedSession === 'function') {
+          const v = await svc.getLastCreatedSession();
+          if (v && typeof v === 'object') lastSessionId = v.id || null;
+          else if (typeof v === 'string') lastSessionId = v;
+        }
+        if (!lastSessionId && typeof svc.getCurrentSessionId === 'function') {
+          const v2 = await svc.getCurrentSessionId();
+          if (v2 && typeof v2 === 'object') lastSessionId = v2.id || null;
+          else if (typeof v2 === 'string') lastSessionId = v2;
+        }
+        // fallbacks to common public properties
+        if (!lastSessionId && (svc.lastCreatedSessionId || svc.selectedSessionId)) {
+          lastSessionId = svc.lastCreatedSessionId || svc.selectedSessionId || null;
+        }
+      } catch (err) {
+        console.warn('[FeedbackPage] loadSessions: error while checking last/current session', err);
+      }
 
-  return ({
-    original: img.original,
-    withBoxes: (img as any).withBoxes ?? img.original,  // fallback if undefined
-    fileName: img.filename ?? img.original.split('/').pop() ?? '',
-    // Prefer explicit statusMessage from processing; fall back to prediction fields
-    detectionMessage,
-    detectionResult,
-    // Keep raw values handy for templates and dropdown defaults
-    rawPrediction: prediction ? { type: predType, shape: predShape, severity: predSeverity } : undefined,
-    statusMessage: img.statusMessage
-  } as DisplayImage);
+      if (lastSessionId) {
+        this.selectedSessionId = lastSessionId;
+      }
 
-}); // ✅ only here
+      // If the router passed a session id explicitly, prefer that when present
+      if (this.routeSessionId) {
+        const found = this.sessions.find(s => s.id === this.routeSessionId);
+        if (found) this.selectedSessionId = this.routeSessionId;
+      }
 
-    if (this.imagePaths.length === 0) {
-      this.imagePaths.push({
-        original: 'assets/108644884_p0.jpg',
-        withBoxes: 'assets/112772382_p0.jpg'
-      });
+      // If there's still no selected session, pick the first available one
+      if (!this.selectedSessionId && this.sessions.length > 0) {
+        this.selectedSessionId = this.sessions[0].id;
+      }
+    } catch (err) {
+      console.warn('[FeedbackPage] loadSessions: unable to read sessions from service', err);
+      this.sessions = [];
+      this.selectedSessionId = null;
     }
+  }
 
-    // If images exist, pre-fill selection from the first one so dropdowns show
-    // prediction values even if the DOM hasn't been centered yet.
-    if (this.imagePaths.length > 0) {
-      // If a session-selected image exists, prefer that one
-      const svcSelected = (this.imageStorageService as any).getSelectedImage ? (this.imageStorageService as any).getSelectedImage() : null;
-      let first = this.imagePaths[0];
-      if (svcSelected) {
-        const matchedSel = this.imagePaths.find(p => p.original === svcSelected.original || p.withBoxes === svcSelected.original);
-        if (matchedSel) first = matchedSel;
-        // clear selection after applied so it doesn't persist unexpectedly
-        if ((this.imageStorageService as any).clearSelectedImage) (this.imageStorageService as any).clearSelectedImage();
-      }
-      this.selectedImage = this.showWithBoxes ? first.withBoxes : first.original;
-      this.selectedPrediction = first.rawPrediction ?? {};
-      this.selectedStatusMessage = first.statusMessage ?? '';
-
-      // Fill detection displays
-      if (this.selectedStatusMessage && this.selectedStatusMessage.length > 0) {
-        this.detectionMessage = this.selectedStatusMessage;
-        this.detectionResult = this.selectedStatusMessage;
-      } else if (this.selectedPrediction) {
-        const p = this.selectedPrediction;
-        this.detectionMessage = p.type ? `${p.type}${p.severity ? ' — ' + p.severity : ''}` : '⚠️ No info available';
-        this.detectionResult = p.shape ? `${p.shape}${p.severity ? ' — ' + p.severity : ''}` : (p.severity ?? '⚠️ No info available');
+  /** Build this.imagePaths from the currently-selected session */
+  async refreshDisplayedImages(): Promise<void> {
+    const svc: any = this.imageStorageService as any;
+    this.imagePaths = [];
+    try {
+      if (!this.selectedSessionId) {
+        // fallback: load all images if no session selected
+        const allImgs: any[] = (typeof svc.getAllImages === 'function') ? svc.getAllImages() : (typeof svc.getAll === 'function' ? Object.values(await svc.getAll()) : []);
+        this.imagePaths = (allImgs || []).map((img: any) => this.buildDisplayImage(img));
+        return;
       }
 
-      // set dropdowns
-      this.dropdown1 = this.selectedPrediction.type ?? this.selectedImageTitle;
-      this.dropdown2 = this.selectedPrediction.shape ?? this.selectedImageTitle;
-      this.dropdown3 = this.selectedPrediction.severity ?? this.selectedImageTitle;
-
-      // ensure formDataMap entry
-      const key = first.original;
-      if (!this.formDataMap[key]) {
-        this.formDataMap[key] = {
-          title: first.fileName ?? this.selectedImageTitle,
-          dropdown1: this.dropdown1,
-          dropdown2: this.dropdown2,
-          dropdown3: this.dropdown3,
-          extraText: this.selectedStatusMessage ?? ''
-        };
+      const sess = this.sessions.find(s => s.id === this.selectedSessionId) || null;
+      if (!sess || !Array.isArray(sess.imageKeys) || sess.imageKeys.length === 0) {
+        // nothing in session; keep placeholder
+        if (this.imagePaths.length === 0) {
+          this.imagePaths.push({ original: 'assets/108644884_p0.jpg', withBoxes: 'assets/112772382_p0.jpg' });
+        }
+        return;
       }
+
+      for (const key of sess.imageKeys) {
+        let entry: any = undefined;
+        if (typeof svc.getEntryForImage === 'function') {
+          entry = await svc.getEntryForImage(key);
+        } else if (typeof svc.getEntry === 'function') {
+          entry = await svc.getEntry(key);
+        } else if (typeof svc.getAllEntries === 'function') {
+          const all = await svc.getAllEntries();
+          entry = all ? all[key] : undefined;
+        }
+        if (entry) this.imagePaths.push(this.buildDisplayImage(entry));
+      }
+    } catch (err) {
+      console.warn('[FeedbackPage] refreshDisplayedImages failed', err);
     }
+  }
 
-    // Print stored images + prediction-derived display strings for debugging
-    this.debugLogStoredImages();
-    // Try to detect the centered image (will update again when DOM ready)
-    this.detectCenterImage();
-    // Compute safe display values from prediction or filename
-    const optType = (this.selectedPrediction.type && this.selectedPrediction.type.trim()) || this.selectedImageTitle || 'Type';
-    const optShape = (this.selectedPrediction.shape && this.selectedPrediction.shape.trim()) || this.selectedImageTitle || 'Shape';
-    const optSeverity = (this.selectedPrediction.severity && this.selectedPrediction.severity.trim()) || this.selectedImageTitle || 'Severity';
-
-    // dropdownOptions is not used by the template for the Type field; keep as generic
-    this.dropdownOptions = [
-      optType,
-      'Negligible',
-      'moderate',
-      'severe',
-      'very severe'
-    ];
-
-    // The template uses dropdownOptionsDirection for the "Type of Crack" select
-    this.dropdownOptionsDirection = [
-      optType,
-      'Horizontal',
-      'Vertical',
-      'Diagonal'
-    ];
-
-    this.dropdownOptionsShape = [
-      optShape,
-      'Bulge',
-      'Vertical',
-      'Diagonal'
-    ];
-
-    this.dropdownOptionsSeverity = [
-      optSeverity,
-      'Negligible',
-      'moderate',
-      'severe',
-      'very severe'
-    ];
-    this.dropdown1 = this.selectedPrediction.type ?? this.selectedImageTitle;
-    this.dropdown2 = this.selectedPrediction.shape ?? this.selectedImageTitle;
-    this.dropdown3 = this.selectedPrediction.severity ?? this.selectedImageTitle;
-  }, 500);
-}
+  /** Normalize StoredImage-like object into DisplayImage */
+  buildDisplayImage(img: any): DisplayImage {
+    const prediction = img.prediction ?? img.rawPrediction ?? undefined;
+    const predType = prediction?.type ?? '';
+    const predShape = prediction?.shape ?? '';
+    const predSeverity = prediction?.severity ?? '';
+    const detectionMessage = img.statusMessage && img.statusMessage.length > 0
+      ? img.statusMessage
+      : (predType || predSeverity) ? `${predType}${predSeverity ? ' — ' + predSeverity : ''}` : '';
+    const detectionResult = img.statusMessage && img.statusMessage.length > 0
+      ? img.statusMessage
+      : (predShape || predSeverity) ? `${predShape}${predSeverity ? ' — ' + predSeverity : ''}` : '';
+    return {
+      original: img.original,
+      withBoxes: img.withBoxes ?? img.original,
+      fileName: img.filename ?? img.fileName ?? (img.original && img.original.split ? img.original.split('/').pop() : ''),
+      detectionMessage,
+      detectionResult,
+      rawPrediction: prediction ? { type: predType, shape: predShape, severity: predSeverity } : undefined,
+      statusMessage: img.statusMessage
+    } as DisplayImage;
+  }
 
 
 
@@ -773,13 +786,28 @@ goToSecondPage() {
       saveBtn.addEventListener('click', async () => {
         try {
           const val = input.value && input.value.trim().length > 0 ? input.value.trim() : `Session ${new Date().toLocaleString()}`;
-          // create session via service and set last created name
-          if ((this.imageStorageService as any).createSession) {
-            const s = (this.imageStorageService as any).createSession(val, [entry.original]);
-            if ((this.imageStorageService as any).setLastCreatedSession) {
-              (this.imageStorageService as any).setLastCreatedSession(s.id, s.name);
+          const svc: any = this.imageStorageService as any;
+          // If a session is already selected (e.g., from Camera page), update it
+          if (this.selectedSessionId && typeof svc.addImageToSession === 'function') {
+            try {
+              svc.addImageToSession(this.selectedSessionId, entry.original);
+            } catch (e) {
+              console.warn('[FeedbackPage] failed to add image to existing session', e);
+            }
+            // Try to rename session if service supports it
+            if (typeof svc.updateSessionName === 'function') {
+              try { svc.updateSessionName(this.selectedSessionId, val); } catch (e) { /* ignore */ }
+            }
+          } else {
+            // create session via service and set last created name
+            if (typeof svc.createSession === 'function') {
+              const s = svc.createSession(val, [entry.original]);
+              if (s && typeof svc.setLastCreatedSession === 'function') {
+                try { svc.setLastCreatedSession(s.id, s.name); } catch (e) { /* ignore */ }
+              }
             }
           }
+
           try { document.body.removeChild(overlay); } catch (e) {}
           alert('Session saved successfully');
           this.router.navigate(['/home-page']);
