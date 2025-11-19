@@ -24,31 +24,6 @@ export class HomePagePage implements OnInit {
 
   }
 
-//   ngOnInit() {
-//     // Initialization logic can go here
-//     const user = this.auth3.getCurrentUser();
-   
-//     // this.firstName = user?.firstName ?? null;
-//     // this.lastName = user?.lastName ?? null;
-// this.userName = user?.email ?? null;
-//     try {
-//       const profile = await this.auth3.getUserProfile();
-//    this.firstName = profile['firstName'];
-// this.lastName = profile['lastName'];
-
-       
-//     } catch (error) {
-//       console.error(error);
-//     }
-  
-
-//     // subscribe to auth changes (optional)
-//     // this.authService.onAuthChange((u: User | null) => {
-//     //   this.userName = u?.email ?? null;
-//     //   if (!u) this.navCtrl.navigateRoot('/login');
-//     // });
-//   }
-
 ngOnInit(): void {
   // avoid making ngOnInit async (implements OnInit expects void)
   // perform async initialization in a separate method

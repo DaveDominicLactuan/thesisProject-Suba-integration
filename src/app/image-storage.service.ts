@@ -148,6 +148,8 @@ export class ImageStorageService {
       const s = this.sessions.find(x => x.id === sessionId);
       if (!s) return false;
       if (!s.imageKeys.includes(imageKey)) s.imageKeys.push(imageKey);
+      // persist session changes so other pages/read-ons reload see updates
+      try { this.persistSessions(); } catch (e) { /* ignore persistence failures */ }
       return true;
     }
 

@@ -251,9 +251,10 @@ export class CameraPage2Page implements AfterViewInit {
           this.storedImages = [];
         } else {
           const keys: string[] = session.imageKeys.slice();
-          this.photosTaken = keys.length;
           const imgs: StoredImage[] = [];
           let processed = 0;
+          // count only keys that currently have an entry (skip deleted/missing)
+          let foundCount = 0;
           for (const k of keys) {
             let entry: any = undefined;
             if (typeof svc.getEntryForImage === 'function') {
@@ -269,10 +270,12 @@ export class CameraPage2Page implements AfterViewInit {
             }
             if (entry) {
               imgs.push(entry as StoredImage);
+              foundCount++;
               if (entry.statusMessage === 'Prediction succeeded') processed++;
             }
           }
           this.photosProcessed = processed;
+          this.photosTaken = foundCount; // only count existing entries
           this.storedImages = imgs;
         }
       } else {
@@ -542,6 +545,8 @@ export class CameraPage2Page implements AfterViewInit {
         try { (this.imageStorage as any).setLastCreatedSession((s as any).id, (s as any).name); } catch {}
         await this.loadSessions();
         await this.refreshDisplayedImages();
+        // ensure counts reflect the newly created/selected session
+        try { await this.updatePhotoCounts(); } catch (e) { /* ignore */ }
       }
     } catch (e) {
       console.warn('[CameraPage2] createSessionOnEnter failed', e);
@@ -602,7 +607,7 @@ export class CameraPage2Page implements AfterViewInit {
     }
   }
 
-  onSessionSelect(event: Event) {
+  async onSessionSelect(event: Event) {
     try {
       const val = (event.target as HTMLSelectElement).value;
       this.selectedSessionId = val || null;
@@ -613,8 +618,14 @@ export class CameraPage2Page implements AfterViewInit {
           this.imageStorage.selectImageByOriginal(s.imageKeys[0]);
         }
         // refresh displayed thumbnails to match session
-        try { this.refreshDisplayedImages(); } catch (e) { /* ignore */ }
+        try { await this.refreshDisplayedImages(); } catch (e) { /* ignore */ }
+      } else {
+        // still refresh display when no session found (fallback to all images)
+        try { await this.refreshDisplayedImages(); } catch (e) { /* ignore */ }
       }
+
+      // recompute counts for the newly selected session so UI shows correct totals
+      try { await this.updatePhotoCounts(); } catch (e) { /* ignore */ }
     } catch (e) {
       console.warn('[CameraPage] onSessionSelect failed', e);
     }

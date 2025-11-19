@@ -39,91 +39,6 @@
   transform: translateX(-50%);
 }
 
-// .signup-container {
-//   width: 90%;
-//   max-width: 400px;
-//   background: rgba(0, 0, 0, 0.7);
-//   margin: auto;
-//   text-align: center;
-//   padding: 20px;
-//   color: #fff;
-//   position: relative;
-//   z-index: 2;
-// }
-
-// .login-form {
-// //   max-width: 270px;
-// max-width: 90%;
-// width: 500px;
-//   // min-height: 420px;
-//   // height: 450px;.
-//   max-height: 110%;
-//   height: 400px;
-//   // height: 90%;
-
-//   margin: auto;
-//   background-color: #ffffff;
-//   border-radius: 15px;
-//   padding: 17px;
-//   box-shadow: 0px 5px 20px rgba(0, 0, 0, 0.1);
-//   position: relative;
-//   top: 20%;
-// //   margin-top: 10px;
-//   margin-bottom: 200px;
-// // margin: 20px auto 30px auto; 
-//   z-index: 2;
-//   align-items: center;
-//   justify-content: center;
-  
-// }
-
-// .login-form {
-//   max-width: 90%;
-//   width: 500px;
-//   margin: auto;
-//   background-color: #ffffff;
-//   border-radius: 15px;
-//   padding: 17px;
-//   box-shadow: 0px 5px 20px rgba(0, 0, 0, 0.1);
-//   position: relative;
-//   top: 20%;
-//   margin-bottom: 200px;
-//   z-index: 2;
-//   align-items: center;
-//   justify-content: center;
-
-//   display: flex;
-//   flex-direction: column;
-//   /* Remove fixed height so it grows with content */
-// }
-
-// .login-form {
-//   /* ...existing styles... */
-//   max-width: 90%;
-//   width: 500px;
-//   margin: auto;
-//   background-color: #ffffff;
-//   border-radius: 15px;
-//   padding: 17px;
-//   box-shadow: 0px 5px 20px rgba(0, 0, 0, 0.1);
-//   position: relative;
-//   top: 10%;
-//   margin-bottom: 200px;
-//   z-index: 2;
-//   align-items: center;
-//   justify-content: center;
-//   display: flex;
-//   flex-direction: column;
-//   /* Add these for scrolling */
-//   max-height: 80vh;
-//   overflow-y: auto;
-// }
-
-// /* Optional: class for different position when role is selected */
-// .login-form.role-selected {
-//   top: 12%;
-//   margin-bottom: 50px;
-// }
 
 .login-form {
 //   max-width: 270px;
@@ -287,30 +202,6 @@ width: 500px;
   }
 }
 
-// .form-field {
-//   display: flex;
-//   align-items: center;
-//   background-color: transparent;
-//   border: 1.5px solid #008799;
-//   border-radius: 25px;
-//   padding: 10px 15px;
-//   margin-bottom: 15px;
-
-//   ion-icon {
-//     font-size: 20px;
-//     color: #fff;
-//     margin-right: 10px;
-//   }
-
-//   input {
-//     flex: 1;
-//     background: transparent;
-//     border: none;
-//     color: white;
-//     font-size: 16px;
-//     outline: none;
-//   }
-// }
 
 .form-field {
   display: flex;

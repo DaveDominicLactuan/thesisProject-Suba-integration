@@ -37,9 +37,6 @@ engineeringId: string = '';
 fullName: string = '';
 regForm!: FormGroup; // our single form
 
-
-
-
 // signupForm: FormGroup;
 
   constructor(
@@ -48,13 +45,7 @@ regForm!: FormGroup; // our single form
   private auth: AuthService, private auth3: Auth3Service,
   private navCtrl: NavController, private firestore: AngularFirestore
 ) {
-  // this.signupForm = this.formBuilder.group({
-  //   fullName: ['', Validators.required],
-  //   engineeringId: ['', Validators.required],
-  //   email: ['', [Validators.required, Validators.email]],
-  //   password: ['', Validators.required],
-  //   confirmPassword: ['', Validators.required]
-  // });
+ 
 }
 
 ngOnInit() {
@@ -76,27 +67,7 @@ this.regForm = this.fb.group({
     return password === confirmPassword ? null : { mismatch: true };
   }
 
-// async onRegister() {
-//   if (this.regForm.invalid) {
-//     alert('Please fill out all required fields');
-//     return;
-//   }
 
-//   const { email, password, firstName, lastName, engineeringID } = this.regForm.value;
-
-//   try {
-//     await this.auth3.register(
-//       email ?? '',
-//       password ?? '',
-//       firstName ?? '',
-//       lastName ?? '',
-//       engineeringID ?? ''
-//     );
-//     this.router.navigateByUrl('/home', { replaceUrl: true });
-//   } catch (err: any) {
-//     alert(err.message || 'Registration failed');
-//   }
-// }
 
 async onRegister() {
 
@@ -136,81 +107,11 @@ async onRegister() {
 
 
 
-  //  async register() {
-  //   this.error = '';
-
-  //   // Validate passwords
-  //   if (this.password !== this.confirmPassword) {
-  //     this.error = 'Passwords do not match';
-  //     return;
-  //   }
-
-  //   // Optional: validate required fields
-  //   if (!this.fullName || !this.engineeringId || !this.email || !this.password) {
-  //     this.error = 'All fields are required';
-  //     return;
-  //   }
-
-  //   try {
-  //     await this.auth.register(this.email, this.password, this.fullName, this.engineeringId);
-  //     // this.navCtrl.navigateRoot('/home');
-  //      this.router.navigate(['/landing-page']);
-  //   } catch (err: any) {
-  //     this.error = err.message || 'Registration failed';
-  //   }
-  // }
-
-//   register() {
-//   if (this.signupForm.invalid) {
-//     this.error = 'Form is invalid';
-//     return;
-//   }
-
-//   const { fullName, engineeringId, email, password, confirmPassword } = this.signupForm.value;
-
-//   if (password !== confirmPassword) {
-//     this.error = 'Passwords do not match';
-//     return;
-//   }
-
-//   this.auth.register(email, password, fullName, engineeringId)
-//     .then(() => this.router.navigate(['/landing-page']))
-//     .catch(err => this.error = err.message || 'Registration failed');
-// }
-// register() {
-//   if (this.signupForm.invalid) {
-//     this.error = 'Form is invalid';
-//     return;
-//   }
-
-//   const { email, password, confirmPassword, fullName, engineeringId } = this.signupForm.value;
-
-//   if (password !== confirmPassword) {
-//     this.error = 'Passwords do not match';
-//     return;
-//   }
-
-//  this.auth.register(email, password, fullName, engineeringId)
-//   .then(() => this.router.navigate(['/landing-page']))
-//   .catch(err => this.error = err.message || 'Registration failed');
-// }
-
-
-
 
   goToLogin() {
     this.navCtrl.navigateBack('/login');
   }
 
-  // onSubmit() {
-  //   if (this.signupForm.valid) {
-  //     console.log('Form Submitted:', this.signupForm.value);
-  //   } else {
-  //     console.log('Form Invalid');
-  //   }
-  // }
-
- 
 
 selectRole(role: string) {
   this.selectedRole = role;
@@ -222,9 +123,6 @@ togglePasswordVisibility() {
 }
 
 
-  // ngOnInit() {
-    
-  // }
 
   goToHomePage() {
     this.router.navigate(['/home-page']);

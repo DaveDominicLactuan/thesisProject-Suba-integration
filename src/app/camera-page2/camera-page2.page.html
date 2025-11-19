@@ -3,13 +3,6 @@
     <!-- 🎥 Live Camera Feed -->
   <video #video autoplay muted playsinline class="camera-feed"></video>
 
-  <!-- 🖼️ Captured Image Preview Overlay -->
-  <!-- <div *ngIf="imagePreview" class="image-preview">
-    <img [src]="imagePreview" />
-    <button class="back-btn" type="button" (click)="onBack()">
-      <img src="assets/wArrow.png" alt="Back" class="back-icon" />
-    </button>
-  </div> -->
 
   <!-- 🎨 Hidden Canvas for Capturing -->
   <canvas #canvas hidden></canvas>
@@ -31,14 +24,7 @@
   <button class="function-btn" (click)="pickImagesMobile()">Upload Image <img src="assets/Upload_Image_White.png" alt="Upload" class="action-icon" /></button>
       <button class="function-btn" (click)="goToFeedBackPage()">Finish Session <img src="assets/check2.png" alt="Finish" class="action-icon" /></button>
     </div>
-      <!-- Session controls: choose existing session or create new from current selection -->
-      <!-- <div style="display:flex;gap:8px;align-items:center;margin:8px 12px;">
-        <select *ngIf="sessions && sessions.length > 0" (change)="onSessionSelect($event)" style="padding:6px;border-radius:6px;border:1px solid #ccc;">
-          <option value="">Select session...</option>
-          <option *ngFor="let s of sessions" [value]="s.id">{{ s.name }} ({{ s.imageKeys?.length || 0 }})</option>
-        </select>
-        <button class="function-btn" (click)="createSessionFromSelection()" style="padding:8px 10px;border-radius:6px;background:#28a745;color:#fff;border:none;">Create Session</button>
-      </div> -->
+
 
     <!-- Bottom Section (Spinner + Shutter + Thumbnails) -->
     <div class="bottom-bottom-row">
@@ -65,16 +51,7 @@
         />
       </div>
 
-   
-
-      <!-- hidden file input used by Upload Image -->
-      <!-- <input #uploadInput type="file" accept="image/*" multiple style="display:none" (change)="onFileSelected($event)" /> -->
-
-      <!-- <div *ngIf="lastPrediction">
-        <p>Type: {{ lastPrediction.type }}</p>
-        <p>Shape: {{ lastPrediction.shape }}</p>
-        <p>Severity: {{ lastPrediction.severity }}</p>
-      </div> -->
+  
     </div>
   </div>
 </div>

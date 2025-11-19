@@ -7,34 +7,7 @@
     </button>
     <button class="top-btn right" (click)="goToFeedBackPage()">↻</button>
   </div>
-<!-- 
-   Gallery + toggle (copied from feedback-page for quick testing) 
-  <div class="top-bar">
-    <div class="toggle-wrapper">
-      <label class="switch">
-        <input type="checkbox" [(ngModel)]="showWithBoxes" (change)="detectCenterImage()" />
-        <span class="slider round"></span>
-      </label>
-      <span class="toggle-label">{{ showWithBoxes ? 'With Boxes' : 'Original' }}</span>
-    </div>
-     helpful small title showing current selection 
-    <div class="top-title">{{ selectedImageTitle }}</div>
-    <div class="gallery-controls">
-      <button class="control-btn" (click)="loadTestAssets()">Load Test Assets</button>
-      <button class="control-btn" (click)="loadStoredImages()">Load Stored Images</button>
-      <button class="control-btn" (click)="toggleDebugPanel()">Debug</button>
-      <button class="control-btn" (click)="triggerFileInput()">Upload Images</button>
-      <button class="control-btn" (click)="pickImagesMobile()">Pick Images (Mobile)</button>
-    </div>
-  </div> -->
 
-  <!-- <div class="session-controls" style="padding:12px 16px;display:flex;gap:8px;align-items:center;">
-    <select *ngIf="sessions && sessions.length > 0" (change)="onSessionSelect($event)" style="padding:6px;border-radius:6px;border:1px solid #ccc;">
-      <option value="">Choose session...</option>
-      <option *ngFor="let s of sessions" [value]="s.id">{{ s.name }} ({{ s.imageKeys?.length || 0 }})</option>
-    </select>
-    <button class="function-btn" (click)="createSessionFromSelection()" style="padding:8px 10px;border-radius:6px;background:#28a745;color:#fff;border:none;">Create Session</button>
-  </div> -->
 
   <div *ngIf="imagePaths.length === 0 && capturedImages.length === 0" class="thumbnail-placeholder"></div>
   <div *ngIf="imagePaths.length > 0" class="thumbnail-scroll2" #thumbScroll (scroll)="onThumbnailScroll($event)">
@@ -43,21 +16,6 @@
   <div *ngIf="imagePaths.length === 0 && capturedImages.length > 0" class="thumbnail-scroll2" #thumbScroll (scroll)="onThumbnailScroll($event)">
     <img *ngFor="let img of capturedImages" [src]="img" class="thumbnail2" [style.border]="selectedThumbSrc===img ? '3px solid #2ecc71' : 'none'" (click)="onStoredThumbClick({ original: img, withBoxes: img, fileName: '' })" />
   </div>
-
-
-  <!-- Debug panel (overlay) -->
-  <!-- <div class="debug-panel" *ngIf="showDebugPanel">
-    <div class="debug-content">
-      <button class="debug-close" (click)="toggleDebugPanel()">✖</button>
-      <h3>Selected Prediction</h3>
-      <p><strong>Type:</strong> {{ selectedPrediction?.type || '-' }}</p>
-      <p><strong>Shape:</strong> {{ selectedPrediction?.shape || '-' }}</p>
-      <p><strong>Severity:</strong> {{ selectedPrediction?.severity || '-' }}</p>
-      <p><strong>Status:</strong> {{ selectedStatusMessage || '-' }}</p>
-      <h4>Raw prediction object</h4>
-      <pre>{{ selectedPrediction | json }}</pre>
-    </div>
-  </div> -->
 
     <!-- Hidden multi-file input used by Upload Images button -->
     <input type="file" #fileInput accept="image/*" multiple style="display:none" (change)="onFileSelected($event)" />
@@ -100,12 +58,6 @@
         <div class="action-label">Finish Session</div>
       </div>
 
-      <!-- <div *ngIf="capturedImages.length === 0" class="thumbnail-placeholder">📸</div>
-
-      <div *ngIf="capturedImages.length > 0" class="thumbnail-scroll">
-        <img *ngFor="let img of capturedImages" [src]="img" class="thumbnail" />
-      </div> -->
-      
     </div>
 
     <!-- Bottom section: empty placeholder to match camera-page's two-section layout (for future controls) -->

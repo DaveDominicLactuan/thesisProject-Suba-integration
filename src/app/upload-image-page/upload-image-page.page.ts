@@ -81,10 +81,7 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
     private crackDetectionService: CrackDetectionService,
     private imageStorage: ImageStorageService
   ) {
-    // this.requestCameraPermission();
-    // // Preload test assets if requested
-    // if (this.includeTestAssets) this.loadTestAssets();
-    // subscribe to current image selection so this page reacts when user selects a session/image elsewhere
+  
     try {
       this.imageStorage.getCurrentImage$().subscribe(img => {
         if (img) {
@@ -128,6 +125,7 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
         try { (this.imageStorage as any).setLastCreatedSession((s as any).id, (s as any).name); } catch {}
         await this.loadSessions();
         await this.refreshDisplayedImages();
+        try { await this.updatePhotoCounts(); } catch (e) { /* ignore */ }
       }
     } catch (e) {
       console.warn('[UploadImagePage] createSessionOnEnter failed', e);
@@ -199,15 +197,19 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
     }
   }
 
-  onSessionSelect(event: Event) {
+  async onSessionSelect(event: Event) {
     try {
       const val = (event.target as HTMLSelectElement).value;
       this.selectedSessionId = val || null;
       const s = this.sessions.find(x => x.id === val);
       if (s) {
         this.selectSessionAndGo(s);
-        try { this.refreshDisplayedImages(); } catch (e) { /* ignore */ }
+        try { await this.refreshDisplayedImages(); } catch (e) { /* ignore */ }
+      } else {
+        try { await this.refreshDisplayedImages(); } catch (e) { /* ignore */ }
       }
+      // recompute counters for selected session (or global when none)
+      try { await this.updatePhotoCounts(); } catch (e) { /* ignore */ }
     } catch (e) {
       console.warn('[UploadImagePage] onSessionSelect failed', e);
     }
@@ -228,35 +230,7 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
 
   /** Initialize live camera feed */
   async initCamera() {
-    // if (Capacitor.getPlatform() === 'android' || Capacitor.getPlatform() === 'ios') {
-    //   const permissions = await Camera.requestPermissions();
-    //   if (permissions.camera !== 'granted') {
-    //     // user denied camera
-    //     return;
-    //   }
-    // }
-
-    // if (this.mediaStream) {
-    //   this.mediaStream.getTracks().forEach(track => track.stop());
-    //   this.mediaStream = null;
-    // }
-
-    // try {
-    //   const constraints: MediaStreamConstraints = { video: { facingMode: 'environment' }, audio: false };
-    //   this.mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
-    //   const videoEl = this.videoRef.nativeElement;
-    //   videoEl.srcObject = this.mediaStream;
-    //   await new Promise<void>(resolve => {
-    //     videoEl.onloadedmetadata = () => {
-    //       videoEl.play().catch(()=>{});
-    //       resolve();
-    //     };
-    //   });
-    //   console.log('✅ Live camera preview started');
-    // } catch (error) {
-    //   console.error('Camera access error:', error);
-    //   alert('Failed to access camera. Please check permissions and device compatibility.');
-    // }
+ 
   }
 
   /** Capture a frame, preprocess, run inference, and save result */
@@ -491,10 +465,7 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
     this.goBack();
   }
 
-  /**
-   * Load a few images from assets for quick testing of the gallery UI.
-   * To disable, set includeTestAssets = false in the class or remove these entries.
-   */
+
   loadTestAssets() {
     try {
       const base = 'assets/icon/';
@@ -585,14 +556,49 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
    */
   async updatePhotoCounts() {
     try {
-      const all: StoredImage[] = await this.imageStorage.getAllImages();
-      this.photosTaken = Array.isArray(all) ? all.length : 0;
-  // Count images that have an explicit successful prediction status
-  this.photosProcessed = Array.isArray(all) ? all.filter(i => (i.statusMessage === 'Prediction succeeded')).length : 0;
-      // store authoritative copy for thumbnails
-      this.storedImages = Array.isArray(all) ? all.slice() : [];
-      // populate imagePaths from stored images (replace current list)
-      this.imagePaths = this.storedImages.map((s: StoredImage) => ({ original: s.original, withBoxes: (s as any).withBoxes || s.original, fileName: s.filename, rawPrediction: s.prediction }));
+      // If a session is active, compute counts from that session's image keys
+      if (this.selectedSessionId) {
+        if (!this.sessions || this.sessions.length === 0) {
+          try { await this.loadSessions(); } catch (e) { /* ignore */ }
+        }
+        const session = this.sessions.find(s => s.id === this.selectedSessionId) || null;
+        if (!session || !Array.isArray(session.imageKeys)) {
+          this.photosTaken = 0;
+          this.photosProcessed = 0;
+          this.storedImages = [];
+          this.imagePaths = [];
+        } else {
+          const keys = session.imageKeys.slice();
+          let processed = 0;
+          const imgs: StoredImage[] = [];
+          let foundCount = 0;
+          for (const k of keys) {
+            let entry: any = undefined;
+            if (typeof (this.imageStorage as any).getEntryForImage === 'function') {
+              const maybe = (this.imageStorage as any).getEntryForImage(k);
+              entry = (maybe && typeof (maybe.then) === 'function') ? await maybe : maybe;
+            } else if (typeof (this.imageStorage as any).getAllEntries === 'function') {
+              const all = await (this.imageStorage as any).getAllEntries();
+              entry = all ? all[k] : undefined;
+            }
+            if (entry) {
+              imgs.push(entry as StoredImage);
+              foundCount++;
+              if (entry.statusMessage === 'Prediction succeeded') processed++;
+            }
+          }
+          this.photosProcessed = processed;
+          this.photosTaken = foundCount; // only count existing entries
+          this.storedImages = imgs;
+          this.imagePaths = imgs.map((s: StoredImage) => ({ original: s.original, withBoxes: (s as any).withBoxes || s.original, fileName: s.filename, rawPrediction: s.prediction }));
+        }
+      } else {
+        const all: StoredImage[] = await this.imageStorage.getAllImages();
+        this.photosTaken = Array.isArray(all) ? all.length : 0;
+        this.photosProcessed = Array.isArray(all) ? all.filter(i => (i.statusMessage === 'Prediction succeeded')).length : 0;
+        this.storedImages = Array.isArray(all) ? all.slice() : [];
+        this.imagePaths = this.storedImages.map((s: StoredImage) => ({ original: s.original, withBoxes: (s as any).withBoxes || s.original, fileName: s.filename, rawPrediction: s.prediction }));
+      }
       console.log('[UploadImagePage] updatePhotoCounts:', { photosTaken: this.photosTaken, photosProcessed: this.photosProcessed });
     } catch (e) {
       console.warn('updatePhotoCounts failed', e);
@@ -807,9 +813,8 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
     // Update UI
     this.imagePreview = dataUrl;
     this.capturedImages.unshift(dataUrl);
-  // detect center thumbnail after UI update
-  setTimeout(() => this.detectCenterThumbnail(), 60);
-    this.photosTaken++;
+    // detect center thumbnail after UI update
+    setTimeout(() => this.detectCenterThumbnail(), 60);
     this.isProcessing = true;
 
     let inferenceCalled = false;

@@ -1,35 +1,3 @@
-// .camera-live {
-//   position: relative;
-//   width: 100vw;
-//   height: 100vh;
-//   background: transparent;
-//   display: flex;
-//   flex-direction: column;
-//   justify-content: space-between;
-//   overflow: hidden;
-// }
-
-// .camera-live {
-//   background: transparent !important;
-//   ion-content, .overlay, .top-bar, .bottom-bar {
-//     background: transparent !important;
-//   }
-// }
-
-// .camera-live {
-//   background: transparent !important;
-// }
-
-// .overlay,
-// .top-bar {
-//   background: transparent !important;
-// }
-
-// .bottom-bar {
-//   background: rgba(255, 255, 255, 0.8); // optional transparency
-//   backdrop-filter: blur(4px); // optional style for translucent look
-// }
-
 .camera-feed {
   position: absolute;
   top: 0;
@@ -341,85 +309,6 @@ position: absolute;
   box-shadow: 0 0 4px rgba(0, 0, 0, 0.3);
 }
 
-// .spinner-container {
-//   position: relative;
-//   width: 50px;
-//   height: 50px;
-//   display: flex;
-//   align-items: center;
-//   justify-content: center;
-//   cursor: pointer;
-// }
-
-// .rotating-ring {
-//   width: 50px;
-//   height: 50px;
-//   border: 6px solid #ddd;
-//   border-top-color: #222;
-//   border-radius: 50%;
-//   animation: spin 1s linear infinite;
-//   position: absolute;
-//   top: 0;
-//   left: 0;
-//   z-index: 0;
-// }
-
-// @keyframes spin {
-//   0% { transform: rotate(0deg); }
-//   100% { transform: rotate(360deg); }
-// }
-
-// .center-value {
-//   position: absolute;
-//   font-size: 14px;
-//   color: black;
-//   font-weight: bold;
-//   background: white;
-//   width: 38px;
-//   height: 38px;
-//   border-radius: 50%;
-//   display: flex;
-//   align-items: center;
-//   justify-content: center;
-//   z-index: 1;
-//   box-shadow: 0 0 2px rgba(0,0,0,0.2);
-// }
-
-// .red-circle {
-//   position: absolute;
-//   top: -10px;
-//   right: -10px;
-//   background: red;
-//   color: white;
-//   font-weight: bold;
-//   font-size: 10px;
-//   width: 15px;
-//   height: 15px;
-//   border-radius: 50%;
-//   display: flex;
-//   align-items: center;
-//   justify-content: center;
-//   z-index: 2;
-
-//   &.green {
-//     background: rgb(9, 188, 18);
-//   }
-
-//   &.red {
-//     background: red;
-//   }
-// }
-
-// .spinner-container-rect {
-//   position: relative;
-//   width: 70px;
-//   height: 40px;
-//   display: flex;
-//   align-items: center;
-//   justify-content: center;
-//   cursor: pointer;
-// }
-
 .spinner-container-rect {
   position: relative;
   width: 70px;
@@ -487,53 +376,6 @@ position: absolute;
   z-index: 0;
 }
 
-// /* Value box in rectangle form */
-// .center-value-rect {
-//   position: absolute;
-//   font-size: 14px;
-//   color: black;
-//   font-weight: bold;
-//   background: white;
-//   width: 60px;
-//   height: 28px;
-//   border-radius: 6px;
-//   display: flex;
-//   align-items: center;
-//   justify-content: center;
-//   z-index: 1;
-//   box-shadow: 0 0 2px rgba(0,0,0,0.2);
-// }
-
-/* Red circle indicator stays the same but moves to rectangle's top-right */
-// .red-circle {
-//   position: absolute;
-//   top: -5px;
-//   right: -5px;
-//   background: red;
-//   color: white;
-//   font-weight: bold;
-//   font-size: 10px;
-//   width: 15px;
-//   height: 15px;
-//   border-radius: 50%;
-//   display: flex;
-//   align-items: center;
-//   justify-content: center;
-//   z-index: 2;
-
-//   &.green {
-//     background: rgb(9, 188, 18);
-//   }
-
-//   &.red {
-//     background: red;
-//   }
-// }
-
-// @keyframes spin {
-//   0% { transform: rotate(0deg); }
-//   100% { transform: rotate(360deg); }
-// }
 
 .red-circle {
   position: absolute;

@@ -40,10 +40,6 @@ const routes: Routes = [
     loadChildren: () => import('./pdf-page/pdf-page.module').then( m => m.PdfPagePageModule)
   },
   {
-    path: 'custom-camera-test',
-    loadChildren: () => import('./custom-camera-test/custom-camera-test.module').then( m => m.CustomCameraTestPageModule)
-  },
-  {
     path: 'pdf-page-test',
     loadChildren: () => import('./pdf-page-test/pdf-page-test.module').then( m => m.PdfPageTestPageModule)
   },
@@ -61,18 +57,11 @@ const routes: Routes = [
     loadChildren: () => import('./upload-image-page/upload-image-page.module').then( m => m.UploadImagePagePageModule)
   },
   {
-    path: 'upload-image-page2',
-    loadChildren: () => import('./upload-image-page2/upload-image-page2.module').then( m => m.UploadImagePage2PageModule)
-  },
-  {
-    path: 'upload-image-page3',
-    loadChildren: () => import('./upload-image-page3/upload-image-page3.module').then( m => m.UploadImagePage3PageModule)
-  },
-  {
     path: 'camera-page2',
     loadChildren: () => import('./camera-page2/camera-page2.module').then( m => m.CameraPage2PageModule)
 
-  },  {
+  },
+  {
     path: 'feedback-page2',
     loadChildren: () => import('./feedback-page2/feedback-page2.module').then( m => m.FeedbackPage2PageModule)
   },
