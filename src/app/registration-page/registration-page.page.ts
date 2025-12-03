@@ -36,6 +36,8 @@ error = '';
 engineeringId: string = '';
 fullName: string = '';
 regForm!: FormGroup; // our single form
+  submitted: boolean = false;
+  registrationError: string | null = null;
 
 // signupForm: FormGroup;
 
@@ -71,6 +73,9 @@ this.regForm = this.fb.group({
 
 async onRegister() {
 
+  this.submitted = true;
+  this.registrationError = null;
+
   const { email, password, firstName, lastName, engineeringID, confirmPassword } = this.regForm.value;
 
   console.log("Debug - Form Values:");
@@ -81,13 +86,26 @@ async onRegister() {
   console.log("Last Name:", lastName);
   console.log("Engineering ID:", engineeringID);
   
-  if (this.regForm.invalid) {
-    if (this.regForm.errors?.['mismatch']) {
-      alert('Passwords do not match');
-    } else {
-      alert('Please fill out all required fields, password must be at least 6 characters long, and email must be valid');
+  // Ensure a role is selected
+  if (!this.selectedRole) {
+    this.registrationError = 'Please select a role (Engineer or User).';
+    return;
+  }
 
+  // mark controls so errors appear
+  if (this.regForm.invalid) {
+    this.regForm.markAllAsTouched();
+    if (this.regForm.errors?.['mismatch']) {
+      this.registrationError = 'Passwords do not match.';
+    } else {
+      this.registrationError = 'Please fix the highlighted fields.';
     }
+    return;
+  }
+
+  // If role is 'parent' ensure engineeringID present
+  if (this.selectedRole === 'parent' && !engineeringID) {
+    this.registrationError = 'Engineering ID is required for Engineer role.';
     return;
   }
 
@@ -99,11 +117,22 @@ async onRegister() {
       lastName ?? '',
       engineeringID ?? ''
     );
+
+    // Notify the user that registration succeeded, then navigate.
+    // Use a simple browser alert/confirm so no additional Ionic imports are required.
+    alert('Account created successfully. Press OK to continue.');
     this.router.navigateByUrl('/landing-page', { replaceUrl: true });
   } catch (err: any) {
-    alert(err.message || 'Registration failed');
+    // show inline error message instead of only alert
+    this.registrationError = err?.message || 'Registration failed';
+    alert(this.registrationError);
   }
 }
+
+  // convenience getter for template
+  get f() {
+    return this.regForm.controls;
+  }
 
 
 

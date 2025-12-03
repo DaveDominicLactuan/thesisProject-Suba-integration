@@ -148,6 +148,25 @@ position: absolute;
   height: 100%;
 }
 
+/* Flash that appears briefly when taking a picture */
+.capture-flash {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: #ffffff; /* white camera flash */
+  opacity: 1;
+  z-index: 60; /* above UI but below preview overlay which is z-index 50 (preview uses 50) */
+  pointer-events: none;
+  animation: flash-fade 220ms ease-out forwards;
+}
+
+@keyframes flash-fade {
+  0% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
 /* Top Bar */
 
 

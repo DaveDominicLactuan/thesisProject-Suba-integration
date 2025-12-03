@@ -230,6 +230,25 @@ width: 500px;
   }
 }
 
+/* Invalid field visual */
+.form-field.invalid {
+  border-color: #e74c3c; /* red */
+  box-shadow: 0 0 0 3px rgba(231,76,60,0.06);
+}
+
+.field-error {
+  color: #e74c3c;
+  font-size: 12px;
+  margin-top: -8px;
+  margin-bottom: 8px;
+  padding-left: 6px;
+}
+
+.signup-btn[disabled] {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 
 .signup-btn {
   width: 100%;

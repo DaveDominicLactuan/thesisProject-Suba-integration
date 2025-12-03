@@ -763,6 +763,8 @@ goToSecondPage() {
       const cancelBtn = document.createElement('button');
       cancelBtn.innerText = 'Cancel';
       cancelBtn.style.padding = '8px 10px';
+      cancelBtn.style.width = '110px';
+      cancelBtn.style.height = '40px';
       cancelBtn.style.border = 'none';
       cancelBtn.style.background = '#aaa';
       cancelBtn.style.color = '#fff';
@@ -772,6 +774,8 @@ goToSecondPage() {
       const saveBtn = document.createElement('button');
       saveBtn.innerText = 'Save';
       saveBtn.style.padding = '8px 10px';
+      saveBtn.style.width = '110px';
+      saveBtn.style.height = '40px';
       saveBtn.style.border = 'none';
       saveBtn.style.background = '#3880ff';
       saveBtn.style.color = '#fff';
@@ -822,7 +826,7 @@ goToSecondPage() {
       btnRow.appendChild(saveBtn);
 
       box.appendChild(title);
-      box.appendChild(label);
+      // box.appendChild(label);
       box.appendChild(input);
       box.appendChild(btnRow);
       overlay.appendChild(box);

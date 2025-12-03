@@ -3,6 +3,9 @@
     <!-- 🎥 Live Camera Feed -->
   <video #video autoplay muted playsinline class="camera-feed"></video>
 
+  <!-- Brief visual flash when taking a picture -->
+  <div *ngIf="showFlash" class="capture-flash"></div>
+
 
   <!-- 🎨 Hidden Canvas for Capturing -->
   <canvas #canvas hidden></canvas>
@@ -37,7 +40,7 @@
       </div>
 
       <!-- 🔘 Capture Button -->
-      <button class="shutter-btn" (click)="takePicture()"></button>
+      <button class="shutter-btn" (click)="takePicture()" [disabled]="isCooldown"></button>
 
       <!-- Thumbnails on the right (render from stored images) -->
       <div *ngIf="storedImages.length === 0" class="thumbnail-placeholder" (click)="showTestOverlay()"></div>

@@ -59,6 +59,11 @@ export class CameraPage2Page implements AfterViewInit {
   lastPrediction: { type: string; shape: string; severity: string } | null = null;
 
   scaledBoxes = [];
+  // Cooldown and flash UI for capture
+  isCooldown: boolean = false;
+  showFlash: boolean = false;
+  flashDurationMs: number = 120; // visual flash length
+  cooldownMs: number = 500; // minimum time between pictures
   // session management
   sessions: any[] = [];
   selectedSessionId: string | null = null;
@@ -709,6 +714,19 @@ export class CameraPage2Page implements AfterViewInit {
   async takePicture() {
     // Ensure UI shows processing state immediately
     this.isProcessing = true;
+    // Prevent spamming the shutter: if currently cooling down, ignore
+    if (this.isCooldown) {
+      console.log('[CameraPage2] takePicture blocked: cooldown active');
+      return;
+    }
+
+    // start cooldown immediately and show a short visual flash
+    this.isCooldown = true;
+    this.showFlash = true;
+    // hide flash shortly after
+    setTimeout(() => { this.showFlash = false; }, this.flashDurationMs);
+    // release cooldown after configured ms
+    setTimeout(() => { this.isCooldown = false; }, this.cooldownMs);
     // photosTaken will be derived from storage after save so don't increment here
     // track whether inference was invoked and whether it succeeded
     let inferenceCalled = false;
