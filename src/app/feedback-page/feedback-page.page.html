@@ -98,11 +98,16 @@
 </div> -->
 
 
+
       <!-- <button class="sign-in-button" (click)="getAllEntries()">Submit</button>
       <button class="sign-in-button" (click)="testApi()">Test API</button> -->
       <!-- <button class="sign-in-button" (click)="gopdfPage()">Proceed to PDF</button> -->
           <!-- Save current StoredImage as a session, then navigate home -->
-          <button class="sign-in-button" (click)="saveCurrentStoredImageAndGoHome()">Save Session</button>
+          <div class="button-group">
+            <button class="sign-in-button" (click)="viewResults()">View Results</button>
+            <button class="sign-in-button" (click)="saveCurrentStoredImageAndGoHome()">Save Session</button>
+          </div>
     </div>
   </ion-content>
 </div>
+

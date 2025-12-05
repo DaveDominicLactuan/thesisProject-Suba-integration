@@ -158,10 +158,11 @@ private async initialize(): Promise<void> {
     try {
       const params: any = {};
       if (session && session.id) params.sessionId = session.id;
-      this.router.navigate(['/camera-page2'], { queryParams: params });
+      // Navigate to feedback page and include sessionId so feedback page can load the session
+      this.router.navigate(['/feedback-page'], { queryParams: params });
     } catch (e) {
-      console.warn('Navigation to camera page failed, falling back', e);
-      this.router.navigate(['/camera-page2']);
+      console.warn('Navigation to feedback page failed, falling back', e);
+      this.router.navigate(['/feedback-page']);
     }
   }
 

@@ -34,8 +34,9 @@
   width: 100%;
   min-height: 40px;
   padding: 12px;
-  background-color: #000c2e;
-  color: white;
+  /* use the same vibrant gradient as other pages (keeps size/positioning) */
+  background: linear-gradient(to right, #ff512f, #f09819);
+  color: #fff;
   border: none;
   border-radius: 12px;
   font-size: 16px;
@@ -238,6 +239,17 @@
   background:
     linear-gradient(#fffdfd, #fffdfd) padding-box,
     linear-gradient(to right, #ff512f, #f09819) border-box;
+}
+
+.button-group {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.button-group .sign-in-button {
+  width: 100%;
 }
 
 
@@ -497,8 +509,9 @@
 .sign-in-button {
   width: 100%;
   padding: 12px;
-  background-color: #000c2e;
-  color: white;
+  /* reuse gradient color while keeping shape/size */
+  background: linear-gradient(to right, #ff512f, #f09819);
+  color: #fff;
   border: none;
   border-radius: 25px;
   font-size: 16px;

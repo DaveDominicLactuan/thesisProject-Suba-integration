@@ -306,8 +306,6 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
         await this.updatePhotoCounts();
         this.savedImage = entry;
         this.lastPrediction = prediction;
-
-        this.photosProcessed++;
         return entry;
       };
 
@@ -332,7 +330,6 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
             };
             await this.imageStorage.addImage(entry);
             await this.updatePhotoCounts();
-            this.photosProcessed++;
           } catch (e) {
             console.warn('[UploadImagePage] Failed to persist fallback entry after timeout', e);
           }
@@ -420,8 +417,143 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
   }
 
   goToHomePage() {
-    this.router.navigate(['/home-page']);
-    console.log('Navigating to Sign Up page');
+    this.handleGoHome();
+  }
+
+  private async handleGoHome() {
+    try {
+      // Check if active session exists and has no images
+      if (this.selectedSessionId) {
+        const imageCount = (this.imageStorage && typeof (this.imageStorage.getSessionImageCount) === 'function')
+          ? this.imageStorage.getSessionImageCount(this.selectedSessionId)
+          : 0;
+
+        if (imageCount === 0) {
+          // Show confirmation popup for empty session
+          const shouldDelete = await this.showSessionEmptyPopup();
+          if (shouldDelete === 'delete') {
+            // Delete the empty session and navigate home
+            if (typeof (this.imageStorage.removeSession) === 'function') {
+              this.imageStorage.removeSession(this.selectedSessionId);
+            }
+            this.router.navigate(['/home-page']);
+          } else if (shouldDelete === 'stay') {
+            // User wants to stay, do nothing
+            console.log('User chose to stay in upload-image page');
+            return;
+          } else if (shouldDelete === null) {
+            // User clicked outside - cancel and stay on page
+            console.log('User cancelled popup - staying on page');
+            return;
+          }
+        } else {
+          // Session has images, navigate normally
+          this.router.navigate(['/home-page']);
+        }
+      } else {
+        // No active session, navigate normally
+        this.router.navigate(['/home-page']);
+      }
+    } catch (e) {
+      console.warn('handleGoHome failed', e);
+      this.router.navigate(['/home-page']);
+    }
+  }
+
+  private showSessionEmptyPopup(): Promise<'delete' | 'stay' | null> {
+    return new Promise((resolve) => {
+      const html = `
+        <div style="
+          position: fixed;
+          top: 0;
+          left: 0;
+          width: 100%;
+          height: 100%;
+          background: rgba(0,0,0,0.6);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          z-index: 9999;
+        ">
+          <div style="
+            background: #fff;
+            border-radius: 12px;
+            padding: 24px;
+            max-width: 90%;
+            width: 320px;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.2);
+          ">
+            <div style="
+              font-size: 18px;
+              font-weight: 600;
+              color: #000;
+              margin-bottom: 12px;
+              text-align: center;
+            ">Empty Session</div>
+            <div style="
+              font-size: 14px;
+              color: #666;
+              margin-bottom: 20px;
+              text-align: center;
+            ">
+              This session has no images. Would you like to delete it and go back to home?
+            </div>
+            <div style="
+              display: flex;
+              gap: 12px;
+              justify-content: center;
+            ">
+              <button style="
+                flex: 1;
+                padding: 10px;
+                border: 1px solid #ddd;
+                border-radius: 8px;
+                background: #f5f5f5;
+                color: #000;
+                font-size: 14px;
+                cursor: pointer;
+              " onclick="window.__popupResult('stay')">
+                Continue Session
+              </button>
+              <button style="
+                flex: 1;
+                padding: 10px;
+                border: none;
+                border-radius: 8px;
+                background: linear-gradient(to right, #ff512f, #f09819);
+                color: #fff;
+                font-size: 14px;
+                cursor: pointer;
+              " onclick="window.__popupResult('delete')">
+                Delete & Go Home
+              </button>
+            </div>
+          </div>
+        </div>
+      `;
+
+      const container = document.createElement('div');
+      container.innerHTML = html;
+      document.body.appendChild(container);
+
+      (window as any).__popupResult = (result: 'delete' | 'stay') => {
+        document.body.removeChild(container);
+        resolve(result);
+      };
+
+      // Auto-cancel if user clicks outside (on the backdrop)
+      setTimeout(() => {
+        const backdrop = container.firstElementChild as HTMLElement;
+        if (backdrop) {
+          backdrop.addEventListener('click', (e) => {
+            if (e.target === backdrop) {
+              document.body.removeChild(container);
+              resolve(null);
+            }
+          });
+        }
+      }, 0);
+    });
   }
 
   onBoxClick(box: any) {
@@ -625,20 +757,33 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
     if (!confirm(confirmMsg)) return;
 
     try {
-      // attempt to remove from persistent storage (if present) via canonical API
-      const svc: any = this.imageStorage as any;
-      let removed = false;
-      try {
-        // Call the canonical delete API on the ImageStorageService
-        removed = await (this.imageStorage as any).deleteImage(src);
-      } catch (e) {
-        console.warn('[UploadImagePage] persistent remove attempt failed', e);
+      // determine a canonical original key to pass to storage (handle withBoxes URLs)
+      let canonical = src;
+      if (idx !== -1 && this.imagePaths[idx] && this.imagePaths[idx].original) {
+        canonical = this.imagePaths[idx].original;
+      } else {
+        const found = this.imagePaths.find((p: any) => p.withBoxes === src || p.original === src);
+        if (found && found.original) canonical = found.original;
       }
 
-      // If persistent removal wasn't possible, remove locally from imagePaths
-      if (!removed) {
-        if (idx !== -1) this.imagePaths.splice(idx, 1);
-        if (capturedIdx !== -1) this.capturedImages.splice(capturedIdx, 1);
+      // attempt to remove from persistent storage (if present) via canonical API
+      let removed = false;
+      try {
+        removed = await (this.imageStorage as any).deleteImage(canonical);
+      } catch (e) {
+        console.warn('[UploadImagePage] persistent remove attempt failed', e);
+        removed = false;
+      }
+
+      // Always remove any matching local references (guard against stale in-memory state)
+      try {
+        this.imagePaths = this.imagePaths.filter((p: any) => !(p.original === canonical || p.withBoxes === canonical || p.original === src || p.withBoxes === src));
+        this.capturedImages = this.capturedImages.filter(c => !(c === canonical || c === src));
+        // ensure change detection picks up the new arrays
+        this.imagePaths = this.imagePaths.concat([]);
+        this.capturedImages = this.capturedImages.concat([]);
+      } catch (e) {
+        console.warn('[UploadImagePage] local cleanup after delete failed', e);
       }
 
       // update counters after deletion and refresh authoritative storedImages/imagePaths
@@ -816,6 +961,8 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
     // detect center thumbnail after UI update
     setTimeout(() => this.detectCenterThumbnail(), 60);
     this.isProcessing = true;
+    // bump taken count immediately so spinner shows while inference runs
+    this.photosTaken += 1;
 
     let inferenceCalled = false;
     let inferenceSucceeded = false;
@@ -879,7 +1026,6 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
       this.imagePaths.unshift({ original: entry.original, withBoxes: (entry as any).withBoxes || entry.original, fileName: entry.filename, rawPrediction: entry.prediction });
       // keep counters in sync with persistent storage
       await this.updatePhotoCounts();
-      this.photosProcessed++;
       return entry;
     };
 
@@ -913,7 +1059,6 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
           }
           this.imagePaths.unshift({ original: entry.original, withBoxes: entry.original, fileName: entry.filename, rawPrediction: entry.prediction });
           await this.updatePhotoCounts();
-          this.photosProcessed++;
         } catch (e) {
           console.warn('[UploadImagePage] Failed to persist fallback entry after timeout', e);
         }
@@ -921,6 +1066,10 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
         console.warn('processDataUrl failed', err);
       }
     } finally {
+      if (inferenceSucceeded) {
+        // mark processed locally so spinner stops even before storage sync
+        this.photosProcessed += 1;
+      }
       this.isProcessing = false;
     }
   }

@@ -43,6 +43,8 @@ export class CameraPagePage implements AfterViewInit {
 
   imagePreview: string | null = null;
   capturedImages: string[] = [];
+  // authoritative list of images stored via ImageStorageService
+  storedImages: StoredImage[] = [];
   usingFrontCamera = false;
   mediaStream: MediaStream | null = null;
   extraText: string | null = null;
@@ -106,7 +108,6 @@ export class CameraPagePage implements AfterViewInit {
     // mimic upload-image-page behaviour: preprocess, run inference, store
     // this.imagePreview = dataUrl;
     this.capturedImages.unshift(dataUrl);
-    this.photosTaken++;
     this.isProcessing = true;
 
     let prediction: any = null;
@@ -134,8 +135,8 @@ export class CameraPagePage implements AfterViewInit {
       prediction: prediction || undefined
     };
     await this.imageStorage.addImage(entry);
-    // update UI
-    this.photosProcessed++;
+    // update UI counters from authoritative storage
+    try { await this.updatePhotoCounts(); } catch (e) { /* ignore */ }
     this.isProcessing = false;
   }
 
@@ -200,7 +201,9 @@ export class CameraPagePage implements AfterViewInit {
   async takePicture() {
     // Ensure UI shows processing state immediately
     this.isProcessing = true;
-    this.photosTaken++;
+     // bump taken so spinner shows while inference runs
+     this.photosTaken += 1;
+    // photosTaken will be synchronized from storage after save; do not increment locally here
     // track whether inference was invoked and whether it succeeded
     let inferenceCalled = false;
     let inferenceSucceeded = false;
@@ -247,7 +250,8 @@ export class CameraPagePage implements AfterViewInit {
       this.savedImage = entry;
       this.lastPrediction = prediction;
 
-      this.photosProcessed++;
+      // update UI counters from authoritative storage
+      try { await this.updatePhotoCounts(); } catch (e) { /* ignore */ }
 
       // Keep console.log before clearing isProcessing so callers/UI see processing until logging completes
       console.log('✅ Prediction stored:', prediction);
@@ -296,6 +300,10 @@ export class CameraPagePage implements AfterViewInit {
       }
       alert('Failed to capture/process image. See console for details.');
     } finally {
+      // Increment processed locally so spinner stops promptly when inference succeeded
+      if (inferenceSucceeded) {
+        this.photosProcessed += 1;
+      }
       // Always clear processing flag so UI is responsive again
       this.isProcessing = false;
     }
@@ -323,6 +331,21 @@ export class CameraPagePage implements AfterViewInit {
     }
 
     return data;
+  }
+
+  /**
+   * Synchronize photosTaken/photosProcessed from the ImageStorageService
+   */
+  async updatePhotoCounts() {
+    try {
+      const all: StoredImage[] = await this.imageStorage.getAllImages();
+      this.photosTaken = Array.isArray(all) ? all.length : 0;
+      this.photosProcessed = Array.isArray(all) ? all.filter(i => (i.statusMessage === 'Prediction succeeded')).length : 0;
+      this.storedImages = Array.isArray(all) ? all.slice() : [];
+      console.log('[CameraPage] updatePhotoCounts:', { photosTaken: this.photosTaken, photosProcessed: this.photosProcessed });
+    } catch (e) {
+      console.warn('[CameraPage] updatePhotoCounts failed', e);
+    }
   }
 
   closePreview() {

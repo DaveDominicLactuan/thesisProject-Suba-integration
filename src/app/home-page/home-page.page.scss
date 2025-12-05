@@ -190,6 +190,52 @@
 }
 
 
+.session-item {
+  padding: 10px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  text-align: left;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  cursor: pointer;
+  
+  /* Gradient border */
+  background:
+    linear-gradient(#fff, #fff) padding-box,
+    linear-gradient(to right, #ff512f, #f09819) border-box;
+  
+  .session-info {
+    flex: 1;
+  }
+  
+  .session-name {
+    font-weight: 600;
+    color: #000;
+    margin-bottom: 4px;
+  }
+  
+  .session-details {
+    font-size: 12px;
+    color: #666;
+  }
+  
+  .delete-btn {
+    background: transparent;
+    border: none;
+    color: #c00;
+    font-weight: 600;
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: 4px;
+    transition: background 0.2s;
+    
+    &:hover {
+      background: rgba(204, 0, 0, 0.1);
+    }
+  }
+}
+
 .bottom-nav {
   position: fixed;
   bottom: 0;

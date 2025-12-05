@@ -656,6 +656,19 @@ goToSecondPage() {
   }
 
   /**
+   * Navigate to results page showing crack analysis charts
+   */
+  viewResults() {
+    // Navigate to results page with current sessionId if available
+    const sessionId = this.routeSessionId || null;
+    if (sessionId) {
+      this.router.navigate(['/results-page'], { queryParams: { sessionId } });
+    } else {
+      this.router.navigate(['/results-page']);
+    }
+  }
+
+  /**
    * Save the currently-selected StoredImage (or the service current image) as a session,
    * update the storage entry, show a confirmation popup and navigate to home.
    */

@@ -89,7 +89,7 @@ export class CameraPage2Page implements AfterViewInit {
       reader.onerror = reject;
       reader.readAsDataURL(file);
     });
-    await this.processDataUrl(dataUrl, file.name);
+    await this.processDataUrl(dataUrl, file.name, false);
   }
 
   /**
@@ -123,10 +123,11 @@ export class CameraPage2Page implements AfterViewInit {
     }
   }
 
-  async processDataUrl(dataUrl: string, filename: string) {
+  async processDataUrl(dataUrl: string, filename: string, bumpCounters: boolean = true) {
     // mimic upload-image-page behaviour: preprocess, run inference, store
     this.capturedImages.unshift(dataUrl);
-    // photosTaken will be synchronized with storage after save; do not increment locally here
+    // bump counters early so spinner shows while processing unless caller already did so
+    if (bumpCounters) this.photosTaken += 1;
     this.isProcessing = true;
 
     // Track whether inference was started so if we timeout we can choose the proper status message
@@ -192,8 +193,8 @@ export class CameraPage2Page implements AfterViewInit {
       } catch (e) {
         console.warn('[CameraPage2] Failed to add image to session or refresh display', e);
       }
-      // update UI counters
-      this.photosProcessed++;
+      // update UI counters from authoritative storage
+      if (prediction) this.photosProcessed += 1;
       await this.updatePhotoCounts();
       return entry;
     };
@@ -224,7 +225,7 @@ export class CameraPage2Page implements AfterViewInit {
           } catch (err) {
             console.warn('[CameraPage2] Failed to add timeout fallback image to session', err);
           }
-          this.photosProcessed++;
+          // update UI counters from authoritative storage
           await this.updatePhotoCounts();
         } catch (e) {
           console.warn('[CameraPage2] Failed to persist fallback entry after timeout', e);
@@ -712,13 +713,15 @@ export class CameraPage2Page implements AfterViewInit {
 
   /** Capture a frame, preprocess, run inference, and save result */
   async takePicture() {
-    // Ensure UI shows processing state immediately
-    this.isProcessing = true;
     // Prevent spamming the shutter: if currently cooling down, ignore
     if (this.isCooldown) {
       console.log('[CameraPage2] takePicture blocked: cooldown active');
       return;
     }
+    // Ensure UI shows processing state immediately
+    this.isProcessing = true;
+    // bump taken so spinner shows while inference runs
+    this.photosTaken += 1;
 
     // start cooldown immediately and show a short visual flash
     this.isCooldown = true;
@@ -815,7 +818,8 @@ export class CameraPage2Page implements AfterViewInit {
         this.savedImage = entry;
         this.lastPrediction = prediction;
 
-        this.photosProcessed++;
+        if (inferenceCalled && inferenceSucceeded && prediction) this.photosProcessed += 1;
+        // update UI counters from authoritative storage
         await this.updatePhotoCounts();
         return entry;
       };
@@ -851,7 +855,7 @@ export class CameraPage2Page implements AfterViewInit {
             } catch (err) {
               console.warn('[CameraPage2] Failed to add fallback taken picture to session', err);
             }
-            this.photosProcessed++;
+            // update UI counters from authoritative storage
             await this.updatePhotoCounts();
           } catch (e) {
             console.warn('[CameraPage2] Failed to store fallback entry after timeout', e);
@@ -958,8 +962,143 @@ export class CameraPage2Page implements AfterViewInit {
   }
 
   goToHomePage() {
-    this.router.navigate(['/home-page']);
-    console.log('Navigating to Sign Up page');
+    this.handleGoHome();
+  }
+
+  private async handleGoHome() {
+    try {
+      // Check if active session exists and has no images
+      if (this.selectedSessionId) {
+        const imageCount = (this.imageStorage && typeof (this.imageStorage.getSessionImageCount) === 'function')
+          ? this.imageStorage.getSessionImageCount(this.selectedSessionId)
+          : 0;
+
+        if (imageCount === 0) {
+          // Show confirmation popup for empty session
+          const shouldDelete = await this.showSessionEmptyPopup();
+          if (shouldDelete === 'delete') {
+            // Delete the empty session and navigate home
+            if (typeof (this.imageStorage.removeSession) === 'function') {
+              this.imageStorage.removeSession(this.selectedSessionId);
+            }
+            this.router.navigate(['/home-page']);
+          } else if (shouldDelete === 'stay') {
+            // User wants to stay, do nothing
+            console.log('User chose to stay in camera-page2');
+            return;
+          } else if (shouldDelete === null) {
+            // User clicked outside - cancel and stay on page
+            console.log('User cancelled popup - staying on page');
+            return;
+          }
+        } else {
+          // Session has images, navigate normally
+          this.router.navigate(['/home-page']);
+        }
+      } else {
+        // No active session, navigate normally
+        this.router.navigate(['/home-page']);
+      }
+    } catch (e) {
+      console.warn('handleGoHome failed', e);
+      this.router.navigate(['/home-page']);
+    }
+  }
+
+  private showSessionEmptyPopup(): Promise<'delete' | 'stay' | null> {
+    return new Promise((resolve) => {
+      const html = `
+        <div style="
+          position: fixed;
+          top: 0;
+          left: 0;
+          width: 100%;
+          height: 100%;
+          background: rgba(0,0,0,0.6);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          z-index: 9999;
+        ">
+          <div style="
+            background: #fff;
+            border-radius: 12px;
+            padding: 24px;
+            max-width: 90%;
+            width: 320px;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.2);
+          ">
+            <div style="
+              font-size: 18px;
+              font-weight: 600;
+              color: #000;
+              margin-bottom: 12px;
+              text-align: center;
+            ">Empty Session</div>
+            <div style="
+              font-size: 14px;
+              color: #666;
+              margin-bottom: 20px;
+              text-align: center;
+            ">
+              This session has no images. Would you like to delete it and go back to home?
+            </div>
+            <div style="
+              display: flex;
+              gap: 12px;
+              justify-content: center;
+            ">
+              <button style="
+                flex: 1;
+                padding: 10px;
+                border: 1px solid #ddd;
+                border-radius: 8px;
+                background: #f5f5f5;
+                color: #000;
+                font-size: 14px;
+                cursor: pointer;
+              " onclick="window.__popupResult('stay')">
+                Continue Session
+              </button>
+              <button style="
+                flex: 1;
+                padding: 10px;
+                border: none;
+                border-radius: 8px;
+                background: linear-gradient(to right, #ff512f, #f09819);
+                color: #fff;
+                font-size: 14px;
+                cursor: pointer;
+              " onclick="window.__popupResult('delete')">
+                Delete & Go Home
+              </button>
+            </div>
+          </div>
+        </div>
+      `;
+
+      const container = document.createElement('div');
+      container.innerHTML = html;
+      document.body.appendChild(container);
+
+      (window as any).__popupResult = (result: 'delete' | 'stay') => {
+        document.body.removeChild(container);
+        resolve(result);
+      };
+
+      // Auto-cancel if user clicks outside (on the backdrop)
+      setTimeout(() => {
+        const backdrop = container.firstElementChild as HTMLElement;
+        if (backdrop) {
+          backdrop.addEventListener('click', (e) => {
+            if (e.target === backdrop) {
+              document.body.removeChild(container);
+              resolve(null);
+            }
+          });
+        }
+      }, 0);
+    });
   }
 
   onBoxClick(box: any) {

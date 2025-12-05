@@ -111,7 +111,17 @@ form, input, optgroup, select {
 }
 
 .bottom-top-row { display:flex; justify-content:space-between; padding:6px 8px; }
-.function-btn { background:#fff; border:1px solid #ddd; padding:8px 12px; border-radius:16px; box-shadow:none; }
+.function-btn {
+  border: 1px solid transparent;
+  padding: 8px 12px;
+  border-radius: 16px;
+  box-shadow: none;
+  background:
+    linear-gradient(#fffdfd, #fffdfd) padding-box,
+    linear-gradient(to right, #ff512f, #f09819) border-box;
+  font-size: 14px;
+  color: black;
+}
 
 .bottom-bottom-row { display:flex; align-items:center; justify-content:space-between; padding:8px 1.0px; position: relative; }
 
@@ -218,10 +228,13 @@ position: absolute;
 }
 
 .function-btn {
-  background: transparent;
-  border: 2px solid #ccc;
-  padding: 6px 12px;
-  border-radius: 12px;
+  border: 1px solid transparent;
+  padding: 8px 12px;
+  border-radius: 16px;
+  box-shadow: none;
+  background:
+    linear-gradient(#fffdfd, #fffdfd) padding-box,
+    linear-gradient(to right, #ff512f, #f09819) border-box;
   font-size: 14px;
   color: black;
 }

@@ -143,6 +143,12 @@ export class ImageStorageService {
 
   getSession(id: string): ImageSession | undefined { return this.sessions.find(s => s.id === id); }
 
+  /** Get the number of images in a session */
+  getSessionImageCount(sessionId: string): number {
+    const s = this.sessions.find(x => x.id === sessionId);
+    return s ? s.imageKeys.length : 0;
+  }
+
   addImageToSession(sessionId: string, imageKey: string): boolean {
     const s = this.sessions.find(x => x.id === sessionId);
     if (!s) return false;
