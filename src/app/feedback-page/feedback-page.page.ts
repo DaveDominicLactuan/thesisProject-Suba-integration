@@ -102,6 +102,9 @@ showWithBoxes: boolean = false;
       extraText: this.selectedStatusMessage ?? ''
     };
 
+    // Auto-center the clicked image (Android Recent Apps style)
+    setTimeout(() => this.scrollSelectedImageIntoView(), 80);
+
     // debug output for immediate inspection
     console.log('[FeedbackPage] onImageClick debug', {
       filename: img.fileName,
@@ -115,6 +118,38 @@ showWithBoxes: boolean = false;
       dropdown3: this.dropdown3,
       formEntry: this.formDataMap[key]
     });
+  }
+
+  /** Smoothly center the selected image in the horizontal scroller */
+  private scrollSelectedImageIntoView(targetSrc?: string) {
+    const container = this.scrollContainer?.nativeElement as HTMLElement | undefined;
+    if (!container) return;
+
+    const images = Array.from(container.querySelectorAll('img.image-item')) as HTMLImageElement[];
+    if (!images || images.length === 0) return;
+
+    const srcToFind = targetSrc || this.selectedImage || '';
+    if (!srcToFind) return;
+
+    const selectedImg = images.find((img: HTMLImageElement) => {
+      const src = img.getAttribute('src') || img.src;
+      return src === srcToFind;
+    }) || null;
+
+    if (!selectedImg) return;
+
+    const containerRect = container.getBoundingClientRect();
+    const imgRect = selectedImg.getBoundingClientRect();
+
+    const containerCenter = containerRect.width / 2;
+    const imgCenter = imgRect.width / 2;
+    const imgOffsetFromStart = imgRect.left - containerRect.left;
+    const scrollNeeded = container.scrollLeft + imgOffsetFromStart + imgCenter - containerCenter;
+
+    container.scrollTo({
+      left: scrollNeeded,
+      behavior: 'smooth'
+    } as ScrollToOptions);
   }
   
 
@@ -299,6 +334,16 @@ showWithBoxes: boolean = false;
     this.detectCenterImage();
   }, 100);
 }
+
+  /**
+   * Centering helper to apply classes for single/double items in the scroller.
+   */
+  getScrollClasses(count: number) {
+    return {
+      'single-thumb': count === 1,
+      'double-thumb': count === 2,
+    };
+  }
 
 detectCenterImage() {
   const container = this.scrollContainer.nativeElement as HTMLElement;

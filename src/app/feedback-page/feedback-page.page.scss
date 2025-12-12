@@ -188,6 +188,7 @@
   display: flex;
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
+  scroll-behavior: smooth;
   scroll-snap-type: x mandatory;
   gap: 19px;
   width: 100%;
@@ -196,37 +197,64 @@
   align-items: center; /* vertically center image items inside the scroll area */
   padding: 10 2px; /* inset so large items don't touch the very edge */
   box-sizing: border-box;
+  scroll-padding-left: 50%;
+  scroll-padding-right: 50%;
 }
 
 
 .image-item {
   flex: 0 0 auto;
-  width: 90%;
-  max-width: calc(100% - 40px); /* never exceed available width minus padding */
-  max-height: 100%; /* keep inside the parent's height */
+  max-width: 95%;
+  max-height: 95%;
+  width: auto;
+  height: auto;
+  min-height: 390px;
+  min-width: 320px;
   object-fit: contain; /* preserve aspect and avoid cropping */
   scroll-snap-align: center;
   border-radius: 10px;
-  transition: transform 0.2s ease, width 0.3s ease, height 0.3s ease;
+  transition: transform 0.2s ease, width 0.3s ease, height 0.3s ease, box-shadow 0.2s ease, filter 0.2s ease;
   margin: 0; /* gap handled by parent .image-scroll */
   box-sizing: border-box;
   margin-left: 10px;
   margin-right: 10px;
+  cursor: pointer;
+  filter: brightness(1);
 
   /* when the outer scroll-wrapper shrinks, reduce the item's size a bit */
   .scroll-wrapper.shrink & {
     width: 60%;
     height: 80%;
   }
+
+  /* Hover state for subtle depth without changing size constraints */
+  &:hover {
+    transform: scale(1.05);
+    filter: brightness(1.05);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.45);
+  }
+}
+
+/* Centering helpers for 1–2 images without changing their size */
+.image-scroll.single-thumb {
+  justify-content: center;
+  padding-left: 50%;
+  padding-right: 50%;
+}
+
+.image-scroll.double-thumb {
+  padding-left: 30%;
+  padding-right: 30%;
 }
 
 .login-form {
   margin-top: 50px;
   position: relative;
-  bottom: 1%;
+  bottom: 8%;
   z-index: 5;
   max-width: 100%;
   width: 800px;
+  height: 410px;
   background-color: #fff;
   border-radius: 15px;
   padding: 30px;
@@ -360,7 +388,8 @@
 
 .image-item.selected {
   border: 3px solid #3880ff;
-  transform: scale(1.02);
+  transform: scale(1.08);
+  box-shadow: 0 6px 20px rgba(56, 128, 255, 0.45);
 }
 
 .selector-arrow {
@@ -537,10 +566,10 @@
 }
 
 .form-group label {
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
   margin-top: 10px;
-  margin-bottom: 5px;
+  margin-bottom: 15px;
   color: #222;
 }
 
@@ -571,6 +600,7 @@
   border-radius: 10px;
   min-height: 35px;
   padding: 5px 10px;
+  margin-bottom: 10px;
   
   /* Gradient border */
   background:

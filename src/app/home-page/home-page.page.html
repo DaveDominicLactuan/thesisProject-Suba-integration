@@ -40,10 +40,13 @@
   </div>
 </div>
 
-<!-- Sessions list -->
-  <div class="sessions-list" *ngIf="sessions && sessions.length > 0" style="margin-top:18px;padding:0 16px;">
-  <h3 style="margin:8px 0 6px 0">Saved Sessions</h3>
-  <div *ngIf="lastSessionDisplayName" style="margin-bottom:8px;font-weight:600;color:#222">Last session: {{ lastSessionDisplayName }}</div>
+<!-- Sessions summary + list -->
+<div class="sessions-summary">
+  <div class="summary-title">Saved Sessions</div>
+  <div class="summary-count">Total Sessions: {{ sessions.length || 0 }}</div>
+</div>
+
+<div class="sessions-list" style="margin-top:12px;padding:0 16px;">
   <div style="display:flex;flex-direction:column;gap:8px;">
     <div *ngFor="let s of sessions" class="session-item" (click)="goToSession(s)">
       <div class="session-info">
@@ -52,6 +55,9 @@
       </div>
       <button class="delete-btn" (click)="deleteSession(s, $event)">Delete</button>
     </div>
+  </div>
+  <div *ngIf="!sessions || sessions.length === 0" style="text-align:center;padding:16px;color:#999;font-size:14px;">
+    No sessions yet. Start a new session to get started.
   </div>
 </div>
 

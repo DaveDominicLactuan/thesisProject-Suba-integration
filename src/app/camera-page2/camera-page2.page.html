@@ -31,12 +31,15 @@
 
     <!-- Bottom Section (Spinner + Shutter + Thumbnails) -->
     <div class="bottom-bottom-row">
-      <div class="spinner-container-rect" (click)="goToFeedBackPage()">
-        <svg *ngIf="photosProcessed < photosTaken" class="rect-spinner" width="70" height="40">
-          <rect x="2" y="2" width="66" height="36" rx="12" ry="12" class="rect-spinner-path" />
-        </svg>
-        <div class="center-value-rect">{{ photosProcessed }}/{{ photosTaken }}</div>
-        <div class="red-circle" [ngClass]="{ 'green': photosProcessed === photosTaken, 'red': photosProcessed < photosTaken }"></div>
+      <div class="func-action" (click)="goToFeedBackPage()">
+        <div class="spinner-container-rect">
+          <svg *ngIf="photosProcessed < photosTaken" class="rect-spinner" width="70" height="40">
+            <rect x="2" y="2" width="66" height="36" rx="12" ry="12" class="rect-spinner-path" />
+          </svg>
+          <div class="center-value-rect">{{ photosProcessed }}/{{ photosTaken }}</div>
+          <div class="red-circle" [ngClass]="{ 'green': photosProcessed === photosTaken, 'red': photosProcessed < photosTaken }"></div>
+        </div>
+        <div class="action-label">Images Processed</div>
       </div>
 
       <!-- 🔘 Capture Button -->

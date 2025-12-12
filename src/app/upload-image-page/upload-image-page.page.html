@@ -10,10 +10,10 @@
 
 
   <div *ngIf="imagePaths.length === 0 && capturedImages.length === 0" class="thumbnail-placeholder"></div>
-  <div *ngIf="imagePaths.length > 0" class="thumbnail-scroll2" #thumbScroll (scroll)="onThumbnailScroll($event)">
+  <div *ngIf="imagePaths.length > 0" class="thumbnail-scroll2" #thumbScroll (scroll)="onThumbnailScroll($event)" [ngClass]="getThumbClasses(imagePaths.length)">
     <img *ngFor="let img of imagePaths" [src]="img.original" class="thumbnail2" [style.border]="selectedThumbSrc===img.original ? '3px solid #2ecc71' : 'none'" (click)="onStoredThumbClick(img)" />
   </div>
-  <div *ngIf="imagePaths.length === 0 && capturedImages.length > 0" class="thumbnail-scroll2" #thumbScroll (scroll)="onThumbnailScroll($event)">
+  <div *ngIf="imagePaths.length === 0 && capturedImages.length > 0" class="thumbnail-scroll2" #thumbScroll (scroll)="onThumbnailScroll($event)" [ngClass]="getThumbClasses(capturedImages.length)">
     <img *ngFor="let img of capturedImages" [src]="img" class="thumbnail2" [style.border]="selectedThumbSrc===img ? '3px solid #2ecc71' : 'none'" (click)="onStoredThumbClick({ original: img, withBoxes: img, fileName: '' })" />
   </div>
 
@@ -33,7 +33,7 @@
           <div class="center-value-rect">{{ photosProcessed }}/{{ photosTaken }}</div>
           <div class="red-circle" [ngClass]="{ 'green': photosProcessed === photosTaken, 'red': photosProcessed < photosTaken }"></div>
         </div>
-        <div class="action-label">Images Processed</div>
+        
       </div>
 
       <!-- Upload and Finish blocks (now siblings of the spinner block for even spacing) -->

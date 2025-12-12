@@ -112,13 +112,10 @@ form, input, optgroup, select {
 
 .bottom-top-row { display:flex; justify-content:space-between; padding:6px 8px; }
 .function-btn {
-  border: 1px solid transparent;
-  padding: 8px 12px;
-  border-radius: 16px;
-  box-shadow: none;
-  background:
-    linear-gradient(#fffdfd, #fffdfd) padding-box,
-    linear-gradient(to right, #ff512f, #f09819) border-box;
+  background: transparent;
+  border: 2px solid #ccc;
+  padding: 6px 12px;
+  border-radius: 12px;
   font-size: 14px;
   color: black;
 }
@@ -228,13 +225,10 @@ position: absolute;
 }
 
 .function-btn {
-  border: 1px solid transparent;
-  padding: 8px 12px;
-  border-radius: 16px;
-  box-shadow: none;
-  background:
-    linear-gradient(#fffdfd, #fffdfd) padding-box,
-    linear-gradient(to right, #ff512f, #f09819) border-box;
+  background: transparent;
+  border: 2px solid #ccc;
+  padding: 6px 12px;
+  border-radius: 12px;
   font-size: 14px;
   color: black;
 }
@@ -258,6 +252,22 @@ position: absolute;
   display: flex;
   justify-content: space-around;
   align-items: center;
+}
+
+/* Match upload-image-page action layout for spinner block */
+.func-action {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+
+.action-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #000;
+  text-align: center;
 }
 
 .shutter-btn {
@@ -365,16 +375,17 @@ position: absolute;
   fill: none;
   stroke: #222;
   stroke-width: 4;
-  stroke-dasharray: 208; // Perimeter of the rectangle (2*(66+36))
-  stroke-dashoffset: 208;
-  animation: rect-spin 1.2s linear infinite;
+  /* Perimeter is ~204px for 66x36 rounded rect; show a moving segment */
+  stroke-dasharray: 80 124; /* visible segment length + gap */
+  stroke-dashoffset: 0;
   stroke-linecap: round;
+  animation: rect-dash 1.2s ease-in-out infinite;
 }
 
-@keyframes rect-spin {
-  to {
-    stroke-dashoffset: 0;
-  }
+@keyframes rect-dash {
+  0%   { stroke-dashoffset: 0; }
+  50%  { stroke-dashoffset: -102; }
+  100% { stroke-dashoffset: -204; }
 }
 
 /* Value box in rectangle form */

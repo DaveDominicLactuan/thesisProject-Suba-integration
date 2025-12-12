@@ -63,6 +63,8 @@ this.regForm = this.fb.group({
     });
 }
 
+//Function to check if the password and confirmPassword are the same
+
  passwordMatchValidator(formGroup: FormGroup) {
     const password = formGroup.get('password')?.value;
     const confirmPassword = formGroup.get('confirmPassword')?.value;
@@ -70,14 +72,17 @@ this.regForm = this.fb.group({
   }
 
 
-
+// Function to handle registration
 async onRegister() {
-
+  // Mark the form as submitted so validation error messages appear on the UI
   this.submitted = true;
+  // Clear any previous registration error messages
   this.registrationError = null;
 
+  // Extract all form field values from the reactive form
   const { email, password, firstName, lastName, engineeringID, confirmPassword } = this.regForm.value;
 
+  // Log all extracted values to the console for debugging purposes
   console.log("Debug - Form Values:");
   console.log("Email:", email);
   console.log("Password:", password);
@@ -86,45 +91,55 @@ async onRegister() {
   console.log("Last Name:", lastName);
   console.log("Engineering ID:", engineeringID);
   
-  // Ensure a role is selected
+  // Check if the user has selected a role (Engineer or User)
+  // If not, set error message and exit early
   if (!this.selectedRole) {
     this.registrationError = 'Please select a role (Engineer or User).';
     return;
   }
 
-  // mark controls so errors appear
+  // Validate the entire form to ensure all required fields meet validation rules
+  // If form is invalid, mark all controls as touched so error messages display
   if (this.regForm.invalid) {
+    // Mark all form controls as touched to trigger error display in the template
     this.regForm.markAllAsTouched();
+    // Check if the specific error is password mismatch
     if (this.regForm.errors?.['mismatch']) {
       this.registrationError = 'Passwords do not match.';
     } else {
+      // Otherwise show a generic error asking user to fix highlighted fields
       this.registrationError = 'Please fix the highlighted fields.';
     }
+    // Exit early without attempting registration
     return;
   }
 
-  // If role is 'parent' ensure engineeringID present
+  // Check if the selected role is 'parent' (Engineer) and if engineeringID is provided
+  // If it's Engineer role but no ID provided, show error and exit
   if (this.selectedRole === 'parent' && !engineeringID) {
     this.registrationError = 'Engineering ID is required for Engineer role.';
     return;
   }
 
+  // If all validation passes, attempt to create the user account
   try {
+    // Call the auth service to register a new user with provided credentials
     await this.auth3.register(
-      email ?? '',
-      password ?? '',
-      firstName ?? '',
-      lastName ?? '',
-      engineeringID ?? ''
+      email ?? '',           // Email address (use empty string if null)
+      password ?? '',        // Password (use empty string if null)
+      firstName ?? '',       // First name (use empty string if null)
+      lastName ?? '',        // Last name (use empty string if null)
+      engineeringID ?? ''    // Engineering ID (use empty string if null)
     );
 
-    // Notify the user that registration succeeded, then navigate.
-    // Use a simple browser alert/confirm so no additional Ionic imports are required.
+    // If registration succeeds, show success alert to the user
     alert('Account created successfully. Press OK to continue.');
+    // Navigate to landing page and replace the current history entry
     this.router.navigateByUrl('/landing-page', { replaceUrl: true });
   } catch (err: any) {
-    // show inline error message instead of only alert
+    // If registration fails, extract the error message from the exception
     this.registrationError = err?.message || 'Registration failed';
+    // Show the error message in an alert dialog
     alert(this.registrationError);
   }
 }
@@ -141,12 +156,13 @@ async onRegister() {
     this.navCtrl.navigateBack('/login');
   }
 
-
+//function to select role
 selectRole(role: string) {
   this.selectedRole = role;
   console.log('Selected Role:', role);
 }
 
+//function to toggle password visibility
 togglePasswordVisibility() {
   this.showPassword = !this.showPassword;
 }
@@ -158,6 +174,7 @@ togglePasswordVisibility() {
     console.log('Navigating to Sign Up page');
   }
 
+  //function to go back to landing page
   onBack() {
   // If a role is selected, deselect it. Otherwise navigate back to landing page.
   if (this.selectedRole) {

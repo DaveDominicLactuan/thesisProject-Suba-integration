@@ -30,7 +30,7 @@
 
     <!-- Scrollable image gallery -->
     <div class="scroll-wrapper">
-      <div class="image-scroll" #scrollContainer (scroll)="onScroll($event)">
+      <div class="image-scroll" #scrollContainer (scroll)="onScroll($event)" [ngClass]="getScrollClasses(imagePaths.length)">
         <img
           *ngFor="let img of imagePaths"
           [src]="showWithBoxes ? img.withBoxes : img.original"

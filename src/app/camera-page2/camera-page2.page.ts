@@ -69,6 +69,9 @@ export class CameraPage2Page implements AfterViewInit {
   selectedSessionId: string | null = null;
   // If a sessionId is passed via route query params, it will be stored here
   routeSessionId?: string | null = null;
+  // Track if this session is brand new and no images have been added during this visit
+  sessionIsPristine: boolean = false;
+  imagesUploadedThisSession: number = 0; // Track number of images uploaded during this page visit
 
   get countdown() {
     return this.photosTaken - this.photosProcessed;
@@ -188,11 +191,14 @@ export class CameraPage2Page implements AfterViewInit {
       try {
         if (this.selectedSessionId && typeof (this.imageStorage.addImageToSession) === 'function') {
           this.imageStorage.addImageToSession(this.selectedSessionId, entry.original);
+          this.sessionIsPristine = false; // Mark session as no longer pristine
         }
         await this.refreshDisplayedImages();
       } catch (e) {
         console.warn('[CameraPage2] Failed to add image to session or refresh display', e);
       }
+      // Increment upload counter for this session
+      this.imagesUploadedThisSession += 1;
       // update UI counters from authoritative storage
       if (prediction) this.photosProcessed += 1;
       await this.updatePhotoCounts();
@@ -225,6 +231,8 @@ export class CameraPage2Page implements AfterViewInit {
           } catch (err) {
             console.warn('[CameraPage2] Failed to add timeout fallback image to session', err);
           }
+          // Increment upload counter for this session
+          this.imagesUploadedThisSession += 1;
           // update UI counters from authoritative storage
           await this.updatePhotoCounts();
         } catch (e) {
@@ -548,6 +556,8 @@ export class CameraPage2Page implements AfterViewInit {
       const s = (this.imageStorage && typeof (this.imageStorage.createSession) === 'function') ? this.imageStorage.createSession(name, []) : null;
       if (s) {
         this.selectedSessionId = (s as any).id;
+        this.sessionIsPristine = true; // Mark as new/pristine (no images added yet)
+        this.imagesUploadedThisSession = 0; // Reset counter when creating new session
         try { (this.imageStorage as any).setLastCreatedSession((s as any).id, (s as any).name); } catch {}
         await this.loadSessions();
         await this.refreshDisplayedImages();
@@ -810,6 +820,7 @@ export class CameraPage2Page implements AfterViewInit {
         try {
           if (this.selectedSessionId && typeof (this.imageStorage.addImageToSession) === 'function') {
             this.imageStorage.addImageToSession(this.selectedSessionId, entry.original);
+            this.sessionIsPristine = false; // Mark as no longer pristine since we added an image
           }
           await this.refreshDisplayedImages();
         } catch (e) {
@@ -817,6 +828,8 @@ export class CameraPage2Page implements AfterViewInit {
         }
         this.savedImage = entry;
         this.lastPrediction = prediction;
+        // Increment upload counter for this session
+        this.imagesUploadedThisSession += 1;
 
         if (inferenceCalled && inferenceSucceeded && prediction) this.photosProcessed += 1;
         // update UI counters from authoritative storage
@@ -850,11 +863,14 @@ export class CameraPage2Page implements AfterViewInit {
             try {
               if (this.selectedSessionId && typeof (this.imageStorage.addImageToSession) === 'function') {
                 this.imageStorage.addImageToSession(this.selectedSessionId, entry.original);
+                this.sessionIsPristine = false; // Mark as no longer pristine since we added an image
               }
               await this.refreshDisplayedImages();
             } catch (err) {
               console.warn('[CameraPage2] Failed to add fallback taken picture to session', err);
             }
+            // Increment upload counter for this session
+            this.imagesUploadedThisSession += 1;
             // update UI counters from authoritative storage
             await this.updatePhotoCounts();
           } catch (e) {
@@ -967,36 +983,26 @@ export class CameraPage2Page implements AfterViewInit {
 
   private async handleGoHome() {
     try {
-      // Check if active session exists and has no images
-      if (this.selectedSessionId) {
-        const imageCount = (this.imageStorage && typeof (this.imageStorage.getSessionImageCount) === 'function')
-          ? this.imageStorage.getSessionImageCount(this.selectedSessionId)
-          : 0;
-
-        if (imageCount === 0) {
-          // Show confirmation popup for empty session
-          const shouldDelete = await this.showSessionEmptyPopup();
-          if (shouldDelete === 'delete') {
-            // Delete the empty session and navigate home
-            if (typeof (this.imageStorage.removeSession) === 'function') {
-              this.imageStorage.removeSession(this.selectedSessionId);
-            }
-            this.router.navigate(['/home-page']);
-          } else if (shouldDelete === 'stay') {
-            // User wants to stay, do nothing
-            console.log('User chose to stay in camera-page2');
-            return;
-          } else if (shouldDelete === null) {
-            // User clicked outside - cancel and stay on page
-            console.log('User cancelled popup - staying on page');
-            return;
+      // Check if active session exists and no images were uploaded during this visit
+      if (this.selectedSessionId && this.imagesUploadedThisSession === 0) {
+        const shouldDelete = await this.showSessionEmptyPopup();
+        if (shouldDelete === 'delete') {
+          // Delete the empty session and navigate home
+          if (typeof (this.imageStorage.removeSession) === 'function') {
+            this.imageStorage.removeSession(this.selectedSessionId);
           }
-        } else {
-          // Session has images, navigate normally
           this.router.navigate(['/home-page']);
+        } else if (shouldDelete === 'stay') {
+          // User wants to stay, do nothing
+          console.log('User chose to stay in camera-page2');
+          return;
+        } else if (shouldDelete === null) {
+          // User clicked outside - cancel and stay on page
+          console.log('User cancelled popup - staying on page');
+          return;
         }
       } else {
-        // No active session, navigate normally
+        // Session has images or no active session, navigate normally
         this.router.navigate(['/home-page']);
       }
     } catch (e) {

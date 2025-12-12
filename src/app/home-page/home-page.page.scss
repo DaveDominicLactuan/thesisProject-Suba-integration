@@ -6,7 +6,7 @@
     justify-content: space-between;
     align-items: center;
     padding: 16px;
-    margin-top: 4%;
+    margin-top: 5%;
 
     h1 {
       font-size: 1.5rem;
@@ -95,9 +95,10 @@
     }
 
     .grammar {
-      background: #f96857;
+      // background: #f96857;
+      background: linear-gradient(to right, #ff512f, #f09819);
       flex: 1;
-      min-height: 160px;
+      min-height: 145px;
       min-width: 100px;
     }
 
@@ -108,7 +109,8 @@
       flex: 1;
 
       .lessons {
-        background: #ffd655;
+        background: linear-gradient(to right, #ff512f, #f09819);
+        border: 1px solid transparent;
         min-height: 75px;
         min-width: 100px;
         // min-height: 158.2px;
@@ -116,7 +118,8 @@
       }
 
       .tests {
-        background: #6bd6cd;
+        // background: #6bd6cd;
+        background: linear-gradient(to right, #ff512f, #f09819);
         // min-height: 100px;
         min-height: 75px;
         min-width: 100px;
@@ -236,12 +239,66 @@
   }
 }
 
+/* Sessions list container with gradient border */
+.sessions-list {
+  border: 2px solid transparent;
+  // border-radius: 12px;
+  border-top-left-radius: 0;
+  border-top-right-radius: 12px;
+  border-bottom-right-radius: 12px;
+  border-bottom-left-radius: 12px;
+  padding: 12px 14px !important;
+  margin: 0px 16px 16px !important;
+  background:
+    linear-gradient(#fff, #fff) padding-box,
+    linear-gradient(to right, #ff512f, #f09819) border-box;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  height: 280px;
+  overflow-y: auto;
+}
+
+/* Sessions summary pill */
+.sessions-summary {
+  border: 2px solid transparent;
+  // border-radius: 12px;
+  border-top-left-radius: 12px;
+  border-top-right-radius: 12px;
+  border-bottom-right-radius: 0px;
+  border-bottom-left-radius: 0px;
+  padding: 16px 1px 70px 14px;
+  margin: 20px 16px 0px;
+  width: calc(70% - 32px);
+  min-height: 50px;
+  height: 72px;
+  box-sizing: border-box;
+  background:
+    linear-gradient(#f7f7f7, #f7f7f7) padding-box,
+    linear-gradient(to right, #ff512f, #f09819) border-box;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
+  color: #2f2f2f;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+
+  .summary-title {
+    font-size: 20px;
+    font-weight: 700;
+    line-height: 1.2;
+  }
+
+  .summary-count {
+    font-size: 15px;
+    font-weight: 600;
+    line-height: 1.2;
+  }
+}
+
 .bottom-nav {
   position: fixed;
   bottom: 0;
   left: 0;
   right: 0;
-  height: 60px;
+  height: 55px;
   width: 100%;
   background-color: #ffffff;
   border-top: 1px solid #ddd;

@@ -69,6 +69,8 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
   // sessions list for session selection UI
   sessions: any[] = [];
   selectedSessionId: string | null = null;
+  sessionIsPristine: boolean = false; // Tracks if current session has had images added during this visit
+  imagesUploadedThisSession: number = 0; // Track number of images uploaded during this page visit
 
   get countdown() {
     return this.photosTaken - this.photosProcessed;
@@ -122,6 +124,7 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
       const s = (this.imageStorage && typeof (this.imageStorage.createSession) === 'function') ? this.imageStorage.createSession(name, []) : null;
       if (s) {
         this.selectedSessionId = (s as any).id;
+        this.sessionIsPristine = true; // Mark session as pristine (nothing added yet)
         try { (this.imageStorage as any).setLastCreatedSession((s as any).id, (s as any).name); } catch {}
         await this.loadSessions();
         await this.refreshDisplayedImages();
@@ -226,11 +229,83 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
     }
     this.selectedThumbSrc = img.withBoxes ?? img.original;
     this.selectedImageTitle = img.fileName ?? '';
+    
+    // Auto-scroll to center the selected item (Android Recent Apps style)
+    setTimeout(() => this.scrollThumbnailIntoView(), 100);
+  }
+
+  /** Scroll the thumbnail carousel to center the selected item */
+  private scrollThumbnailIntoView() {
+    const container = this.thumbScrollRef?.nativeElement as HTMLElement | undefined;
+    if (!container) return;
+
+    const images = container.querySelectorAll('img');
+    if (!images || images.length === 0) return;
+
+    // Find the selected image element
+    let selectedImg: HTMLImageElement | null = null;
+    images.forEach(img => {
+      const src = img.src || img.getAttribute('src');
+      if (src === this.selectedThumbSrc) {
+        selectedImg = img as HTMLImageElement;
+      }
+    });
+
+    if (!selectedImg) return;
+
+    // Calculate scroll position to center the selected item
+    const containerRect = container.getBoundingClientRect();
+    const imgRect = (selectedImg as HTMLImageElement).getBoundingClientRect();
+    
+    // Current scroll position + offset to center
+    const containerCenter = containerRect.width / 2;
+    const imgCenter = imgRect.width / 2;
+    const imgOffsetFromStart = imgRect.left - containerRect.left;
+    const scrollNeeded = container.scrollLeft + imgOffsetFromStart + imgCenter - containerCenter;
+
+    // Smooth scroll animation
+    container.scrollTo({
+      left: scrollNeeded,
+      behavior: 'smooth'
+    } as ScrollToOptions);
   }
 
   /** Initialize live camera feed */
   async initCamera() {
- 
+    try {
+      // Stop existing stream if any
+      if (this.mediaStream) {
+        this.mediaStream.getTracks().forEach(track => track.stop());
+        this.mediaStream = null;
+      }
+
+      // Request camera permissions first
+      await this.requestCameraPermission();
+
+      // Get camera constraints
+      const constraints = {
+        video: {
+          facingMode: this.usingFrontCamera ? 'user' : 'environment',
+          width: { ideal: 1280 },
+          height: { ideal: 720 }
+        },
+        audio: false
+      };
+
+      // Get media stream
+      this.mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
+      
+      // Attach to video element
+      const video = this.videoRef?.nativeElement;
+      if (video) {
+        video.srcObject = this.mediaStream;
+        await video.play();
+        console.log('Camera initialized successfully');
+      }
+    } catch (error) {
+      console.error('Failed to initialize camera:', error);
+      alert('Camera access denied or not available. Please check permissions.');
+    }
   }
 
   /** Capture a frame, preprocess, run inference, and save result */
@@ -297,6 +372,7 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
         try {
           if (this.selectedSessionId && typeof (this.imageStorage.addImageToSession) === 'function') {
             this.imageStorage.addImageToSession(this.selectedSessionId, entry.original);
+            this.sessionIsPristine = false; // Mark session as no longer pristine
           }
           await this.refreshDisplayedImages();
         } catch (e) {
@@ -422,36 +498,26 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
 
   private async handleGoHome() {
     try {
-      // Check if active session exists and has no images
-      if (this.selectedSessionId) {
-        const imageCount = (this.imageStorage && typeof (this.imageStorage.getSessionImageCount) === 'function')
-          ? this.imageStorage.getSessionImageCount(this.selectedSessionId)
-          : 0;
-
-        if (imageCount === 0) {
-          // Show confirmation popup for empty session
-          const shouldDelete = await this.showSessionEmptyPopup();
-          if (shouldDelete === 'delete') {
-            // Delete the empty session and navigate home
-            if (typeof (this.imageStorage.removeSession) === 'function') {
-              this.imageStorage.removeSession(this.selectedSessionId);
-            }
-            this.router.navigate(['/home-page']);
-          } else if (shouldDelete === 'stay') {
-            // User wants to stay, do nothing
-            console.log('User chose to stay in upload-image page');
-            return;
-          } else if (shouldDelete === null) {
-            // User clicked outside - cancel and stay on page
-            console.log('User cancelled popup - staying on page');
-            return;
+      // Check if active session exists and no images were uploaded during this visit
+      if (this.selectedSessionId && this.imagesUploadedThisSession === 0) {
+        const shouldDelete = await this.showSessionEmptyPopup();
+        if (shouldDelete === 'delete') {
+          // Delete the empty session and navigate home
+          if (typeof (this.imageStorage.removeSession) === 'function') {
+            this.imageStorage.removeSession(this.selectedSessionId);
           }
-        } else {
-          // Session has images, navigate normally
           this.router.navigate(['/home-page']);
+        } else if (shouldDelete === 'stay') {
+          // User wants to stay, do nothing
+          console.log('User chose to stay in upload-image page');
+          return;
+        } else if (shouldDelete === null) {
+          // User clicked outside - cancel and stay on page
+          console.log('User cancelled popup - staying on page');
+          return;
         }
       } else {
-        // No active session, navigate normally
+        // Session has images or no active session, navigate normally
         this.router.navigate(['/home-page']);
       }
     } catch (e) {
@@ -681,6 +747,18 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
 
     this.selectedImageTitle = title;
     console.log('[UploadImagePage] Center thumbnail selected:', { title, src });
+  }
+
+  /**
+   * Helper to apply centering classes to the thumbnail scroller based on item count.
+   * - single-thumb: center a lone item
+   * - double-thumb: add symmetric padding so two items sit in center viewport
+   */
+  getThumbClasses(count: number) {
+    return {
+      'single-thumb': count === 1,
+      'double-thumb': count === 2,
+    };
   }
 
   /**
@@ -961,8 +1039,7 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
     // detect center thumbnail after UI update
     setTimeout(() => this.detectCenterThumbnail(), 60);
     this.isProcessing = true;
-    // bump taken count immediately so spinner shows while inference runs
-    this.photosTaken += 1;
+    // Do NOT increment photosTaken here - let updatePhotoCounts handle it from storage
 
     let inferenceCalled = false;
     let inferenceSucceeded = false;
@@ -1018,14 +1095,22 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
       try {
         if (this.selectedSessionId && typeof (this.imageStorage.addImageToSession) === 'function') {
           this.imageStorage.addImageToSession(this.selectedSessionId, entry.original);
+          this.sessionIsPristine = false; // Mark session as no longer pristine
         }
         await this.refreshDisplayedImages();
       } catch (e) {
         console.warn('[UploadImagePage] Failed to add upload to session or refresh display', e);
       }
       this.imagePaths.unshift({ original: entry.original, withBoxes: (entry as any).withBoxes || entry.original, fileName: entry.filename, rawPrediction: entry.prediction });
+      // Increment upload counter for this session
+      this.imagesUploadedThisSession += 1;
       // keep counters in sync with persistent storage
       await this.updatePhotoCounts();
+      // Force UI update and center detection with longer delay to ensure DOM is ready
+      setTimeout(() => {
+        // Trigger change detection
+        this.detectCenterThumbnail();
+      }, 250);
       return entry;
     };
 
@@ -1052,12 +1137,15 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
           try {
             if (this.selectedSessionId && typeof (this.imageStorage.addImageToSession) === 'function') {
               this.imageStorage.addImageToSession(this.selectedSessionId, entry.original);
+              this.sessionIsPristine = false; // Mark session as no longer pristine
             }
             await this.refreshDisplayedImages();
           } catch (e) {
             console.warn('[UploadImagePage] Failed to add fallback upload to session', e);
           }
           this.imagePaths.unshift({ original: entry.original, withBoxes: entry.original, fileName: entry.filename, rawPrediction: entry.prediction });
+          // Increment upload counter for this session
+          this.imagesUploadedThisSession += 1;
           await this.updatePhotoCounts();
         } catch (e) {
           console.warn('[UploadImagePage] Failed to persist fallback entry after timeout', e);
@@ -1066,10 +1154,7 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
         console.warn('processDataUrl failed', err);
       }
     } finally {
-      if (inferenceSucceeded) {
-        // mark processed locally so spinner stops even before storage sync
-        this.photosProcessed += 1;
-      }
+      // Do NOT increment photosProcessed here - let updatePhotoCounts handle it from storage
       this.isProcessing = false;
     }
   }
