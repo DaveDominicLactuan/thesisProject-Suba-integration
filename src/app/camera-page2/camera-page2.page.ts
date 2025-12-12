@@ -73,10 +73,18 @@ export class CameraPage2Page implements AfterViewInit {
   sessionIsPristine: boolean = false;
   imagesUploadedThisSession: number = 0; // Track number of images uploaded during this page visit
 
+  /**
+   * Remaining images to finish processing.
+   * Interacts with UI spinner; derived from ImageStorage via updatePhotoCounts().
+   */
   get countdown() {
     return this.photosTaken - this.photosProcessed;
   }
 
+  /**
+   * Open the hidden file input to select images from device storage.
+   * Used by the Upload Image button; forwards to onFileSelected().
+   */
   triggerFileInput() {
     try {
       this.uploadInputRef.nativeElement.click();
@@ -85,6 +93,10 @@ export class CameraPage2Page implements AfterViewInit {
     }
   }
 
+  /**
+   * Read an image File as Data URL and forward to processDataUrl().
+   * Ensures consistent processing pipeline with capture and mobile picker.
+   */
   async processFile(file: File) {
     const reader = new FileReader();
     const dataUrl: string = await new Promise((resolve, reject) => {
@@ -98,6 +110,10 @@ export class CameraPage2Page implements AfterViewInit {
   /**
    * Mobile image picker — attempts to use Capacitor Photos API and forwards result to processDataUrl
    * Mirrors the behaviour in upload-image-page.pickImagesMobile
+   */
+  /**
+   * Pick a photo from device gallery (Capacitor) and process it.
+   * On success, calls processDataUrl() which runs inference and stores results.
    */
   async pickImagesMobile() {
     try {
@@ -126,6 +142,10 @@ export class CameraPage2Page implements AfterViewInit {
     }
   }
 
+  /**
+   * End-to-end pipeline for a provided dataUrl: preprocess → inference → store.
+   * Updates session state via ImageStorageService and refreshes thumbnails/counters.
+   */
   async processDataUrl(dataUrl: string, filename: string, bumpCounters: boolean = true) {
     // mimic upload-image-page behaviour: preprocess, run inference, store
     this.capturedImages.unshift(dataUrl);
@@ -249,6 +269,10 @@ export class CameraPage2Page implements AfterViewInit {
   /**
    * Synchronize photosTaken/photosProcessed from the ImageStorageService
    */
+  /**
+   * Refresh photosTaken/photosProcessed and storedImages from ImageStorageService.
+   * If a sessionId is active, counts are computed from that session’s imageKeys.
+   */
   async updatePhotoCounts() {
     try {
       const svc: any = this.imageStorage as any;
@@ -306,11 +330,17 @@ export class CameraPage2Page implements AfterViewInit {
     }
   }
 
+  /**
+   * Stub for flash toggle; logs only. Real flash requires native plugin.
+   */
   toggleFlash() {
     // stub — native flash control would require plugin access
     console.log('toggleFlash pressed (stub)');
   }
 
+  /**
+   * Stub for additional menu actions.
+   */
   openMore() {
     // stub for 'more' menu
     console.log('openMore pressed (stub)');
@@ -319,6 +349,10 @@ export class CameraPage2Page implements AfterViewInit {
   /**
    * Show a simple overlay/modal used for quick tests.
    * Mirrors the behaviour implemented on home-page.showTestOverlay()
+   */
+  /**
+   * Append a simple overlay showing thumbnails and quick actions.
+   * Mirrors similar helper on Home page; updates selected thumbnail on click.
    */
   showTestOverlay() {
     try {
@@ -528,6 +562,10 @@ export class CameraPage2Page implements AfterViewInit {
     }
   }
 
+  /**
+   * Lifecycle: once view is ready, initialize camera and storage/session state.
+   * Honors optional route `sessionId` to reuse an existing session.
+   */
   ngAfterViewInit() {
     this.platform.ready().then(() => this.initCamera());
     // initialize page: load images, sessions and create a new session for this visit
@@ -550,6 +588,10 @@ export class CameraPage2Page implements AfterViewInit {
   }
 
   /** Create a new session for this camera visit and set it active */
+  /**
+   * Create a new empty session for this visit and mark it pristine.
+   * Persists via ImageStorageService and refreshes counts and thumbnails.
+   */
   async createSessionOnEnter() {
     try {
       const name = `Session ${new Date().toLocaleString()}`;
@@ -570,6 +612,10 @@ export class CameraPage2Page implements AfterViewInit {
   }
 
   /** Refresh the `storedImages` array to match the active session (or show all if none) */
+  /**
+   * Sync this.storedImages with either the active session or all stored images.
+   * Uses ImageStorageService helpers to resolve image entries by key.
+   */
   async refreshDisplayedImages() {
     try {
       if (this.selectedSessionId) {
@@ -594,6 +640,9 @@ export class CameraPage2Page implements AfterViewInit {
     }
   }
 
+  /**
+   * Load available sessions from ImageStorageService into this.sessions.
+   */
   async loadSessions() {
     try {
       const s = (this.imageStorage && typeof (this.imageStorage.getSessions) === 'function') ? this.imageStorage.getSessions() : [];
@@ -604,6 +653,9 @@ export class CameraPage2Page implements AfterViewInit {
     }
   }
 
+  /**
+   * Create a session from currently selected thumbnail (or all) and persist.
+   */
   async createSessionFromSelection() {
     try {
       const name = prompt('Session name', 'New Session') || `Session ${Date.now()}`;
@@ -623,6 +675,9 @@ export class CameraPage2Page implements AfterViewInit {
     }
   }
 
+  /**
+   * Handle session dropdown selection; update current image and counts.
+   */
   async onSessionSelect(event: Event) {
     try {
       const val = (event.target as HTMLSelectElement).value;
@@ -648,6 +703,9 @@ export class CameraPage2Page implements AfterViewInit {
   }
 
   /** Called when user taps a stored-image thumbnail — select it as current in the service and update UI */
+  /**
+   * Select a stored image in ImageStorageService and reflect it in the UI.
+   */
   onStoredThumbClick(img: StoredImage) {
     try {
       this.imageStorage.selectImageByOriginal(img.original);
@@ -659,6 +717,9 @@ export class CameraPage2Page implements AfterViewInit {
   }
 
   /** Load all StoredImage entries from the ImageStorageService and update local list */
+  /**
+   * Load all stored images from ImageStorageService; keep UI selection in sync.
+   */
   async loadStoredImages(): Promise<void> {
     try {
       // prefer async getter if available
@@ -689,6 +750,10 @@ export class CameraPage2Page implements AfterViewInit {
   }
 
   /** Initialize live camera feed */
+  /**
+   * Start the live camera preview using getUserMedia (or Capacitor on mobile).
+   * Cleans prior streams; wires video element; alerts on permission/device issues.
+   */
   async initCamera() {
     if (Capacitor.getPlatform() === 'android' || Capacitor.getPlatform() === 'ios') {
       const permissions = await Camera.requestPermissions();
@@ -722,6 +787,10 @@ export class CameraPage2Page implements AfterViewInit {
   }
 
   /** Capture a frame, preprocess, run inference, and save result */
+  /**
+   * Capture current frame → preprocess → run inference → store entry.
+   * Debounced via cooldown; updates session, counters, and lastPrediction.
+   */
   async takePicture() {
     // Prevent spamming the shutter: if currently cooling down, ignore
     if (this.isCooldown) {
@@ -934,6 +1003,10 @@ export class CameraPage2Page implements AfterViewInit {
   }
 
   /** Resize + normalize image to [1,3,128,128] Float32Array */
+  /**
+   * Produce Float32 tensor [1,3,128,128] normalized to [-1,1] from a dataUrl.
+   * Used by both photo capture and upload flows prior to inference.
+   */
   async preprocessImage(dataUrl: string): Promise<Float32Array> {
     const img = new Image();
     img.src = dataUrl;
@@ -957,19 +1030,31 @@ export class CameraPage2Page implements AfterViewInit {
     return data;
   }
 
+  /**
+   * Reserved for closing an image preview if one is shown (no-op here).
+   */
   closePreview() {
     // this.imagePreview = null;
   }
 
+  /**
+   * Toggle front/back camera and reinitialize the stream.
+   */
   toggleCamera() {
     this.usingFrontCamera = !this.usingFrontCamera;
     this.initCamera();
   }
 
+  /**
+   * Optional filter hook for thumbnail list (not implemented).
+   */
   filterThumbnails(type: string) {
     //Optional: filtering logic by image origin
   }
 
+  /**
+   * Navigate to Feedback page, passing active sessionId when available.
+   */
   goToFeedBackPage() {
     const params: any = {};
     if (this.selectedSessionId) params.sessionId = this.selectedSessionId;
@@ -977,10 +1062,16 @@ export class CameraPage2Page implements AfterViewInit {
     console.log('Navigating to Feedback page', params);
   }
 
+  /**
+   * Navigate back to Home; if session is empty, offer to delete it first.
+   */
   goToHomePage() {
     this.handleGoHome();
   }
 
+  /**
+   * Implements the Home navigation with an empty-session confirmation flow.
+   */
   private async handleGoHome() {
     try {
       // Check if active session exists and no images were uploaded during this visit
@@ -1011,6 +1102,10 @@ export class CameraPage2Page implements AfterViewInit {
     }
   }
 
+  /**
+   * Show a lightweight inline popup offering to delete an empty session.
+   * Returns 'delete', 'stay', or null (dismiss).
+   */
   private showSessionEmptyPopup(): Promise<'delete' | 'stay' | null> {
     return new Promise((resolve) => {
       const html = `
@@ -1107,10 +1202,17 @@ export class CameraPage2Page implements AfterViewInit {
     });
   }
 
+  /**
+   * Placeholder for future interactions with drawn bounding boxes.
+   */
   onBoxClick(box: any) {
     // Your bounding box logic
   }
 
+  /**
+   * Request camera permissions (Capacitor) on mobile; fall back to web flow.
+   * Attempts to initialize the camera after permission resolution.
+   */
   async requestCameraPermission() {
     // Only request Capacitor Camera permissions on native platforms.
     try {
@@ -1139,6 +1241,9 @@ export class CameraPage2Page implements AfterViewInit {
   }
 
   // allow passing an explicit index (useful when deriving name from storage)
+  /**
+   * Generate a short filename like P{index}{HH}{MM}.jpg for new entries.
+   */
   generateFilename(count?: number): string {
     const now = new Date();
     const hh = String(now.getHours()).padStart(2, '0');
@@ -1147,10 +1252,16 @@ export class CameraPage2Page implements AfterViewInit {
     return `P${idx}${hh}${mm}.jpg`;
   }
 
+  /**
+   * Lifecycle: stop media tracks to release camera on component destroy.
+   */
   ngOnDestroy() {
     this.mediaStream?.getTracks().forEach(track => track.stop());
   }
 
+  /**
+   * Navigate back to Home Page; falls back to history.back on failure.
+   */
   goBack() {
     try {
       this.router.navigateByUrl('/home-page');
@@ -1205,6 +1316,9 @@ export class CameraPage2Page implements AfterViewInit {
     });
   }
 
+  /**
+   * Convert a base64-encoded string to a Blob; utility for uploads/exports.
+   */
   base64ToBlob(base64Data: string, contentType = ''): Blob {
     const byteCharacters = atob(base64Data);
     const byteArrays = [];
@@ -1218,6 +1332,9 @@ export class CameraPage2Page implements AfterViewInit {
     return new Blob(byteArrays, { type: contentType });
   }
 
+  /**
+   * Developer test helper: run inference on a chosen local image file.
+   */
   async testWithLocalImage(file: File) {
     const reader = new FileReader();
     const dataUrl: string = await new Promise((resolve, reject) => {
@@ -1233,6 +1350,10 @@ export class CameraPage2Page implements AfterViewInit {
     this.lastPrediction = prediction;
   }
 
+  /**
+   * Handle multi-file selection from hidden input; processes each via processFile().
+   * Optimistically updates photosTaken for immediate spinner feedback.
+   */
   async onFileSelected(event: Event) {
     const input = event.target as HTMLInputElement;
     if (!input || !input.files || input.files.length === 0) return;
@@ -1271,6 +1392,9 @@ export class CameraPage2Page implements AfterViewInit {
     if (this.photosProcessed >= this.photosTaken) this.isProcessing = false;
   }
 
+  /**
+   * Compute which thumbnail is centered in the overlay scroller and select it.
+   */
   detectCenterThumbnail() {
     const container = document.querySelector('.thumbnail-scroll2') as HTMLElement | null;
     if (!container) return;
@@ -1304,6 +1428,10 @@ export class CameraPage2Page implements AfterViewInit {
     console.log('[CameraPage2] Center thumbnail selected:', { title, src });
   }
 
+  /**
+   * Delete the currently-selected image. If it exists in storage, removes via service;
+   * otherwise removes from in-memory capturedImages. Refreshes lists and counts.
+   */
   async deleteSelectedImage() {
     const src = this.selectedThumbSrc || '';
     if (!src) {

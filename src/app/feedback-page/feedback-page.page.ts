@@ -47,8 +47,16 @@ showWithBoxes: boolean = false;
   // routeSessionId holds session id passed via query param from Camera page
   routeSessionId?: string | null = null;
 
+  /**
+   * Inject router, API, storage service, and CameraPreview (native).
+   * CameraPreview is stopped on init to ensure camera UI is released.
+   */
   constructor(private router: Router, private route: ActivatedRoute, private api: ApiService, private imageStorageService: ImageStorageService, private cameraPreview: CameraPreview) { }
 
+  /**
+   * Lifecycle: stop camera preview (if native), fetch a quick API test,
+   * and prepare to load sessions/images in ngAfterViewInit.
+   */
   ngOnInit() {
     this.api.getHelloTest().subscribe((res: any) => {
   console.log('Response:', res);
@@ -69,6 +77,10 @@ showWithBoxes: boolean = false;
   /**
    * Handle explicit image click: select image, apply its prediction to UI,
    * update formDataMap and log a detailed debug object to console.
+   */
+  /**
+   * Select image in the gallery, populate prediction/status and dropdowns,
+   * update the formDataMap, and auto-center the image in the scroller.
    */
   onImageClick(img: DisplayImage) {
     // select image
@@ -121,6 +133,9 @@ showWithBoxes: boolean = false;
   }
 
   /** Smoothly center the selected image in the horizontal scroller */
+  /**
+   * Smooth-scroll the scroller so the selected image is horizontally centered.
+   */
   private scrollSelectedImageIntoView(targetSrc?: string) {
     const container = this.scrollContainer?.nativeElement as HTMLElement | undefined;
     if (!container) return;
@@ -181,6 +196,10 @@ showWithBoxes: boolean = false;
     
    
 
+  /**
+   * Lifecycle: stop camera preview (if available), then load sessions and
+   * associated images. Kicks off a debug log and center detection.
+   */
   ngAfterViewInit() {
   try {
     this.cameraPreview.stopCamera();
@@ -206,6 +225,10 @@ showWithBoxes: boolean = false;
 
 
   /** Load sessions from the storage service and pick an active session */
+  /**
+   * Load sessions from ImageStorageService using several compatible APIs.
+   * Honors router-provided sessionId and picks a default session if needed.
+   */
   async loadSessions(): Promise<void> {
     const svc: any = this.imageStorageService as any;
     try {
@@ -266,6 +289,10 @@ showWithBoxes: boolean = false;
   }
 
   /** Build this.imagePaths from the currently-selected session */
+  /**
+   * Build imagePaths array for the active session (or all images if none).
+   * Converts storage entries to DisplayImage for UI.
+   */
   async refreshDisplayedImages(): Promise<void> {
     const svc: any = this.imageStorageService as any;
     this.imagePaths = [];
@@ -304,6 +331,10 @@ showWithBoxes: boolean = false;
   }
 
   /** Normalize StoredImage-like object into DisplayImage */
+  /**
+   * Normalize a StoredImage-like object into DisplayImage used by the UI.
+   * Derives detectionMessage/Result from status or prediction fields.
+   */
   buildDisplayImage(img: any): DisplayImage {
     const prediction = img.prediction ?? img.rawPrediction ?? undefined;
     const predType = prediction?.type ?? '';
@@ -328,6 +359,9 @@ showWithBoxes: boolean = false;
 
 
 
+  /**
+   * Debounced scroll handler; re-detect the centered image after scrolling.
+   */
   onScroll(event: any) {
   clearTimeout((event as any)._timeout);
   (event as any)._timeout = setTimeout(() => {
@@ -338,6 +372,9 @@ showWithBoxes: boolean = false;
   /**
    * Centering helper to apply classes for single/double items in the scroller.
    */
+  /**
+   * Helper to style the scroller differently for 1 or 2 items.
+   */
   getScrollClasses(count: number) {
     return {
       'single-thumb': count === 1,
@@ -345,6 +382,10 @@ showWithBoxes: boolean = false;
     };
   }
 
+/**
+ * Determine the image closest to the horizontal center and update UI bindings
+ * (selected image, prediction/status, dropdown option lists, and formDataMap).
+ */
 detectCenterImage() {
   const container = this.scrollContainer.nativeElement as HTMLElement;
   const images = container.querySelectorAll('img');
@@ -499,6 +540,10 @@ detectCenterImage() {
    * This attempts several possible retrieval APIs to stay compatible with
    * different ImageStorageService implementations in the project.
    */
+  /**
+   * Debug: print a table of stored images with prediction/status derived strings.
+   * Attempts several service APIs to stay compatible across implementations.
+   */
   debugLogStoredImages() {
     const svc: any = this.imageStorageService as any;
     let imgs: any[] = [];
@@ -558,6 +603,9 @@ detectCenterImage() {
   }
 
 
+  /**
+   * Flatten the formDataMap into an array and navigate to PDF page prototype.
+   */
   getAllEntries() {
   const allEntries = Object.entries(this.formDataMap).map(([image, data]) => ({
     image,
@@ -571,6 +619,9 @@ detectCenterImage() {
 
   
 
+/**
+ * Persist current dropdown/text selections into formDataMap for selected image.
+ */
 addEntry() {
   if (!this.selectedImage) return;
 
@@ -585,6 +636,9 @@ addEntry() {
   console.log(`Form saved for ${this.selectedImageTitle}`);
 }
 
+/**
+ * Call the demo API and log/assign the message response.
+ */
 testApi() {
 
   this.api.getHelloTest().subscribe((res: any) => {
@@ -596,17 +650,22 @@ testApi() {
 }
 
 
+/**
+ * Navigate to PDF page variant.
+ */
 goToSecondPage() {
     this.router.navigate(['/pdfpage01']);
     console.log('Navigating to Sign Up page');
   }
 
+  /** Navigate to sample PDF page route. */
   gotoPDFPage() {
     this.router.navigate(['/pdf-page']);
     console.log('Navigating to Sign Up page');
   }
 
-   gopdfPage() {
+  /** Navigate to alternate PDF test page. */
+  gopdfPage() {
       this.router.navigate(['/pdf-page-test']);
       console.log('camera page');
     }
@@ -614,6 +673,10 @@ goToSecondPage() {
   /**
    * Delete the currently-selected image from storage and update the UI.
    * Uses the ImageStorageService.removeImageByOriginal method (added to service).
+   */
+  /**
+   * Delete the currently-selected image from ImageStorageService and update UI.
+   * If list becomes empty, clears selection and associated fields.
    */
   async deleteSelectedImage() {
     if (!this.selectedImage) {
@@ -688,6 +751,7 @@ goToSecondPage() {
 
   
   
+  /** Navigate back to Home Page, fallback to history.back on failure. */
   goBack() {
     try {
       this.router.navigateByUrl('/home-page');
@@ -696,6 +760,7 @@ goToSecondPage() {
     }
   }
 
+  /** Template shim for hardware/back-button wiring. */
   onBack() {
     this.goBack();
   }
@@ -703,6 +768,7 @@ goToSecondPage() {
   /**
    * Navigate to results page showing crack analysis charts
    */
+  /** Navigate to results page (charts), preserving sessionId when present. */
   viewResults() {
     // Navigate to results page with current sessionId if available
     const sessionId = this.routeSessionId || null;
@@ -716,6 +782,10 @@ goToSecondPage() {
   /**
    * Save the currently-selected StoredImage (or the service current image) as a session,
    * update the storage entry, show a confirmation popup and navigate to home.
+   */
+  /**
+   * Save current image into a session (create or update), prompt for a name,
+   * and navigate back to Home upon confirmation.
    */
   async saveCurrentStoredImageAndGoHome() {
     try {
@@ -772,6 +842,10 @@ goToSecondPage() {
   }
 
   /** Show an overlay to name and save the session or cancel */
+  /**
+   * Show an inline overlay to name the session and persist via storage service.
+   * Resolves after user clicks Save or Cancel; navigates Home on save.
+   */
   async showSaveSessionPrompt(entry: any): Promise<void> {
     return new Promise((resolve) => {
       // create overlay

@@ -20,17 +20,22 @@ export class HomePagePage implements OnInit {
   sessions: any[] = [];
   lastSessionDisplayName: string | null = null;
 
+  /** Inject auth, router, and image storage services for navigation and data. */
   constructor(private formBuilder: FormBuilder, private router: Router, private authService: AuthService, private navCtrl: NavController, private auth3: Auth3Service, private imageStorage: ImageStorageService) {
 
   }
 
+/**
+ * Lifecycle: kick off async initialization (user profile + sessions) without
+ * marking ngOnInit async (Angular OnInit expects void).
+ */
 ngOnInit(): void {
   // avoid making ngOnInit async (implements OnInit expects void)
   // perform async initialization in a separate method
   this.initialize();
 }
 
-/** Perform async initialization tasks */
+/** Perform async initialization tasks (profile + sessions). */
 private async initialize(): Promise<void> {
   try {
     const profile = await this.auth3.getUserProfile();
@@ -44,11 +49,12 @@ private async initialize(): Promise<void> {
 }
 
   // Called by Ionic when page becomes active — refresh sessions/counts
+  /** Ionic hook: refresh sessions each time page becomes active. */
   ionViewWillEnter() {
     this.loadSessions();
   }
 
-  /** Load sessions from ImageStorageService and compute image counts */
+  /** Load sessions from ImageStorageService and compute image counts. */
   async loadSessions() {
     try {
       const s = (this.imageStorage.getSessions && typeof this.imageStorage.getSessions === 'function') ? this.imageStorage.getSessions() : [];
@@ -115,36 +121,46 @@ private async initialize(): Promise<void> {
     },
   ];
 
+  /** Navigate to legacy camera page route. */
   goToHomePage() {
     this.router.navigate(['/camera-page']);
     console.log('camera page');
   }
   
+  /** Navigate to enhanced camera page with sessions support. */
   goToCameraPage2() {
     this.router.navigate(['/camera-page2']);
     console.log('camera page');
   }
 
+  /** Navigate to custom camera test page. */
   goTestCameraPage() {
     this.router.navigate(['/custom-camera-test']);
     console.log('custom camera');
   }
 
+  /** Navigate to PDF test page. */
   gopdfPage() {
     this.router.navigate(['/pdf-page-test']);
     console.log('pdf page');
   }
 
+  /** Navigate to camera page 2 (alt entry). */
   gopdfPage2() {
     this.router.navigate(['/camera-page2']);
     console.log('pdf 2 page');
   }
 
+  /** Navigate to sessions list page. */
   goSessionPage() {
     this.router.navigate(['/session-page']);
     console.log('pdf 2 page');
   }
 
+  /**
+   * Open the Feedback page pre-selecting a session. Select its first image in
+   * ImageStorageService so detail UIs can initialize accordingly.
+   */
   async goToSession(session: any) {
     // pick the first image in session and select it in the service, then open camera page
     try {
@@ -167,6 +183,7 @@ private async initialize(): Promise<void> {
   }
 
   /** Delete a session and refresh list */
+  /** Delete a session via ImageStorageService and refresh list. */
   async deleteSession(session: any, ev?: Event) {
     try {
       if (ev) ev.stopPropagation();
@@ -183,6 +200,7 @@ private async initialize(): Promise<void> {
   }
 
 
+  /** Navigate to image upload page. */
   goToUploadImage() {
     this.router.navigate(['/upload-image-page']);
     console.log('pdf 3 page');
@@ -192,6 +210,10 @@ private async initialize(): Promise<void> {
 
   /**
    * Clear all stored images after a confirmation prompt.
+   */
+  /**
+   * Confirm and clear all stored images via ImageStorageService.
+   * Shows a success/failure toast via alert.
    */
   async clearImageStorage() {
     const ok = confirm('Clear all stored images? This cannot be undone.');
@@ -215,6 +237,9 @@ private async initialize(): Promise<void> {
   /**
    * Append a simple overlay/modal to the page with a button that sends a notification.
    * The overlay is self-cleaning after the button is pressed or the backdrop is clicked.
+   */
+  /**
+   * Simple in-app overlay to test notifications and storage/session helpers.
    */
   showTestOverlay() {
     // Prevent multiple overlays

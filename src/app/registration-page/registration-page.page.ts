@@ -41,6 +41,7 @@ regForm!: FormGroup; // our single form
 
 // signupForm: FormGroup;
 
+  /** Inject auth, router, firestore; form is built in ngOnInit. */
   constructor(
   private formBuilder: FormBuilder,
   private router: Router, private fb: FormBuilder,
@@ -50,6 +51,9 @@ regForm!: FormGroup; // our single form
  
 }
 
+/**
+ * Lifecycle: build the reactive registration form with validators.
+ */
 ngOnInit() {
 this.regForm = this.fb.group({
       firstName: ['', Validators.required],
@@ -65,6 +69,9 @@ this.regForm = this.fb.group({
 
 //Function to check if the password and confirmPassword are the same
 
+ /**
+  * Cross-field validator to ensure password and confirmPassword match.
+  */
  passwordMatchValidator(formGroup: FormGroup) {
     const password = formGroup.get('password')?.value;
     const confirmPassword = formGroup.get('confirmPassword')?.value;
@@ -73,6 +80,10 @@ this.regForm = this.fb.group({
 
 
 // Function to handle registration
+/**
+ * Handle registration: validate form & role, call Auth3Service.register,
+ * then navigate to landing on success or show error on failure.
+ */
 async onRegister() {
   // Mark the form as submitted so validation error messages appear on the UI
   this.submitted = true;
@@ -145,6 +156,7 @@ async onRegister() {
 }
 
   // convenience getter for template
+  /** Convenience getter for template error checks: `f['email']` etc. */
   get f() {
     return this.regForm.controls;
   }
@@ -152,29 +164,37 @@ async onRegister() {
 
 
 
+  /** Navigate back to login screen. */
   goToLogin() {
     this.navCtrl.navigateBack('/login');
   }
 
 //function to select role
+/** Track selected role; required for Engineer ID validation. */
 selectRole(role: string) {
   this.selectedRole = role;
   console.log('Selected Role:', role);
 }
 
 //function to toggle password visibility
+/** Toggle password input visibility in the form. */
 togglePasswordVisibility() {
   this.showPassword = !this.showPassword;
 }
 
 
 
+  /** Navigate to Home page after registration or for testing. */
   goToHomePage() {
     this.router.navigate(['/home-page']);
     console.log('Navigating to Sign Up page');
   }
 
   //function to go back to landing page
+  /**
+   * Back behavior: if a role was chosen, deselect it; otherwise navigate
+   * to landing (fallback to navCtrl.back()).
+   */
   onBack() {
   // If a role is selected, deselect it. Otherwise navigate back to landing page.
   if (this.selectedRole) {
