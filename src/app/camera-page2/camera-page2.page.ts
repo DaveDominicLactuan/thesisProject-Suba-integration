@@ -72,6 +72,7 @@ export class CameraPage2Page implements AfterViewInit {
   // Track if this session is brand new and no images have been added during this visit
   sessionIsPristine: boolean = false;
   imagesUploadedThisSession: number = 0; // Track number of images uploaded during this page visit
+  private backButtonSub: any; // hardware back handler
 
   /**
    * Remaining images to finish processing.
@@ -568,6 +569,14 @@ export class CameraPage2Page implements AfterViewInit {
    */
   ngAfterViewInit() {
     this.platform.ready().then(() => this.initCamera());
+    // Handle Android hardware back: prompt before discarding empty session
+    try {
+      this.backButtonSub = this.platform.backButton.subscribeWithPriority(10, async () => {
+        await this.handleGoHome();
+      });
+    } catch (e) {
+      console.warn('[CameraPage2] failed to register hardware back handler', e);
+    }
     // initialize page: load images, sessions and create a new session for this visit
     // read optional sessionId passed via navigation (when opening camera from Sessions list)
     try { this.routeSessionId = this.route.snapshot.queryParamMap.get('sessionId'); } catch (e) { this.routeSessionId = null; }
@@ -645,6 +654,9 @@ export class CameraPage2Page implements AfterViewInit {
    */
   async loadSessions() {
     try {
+      if (typeof (this.imageStorage as any).pruneEmptySessions === 'function') {
+        (this.imageStorage as any).pruneEmptySessions();
+      }
       const s = (this.imageStorage && typeof (this.imageStorage.getSessions) === 'function') ? this.imageStorage.getSessions() : [];
       this.sessions = Array.isArray(s) ? s.slice() : [];
     } catch (e) {
@@ -1074,28 +1086,25 @@ export class CameraPage2Page implements AfterViewInit {
    */
   private async handleGoHome() {
     try {
-      // Check if active session exists and no images were uploaded during this visit
-      if (this.selectedSessionId && this.imagesUploadedThisSession === 0) {
-        const shouldDelete = await this.showSessionEmptyPopup();
-        if (shouldDelete === 'delete') {
-          // Delete the empty session and navigate home
-          if (typeof (this.imageStorage.removeSession) === 'function') {
-            this.imageStorage.removeSession(this.selectedSessionId);
+      const activeId = this.selectedSessionId;
+      const count = (activeId && typeof this.imageStorage.getSessionImageCount === 'function') ? this.imageStorage.getSessionImageCount(activeId) : 0;
+      const isEmptySession = !!activeId && count === 0;
+
+      if (isEmptySession) {
+        const choice = await this.showExitOverlay();
+        if (choice === 'discard') {
+          if (typeof this.imageStorage.removeSessionIfEmpty === 'function') {
+            this.imageStorage.removeSessionIfEmpty(activeId);
+          } else if (typeof this.imageStorage.removeSession === 'function') {
+            this.imageStorage.removeSession(activeId);
           }
           this.router.navigate(['/home-page']);
-        } else if (shouldDelete === 'stay') {
-          // User wants to stay, do nothing
-          console.log('User chose to stay in camera-page2');
-          return;
-        } else if (shouldDelete === null) {
-          // User clicked outside - cancel and stay on page
-          console.log('User cancelled popup - staying on page');
           return;
         }
-      } else {
-        // Session has images or no active session, navigate normally
-        this.router.navigate(['/home-page']);
+        if (choice === 'stay' || choice === null) return;
       }
+
+      this.router.navigate(['/home-page']);
     } catch (e) {
       console.warn('handleGoHome failed', e);
       this.router.navigate(['/home-page']);
@@ -1103,102 +1112,88 @@ export class CameraPage2Page implements AfterViewInit {
   }
 
   /**
-   * Show a lightweight inline popup offering to delete an empty session.
-   * Returns 'delete', 'stay', or null (dismiss).
+   * Show a lightweight overlay letting user discard empty session or stay.
+   * Returns 'discard', 'stay', or null (dismiss).
    */
-  private showSessionEmptyPopup(): Promise<'delete' | 'stay' | null> {
-    return new Promise((resolve) => {
-      const html = `
-        <div style="
-          position: fixed;
-          top: 0;
-          left: 0;
-          width: 100%;
-          height: 100%;
-          background: rgba(0,0,0,0.6);
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          z-index: 9999;
-        ">
-          <div style="
-            background: #fff;
-            border-radius: 12px;
-            padding: 24px;
-            max-width: 90%;
-            width: 320px;
-            box-shadow: 0 8px 24px rgba(0,0,0,0.2);
-          ">
-            <div style="
-              font-size: 18px;
-              font-weight: 600;
-              color: #000;
-              margin-bottom: 12px;
-              text-align: center;
-            ">Empty Session</div>
-            <div style="
-              font-size: 14px;
-              color: #666;
-              margin-bottom: 20px;
-              text-align: center;
-            ">
-              This session has no images. Would you like to delete it and go back to home?
-            </div>
-            <div style="
-              display: flex;
-              gap: 12px;
-              justify-content: center;
-            ">
-              <button style="
-                flex: 1;
-                padding: 10px;
-                border: 1px solid #ddd;
-                border-radius: 8px;
-                background: #f5f5f5;
-                color: #000;
-                font-size: 14px;
-                cursor: pointer;
-              " onclick="window.__popupResult('stay')">
-                Continue Session
-              </button>
-              <button style="
-                flex: 1;
-                padding: 10px;
-                border: none;
-                border-radius: 8px;
-                background: linear-gradient(to right, #ff512f, #f09819);
-                color: #fff;
-                font-size: 14px;
-                cursor: pointer;
-              " onclick="window.__popupResult('delete')">
-                Delete & Go Home
-              </button>
-            </div>
-          </div>
-        </div>
-      `;
+  private showExitOverlay(): Promise<'discard' | 'stay' | null> {
+    return new Promise(resolve => {
+      const backdrop = document.createElement('div');
+      backdrop.style.position = 'fixed';
+      backdrop.style.top = '0';
+      backdrop.style.left = '0';
+      backdrop.style.width = '100%';
+      backdrop.style.height = '100%';
+      backdrop.style.background = 'rgba(0,0,0,0.6)';
+      backdrop.style.display = 'flex';
+      backdrop.style.alignItems = 'center';
+      backdrop.style.justifyContent = 'center';
+      backdrop.style.zIndex = '9999';
 
-      const container = document.createElement('div');
-      container.innerHTML = html;
-      document.body.appendChild(container);
+      const modal = document.createElement('div');
+      modal.style.background = '#fff';
+      modal.style.borderRadius = '12px';
+      modal.style.padding = '22px';
+      modal.style.maxWidth = '90%';
+      modal.style.width = '320px';
+      modal.style.boxShadow = '0 8px 24px rgba(0,0,0,0.2)';
 
-      (window as any).__popupResult = (result: 'delete' | 'stay') => {
-        document.body.removeChild(container);
+      const title = document.createElement('div');
+      title.textContent = 'Leave without saving?';
+      title.style.fontSize = '18px';
+      title.style.fontWeight = '600';
+      title.style.marginBottom = '10px';
+      title.style.textAlign = 'center';
+
+      const desc = document.createElement('div');
+      desc.textContent = 'This session has no images. Delete it and go home, or stay to continue.';
+      desc.style.fontSize = '14px';
+      desc.style.color = '#444';
+      desc.style.marginBottom = '16px';
+      desc.style.textAlign = 'center';
+
+      const actions = document.createElement('div');
+      actions.style.display = 'flex';
+      actions.style.gap = '10px';
+
+      const cleanup = (result: 'discard' | 'stay' | null) => {
+        try { document.body.removeChild(backdrop); } catch {}
         resolve(result);
       };
 
-      // Auto-cancel if user clicks outside (on the backdrop)
-      setTimeout(() => {
-        const backdrop = container.firstElementChild as HTMLElement;
-        if (backdrop) {
-          backdrop.addEventListener('click', (e) => {
-            if (e.target === backdrop) {
-              document.body.removeChild(container);
-              resolve(null);
-            }
-          });
-        }
-      }, 0);
+      const stayBtn = document.createElement('button');
+      stayBtn.textContent = 'Stay here';
+      stayBtn.style.flex = '1';
+      stayBtn.style.padding = '10px';
+      stayBtn.style.border = '1px solid #ddd';
+      stayBtn.style.borderRadius = '8px';
+      stayBtn.style.background = '#f5f5f5';
+      stayBtn.style.cursor = 'pointer';
+      stayBtn.onclick = () => { cleanup('stay'); };
+
+      const discardBtn = document.createElement('button');
+      discardBtn.textContent = 'Delete session & Home';
+      discardBtn.style.flex = '1';
+      discardBtn.style.padding = '10px';
+      discardBtn.style.border = 'none';
+      discardBtn.style.borderRadius = '8px';
+      discardBtn.style.background = 'linear-gradient(90deg,#ff512f,#f09819)';
+      discardBtn.style.color = '#fff';
+      discardBtn.style.cursor = 'pointer';
+      discardBtn.onclick = () => { cleanup('discard'); };
+
+      actions.appendChild(stayBtn);
+      actions.appendChild(discardBtn);
+
+      modal.appendChild(title);
+      modal.appendChild(desc);
+      modal.appendChild(actions);
+
+      backdrop.appendChild(modal);
+      document.body.appendChild(backdrop);
+
+      backdrop.addEventListener('click', (e) => {
+        if (e.target === backdrop) cleanup(null);
+      });
     });
   }
 
@@ -1257,22 +1252,27 @@ export class CameraPage2Page implements AfterViewInit {
    */
   ngOnDestroy() {
     this.mediaStream?.getTracks().forEach(track => track.stop());
+    this.pruneEmptySession();
+    try { if (this.backButtonSub && typeof this.backButtonSub.unsubscribe === 'function') this.backButtonSub.unsubscribe(); } catch {}
   }
 
   /**
    * Navigate back to Home Page; falls back to history.back on failure.
    */
-  goBack() {
-    try {
-      this.router.navigateByUrl('/home-page');
-    } catch (e) {
-      window.history.back();
-    }
+  async goBack() {
+    await this.handleGoHome();
   }
 
   // shim so templates can call onBack()
   onBack() {
     this.goBack();
+  }
+
+  /** Drop active session if it contains zero images */
+  private pruneEmptySession() {
+    if (this.selectedSessionId && typeof this.imageStorage.removeSessionIfEmpty === 'function') {
+      this.imageStorage.removeSessionIfEmpty(this.selectedSessionId);
+    }
   }
 
   /**

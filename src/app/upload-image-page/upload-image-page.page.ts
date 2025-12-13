@@ -71,6 +71,7 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
   selectedSessionId: string | null = null;
   sessionIsPristine: boolean = false; // Tracks if current session has had images added during this visit
   imagesUploadedThisSession: number = 0; // Track number of images uploaded during this page visit
+  private backButtonSub: any; // hardware back handler
 
   get countdown() {
     return this.photosTaken - this.photosProcessed;
@@ -98,6 +99,14 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
 
   ngAfterViewInit() {
     this.platform.ready().then(() => {
+      // Handle Android hardware back: prompt before discarding empty session
+      try {
+        this.backButtonSub = this.platform.backButton.subscribeWithPriority(10, async () => {
+          await this.handleExitToHome();
+        });
+      } catch (e) {
+        console.warn('[UploadImagePage] failed to register hardware back handler', e);
+      }
       // initialize page: load images, sessions and create a new session for this visit
       this.loadStoredImages()
         .then(() => this.loadSessions())
@@ -109,6 +118,9 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
   /** Load sessions from ImageStorageService (sync API) */
   async loadSessions() {
     try {
+      if (typeof (this.imageStorage as any).pruneEmptySessions === 'function') {
+        (this.imageStorage as any).pruneEmptySessions();
+      }
       const s = (this.imageStorage && typeof (this.imageStorage.getSessions) === 'function') ? this.imageStorage.getSessions() : [];
       this.sessions = Array.isArray(s) ? s.slice() : [];
     } catch (e) {
@@ -648,9 +660,39 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
 
   ngOnDestroy() {
     this.mediaStream?.getTracks().forEach(track => track.stop());
+    this.pruneEmptySession();
+    try { if (this.backButtonSub && typeof this.backButtonSub.unsubscribe === 'function') this.backButtonSub.unsubscribe(); } catch {}
   }
 
-  goBack() {
+  async goBack() {
+    await this.handleExitToHome();
+  }
+
+  // shim so templates can call onBack()
+  onBack() {
+    this.goBack();
+  }
+
+  /** Navigate home; if active session is empty, offer discard-or-stay overlay */
+  private async handleExitToHome() {
+    const activeId = this.selectedSessionId;
+    const count = (activeId && typeof this.imageStorage.getSessionImageCount === 'function') ? this.imageStorage.getSessionImageCount(activeId) : 0;
+    const isEmptySession = !!activeId && count === 0;
+
+    if (isEmptySession) {
+      const choice = await this.showExitOverlay();
+      if (choice === 'discard') {
+        if (typeof this.imageStorage.removeSessionIfEmpty === 'function') {
+          this.imageStorage.removeSessionIfEmpty(activeId);
+        } else if (typeof this.imageStorage.removeSession === 'function') {
+          this.imageStorage.removeSession(activeId);
+        }
+        this.router.navigate(['/home-page']);
+        return;
+      }
+      if (choice === 'stay' || choice === null) return;
+    }
+
     try {
       this.router.navigateByUrl('/home-page');
     } catch (e) {
@@ -658,9 +700,94 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
     }
   }
 
-  // shim so templates can call onBack()
-  onBack() {
-    this.goBack();
+  /** Simple overlay appended to DOM offering discard-or-stay when session is empty */
+  private showExitOverlay(): Promise<'discard' | 'stay' | null> {
+    return new Promise(resolve => {
+      const backdrop = document.createElement('div');
+      backdrop.style.position = 'fixed';
+      backdrop.style.top = '0';
+      backdrop.style.left = '0';
+      backdrop.style.width = '100%';
+      backdrop.style.height = '100%';
+      backdrop.style.background = 'rgba(0,0,0,0.55)';
+      backdrop.style.display = 'flex';
+      backdrop.style.alignItems = 'center';
+      backdrop.style.justifyContent = 'center';
+      backdrop.style.zIndex = '9999';
+
+      const modal = document.createElement('div');
+      modal.style.background = '#fff';
+      modal.style.borderRadius = '12px';
+      modal.style.padding = '20px';
+      modal.style.maxWidth = '90%';
+      modal.style.width = '320px';
+      modal.style.boxShadow = '0 8px 24px rgba(0,0,0,0.2)';
+
+      const title = document.createElement('div');
+      title.textContent = 'Leave without saving?';
+      title.style.fontSize = '18px';
+      title.style.fontWeight = '600';
+      title.style.marginBottom = '10px';
+      title.style.textAlign = 'center';
+
+      const desc = document.createElement('div');
+      desc.textContent = 'This session has no images. Delete it and return home or stay here to continue.';
+      desc.style.fontSize = '14px';
+      desc.style.color = '#444';
+      desc.style.marginBottom = '16px';
+      desc.style.textAlign = 'center';
+
+      const actions = document.createElement('div');
+      actions.style.display = 'flex';
+      actions.style.gap = '10px';
+
+      const cleanup = (result: 'discard' | 'stay' | null) => {
+        try { document.body.removeChild(backdrop); } catch {}
+        resolve(result);
+      };
+
+      const stayBtn = document.createElement('button');
+      stayBtn.textContent = 'Stay here';
+      stayBtn.style.flex = '1';
+      stayBtn.style.padding = '10px';
+      stayBtn.style.border = '1px solid #ddd';
+      stayBtn.style.borderRadius = '8px';
+      stayBtn.style.background = '#f5f5f5';
+      stayBtn.style.cursor = 'pointer';
+      stayBtn.onclick = () => { cleanup('stay'); };
+
+      const discardBtn = document.createElement('button');
+      discardBtn.textContent = 'Delete session & Home';
+      discardBtn.style.flex = '1';
+      discardBtn.style.padding = '10px';
+      discardBtn.style.border = 'none';
+      discardBtn.style.borderRadius = '8px';
+      discardBtn.style.background = 'linear-gradient(90deg,#ff512f,#f09819)';
+      discardBtn.style.color = '#fff';
+      discardBtn.style.cursor = 'pointer';
+      discardBtn.onclick = () => { cleanup('discard'); };
+
+      actions.appendChild(stayBtn);
+      actions.appendChild(discardBtn);
+
+      modal.appendChild(title);
+      modal.appendChild(desc);
+      modal.appendChild(actions);
+
+      backdrop.appendChild(modal);
+      document.body.appendChild(backdrop);
+
+      backdrop.addEventListener('click', (e) => {
+        if (e.target === backdrop) cleanup(null);
+      });
+    });
+  }
+
+  /** Drop active session when it has no images */
+  private pruneEmptySession() {
+    if (this.selectedSessionId && typeof this.imageStorage.removeSessionIfEmpty === 'function') {
+      this.imageStorage.removeSessionIfEmpty(this.selectedSessionId);
+    }
   }
 
 

@@ -149,6 +149,29 @@ export class ImageStorageService {
     return s ? s.imageKeys.length : 0;
   }
 
+  /** Remove a session only if it has no images; returns true when removed */
+  removeSessionIfEmpty(sessionId: string): boolean {
+    const idx = this.sessions.findIndex(s => s.id === sessionId);
+    if (idx === -1) return false;
+    const session = this.sessions[idx];
+    if (!session.imageKeys || session.imageKeys.length === 0) {
+      this.sessions.splice(idx, 1);
+      this.persistSessions();
+      return true;
+    }
+    return false;
+  }
+
+  /** Remove all empty sessions and return how many were pruned */
+  pruneEmptySessions(): number {
+    const before = this.sessions.length;
+    this.sessions = this.sessions.filter(s => Array.isArray(s.imageKeys) && s.imageKeys.length > 0);
+    if (this.sessions.length !== before) {
+      this.persistSessions();
+    }
+    return before - this.sessions.length;
+  }
+
   addImageToSession(sessionId: string, imageKey: string): boolean {
     const s = this.sessions.find(x => x.id === sessionId);
     if (!s) return false;
