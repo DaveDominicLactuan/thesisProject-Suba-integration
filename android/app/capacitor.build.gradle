@@ -14,6 +14,7 @@ dependencies {
     implementation project(':capacitor-filesystem')
     implementation project(':capacitor-haptics')
     implementation project(':capacitor-keyboard')
+    implementation project(':capacitor-splash-screen')
     implementation project(':capacitor-status-bar')
     implementation "androidx.exifinterface:exifinterface:1.2.0"
     implementation "androidx.webkit:webkit:1.4.0"
