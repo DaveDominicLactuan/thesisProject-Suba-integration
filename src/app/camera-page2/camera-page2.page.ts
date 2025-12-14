@@ -83,18 +83,6 @@ export class CameraPage2Page implements AfterViewInit {
   }
 
   /**
-   * Open the hidden file input to select images from device storage.
-   * Used by the Upload Image button; forwards to onFileSelected().
-   */
-  triggerFileInput() {
-    try {
-      this.uploadInputRef.nativeElement.click();
-    } catch (e) {
-      console.warn('triggerFileInput failed', e);
-    }
-  }
-
-  /**
    * Read an image File as Data URL and forward to processDataUrl().
    * Ensures consistent processing pipeline with capture and mobile picker.
    */
@@ -375,9 +363,10 @@ export class CameraPage2Page implements AfterViewInit {
       overlay.style.justifyContent = 'center';
 
       const box = document.createElement('div');
-      box.style.background = '#fff';
-      box.style.padding = '12px';
-      box.style.borderRadius = '8px';
+      // Outer container keeps shadow + rounded corners; inner panel holds white background
+      box.style.background = 'transparent';
+      box.style.padding = '8px';
+      box.style.borderRadius = '10px';
       box.style.minWidth = '280px';
       box.style.maxWidth = '92vw';
       box.style.boxShadow = '0 6px 18px rgba(0,0,0,0.2)';
@@ -386,6 +375,20 @@ export class CameraPage2Page implements AfterViewInit {
       box.style.alignItems = 'center';
       box.style.gap = '12px';
       box.style.overflow = 'hidden';
+
+      // inner content holds the white background and padding (matches `input-item-content` usage)
+      const boxInner = document.createElement('div');
+      boxInner.className = 'input-item-content';
+      boxInner.style.display = 'flex';
+      boxInner.style.flexDirection = 'column';
+      boxInner.style.alignItems = 'center';
+      boxInner.style.gap = '12px';
+      boxInner.style.background = 'linear-gradient(#fff, #fff) padding-box, linear-gradient(to right, #ff512f, #f09819) border-box';
+      boxInner.style.border = '1px solid transparent';
+      boxInner.style.borderRadius = '8px';
+      boxInner.style.padding = '12px';
+      boxInner.style.width = '100%';
+      boxInner.style.boxSizing = 'border-box';
 
       const title = document.createElement('div');
       title.textContent = this.selectedImageTitle || 'No Image Selected';
@@ -463,15 +466,17 @@ export class CameraPage2Page implements AfterViewInit {
       btnRow.style.justifyContent = 'space-between';
 
       const deleteBtn = document.createElement('button');
-      deleteBtn.className = 'function-btn';
+      // reuse app styles and apply the gradient-border "icon-btn" treatment
+      deleteBtn.className = 'function-btn icon-btn';
       deleteBtn.type = 'button';
-      deleteBtn.style.background = '#ff4d4d';
-      deleteBtn.style.color = '#fff';
       deleteBtn.style.display = 'flex';
       deleteBtn.style.alignItems = 'center';
       deleteBtn.style.justifyContent = 'center';
       deleteBtn.style.height = '40px';
       deleteBtn.style.borderRadius = '10px';
+      deleteBtn.style.border = '1px solid transparent';
+      deleteBtn.style.background = 'linear-gradient(#fff, #fff) padding-box, linear-gradient(to right, #ff512f, #f09819) border-box';
+      deleteBtn.style.color = '#ff4d4d';
 
       // text + inline trash SVG icon
       const deleteText = document.createTextNode('Delete Selected Image');
@@ -490,15 +495,17 @@ export class CameraPage2Page implements AfterViewInit {
       };
 
       const closeBtn = document.createElement('button');
-      closeBtn.className = 'function-btn';
+      // apply same gradient-border style for visual parity
+      closeBtn.className = 'function-btn icon-btn';
       closeBtn.type = 'button';
-      closeBtn.style.background = '#ddd';
-      closeBtn.style.color = '#111';
       closeBtn.style.display = 'flex';
       closeBtn.style.alignItems = 'center';
       closeBtn.style.justifyContent = 'center';
       closeBtn.style.height = '40px';
       closeBtn.style.borderRadius = '10px';
+      closeBtn.style.border = '1px solid transparent';
+      closeBtn.style.background = 'linear-gradient(#fff, #fff) padding-box, linear-gradient(to right, #ff512f, #f09819) border-box';
+      closeBtn.style.color = '#111';
 
       // text + inline check SVG icon for close
       const closeText = document.createTextNode('Close');
@@ -522,9 +529,11 @@ export class CameraPage2Page implements AfterViewInit {
       btnRow.appendChild(deleteBtn);
       btnRow.appendChild(closeBtn);
 
-      box.appendChild(title);
-      box.appendChild(thumbContainer);
-      box.appendChild(btnRow);
+      // place content inside the white inner panel, then add that to the outer box
+      boxInner.appendChild(title);
+      boxInner.appendChild(thumbContainer);
+      boxInner.appendChild(btnRow);
+      box.appendChild(boxInner);
       overlay.appendChild(box);
 
       overlay.addEventListener('click', (ev) => {
@@ -1166,7 +1175,8 @@ export class CameraPage2Page implements AfterViewInit {
       stayBtn.style.padding = '10px';
       stayBtn.style.border = '1px solid #ddd';
       stayBtn.style.borderRadius = '8px';
-      stayBtn.style.background = '#f5f5f5';
+      stayBtn.style.background = 'linear-gradient(90deg,#ff512f,#f09819)';
+      stayBtn.style.color = 'white';
       stayBtn.style.cursor = 'pointer';
       stayBtn.onclick = () => { cleanup('stay'); };
 

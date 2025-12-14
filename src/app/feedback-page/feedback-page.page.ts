@@ -862,7 +862,8 @@ goToSecondPage() {
       overlay.style.zIndex = '9999';
 
       const box = document.createElement('div');
-      box.style.background = '#fff';
+      box.style.border = '1px solid transparent';
+      box.style.background = 'linear-gradient(#fff, #fff) padding-box, linear-gradient(to right, #ff512f, #f09819) border-box';
       box.style.padding = '18px';
       box.style.borderRadius = '8px';
       box.style.minWidth = '300px';
@@ -898,7 +899,7 @@ goToSecondPage() {
       cancelBtn.style.width = '110px';
       cancelBtn.style.height = '40px';
       cancelBtn.style.border = 'none';
-      cancelBtn.style.background = '#aaa';
+      cancelBtn.style.background = 'linear-gradient(90deg,#ff512f,#f09819)';
       cancelBtn.style.color = '#fff';
       cancelBtn.style.borderRadius = '6px';
       cancelBtn.style.cursor = 'pointer';
@@ -909,7 +910,7 @@ goToSecondPage() {
       saveBtn.style.width = '110px';
       saveBtn.style.height = '40px';
       saveBtn.style.border = 'none';
-      saveBtn.style.background = '#3880ff';
+      saveBtn.style.background = 'linear-gradient(90deg,#ff512f,#f09819)';
       saveBtn.style.color = '#fff';
       saveBtn.style.borderRadius = '6px';
       saveBtn.style.cursor = 'pointer';
