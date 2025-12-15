@@ -617,37 +617,7 @@ detectCenterImage() {
   return allEntries;
 }
 
-  
 
-/**
- * Persist current dropdown/text selections into formDataMap for selected image.
- */
-addEntry() {
-  if (!this.selectedImage) return;
-
-  this.formDataMap[this.selectedImage] = {
-    title: this.selectedImageTitle,
-    dropdown1: this.dropdown1,
-    dropdown2: this.dropdown2,
-    dropdown3: this.dropdown3,
-    extraText: this.extraText
-  };
-
-  console.log(`Form saved for ${this.selectedImageTitle}`);
-}
-
-/**
- * Call the demo API and log/assign the message response.
- */
-testApi() {
-
-  this.api.getHelloTest().subscribe((res: any) => {
-      this.message = res.message;
-    });
-
-    console.log(this.message)
-
-}
 
 
 /**

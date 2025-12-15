@@ -320,137 +320,6 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
     }
   }
 
-  /** Capture a frame, preprocess, run inference, and save result */
-  async takePicture() {
-    // Ensure UI shows processing state immediately
-    this.isProcessing = true;
-    // photosTaken will be derived from storage after save so don't increment here
-    // track whether inference was invoked and whether it succeeded
-    let inferenceCalled = false;
-    let inferenceSucceeded = false;
-
-    try {
-      const video = this.videoRef.nativeElement;
-      const canvas = this.canvasRef.nativeElement;
-      const ctx = canvas.getContext('2d')!;
-
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-
-      const dataUrl = canvas.toDataURL('image/png');
-      this.imagePreview = dataUrl;
-  this.capturedImages.unshift(dataUrl);
-  // allow DOM to update and then detect center thumbnail
-  setTimeout(() => this.detectCenterThumbnail(), 60);
-
-      // Wrap preprocess → inference → save into a cancellable-timeout-aware sequence
-      const work = async () => {
-        const imageTensor = await this.preprocessImage(dataUrl);
-        // call the backend/model
-        let prediction = null;
-        try {
-          inferenceCalled = true;
-          prediction = await this.crackDetectionService.runInference(imageTensor);
-          inferenceSucceeded = !!prediction;
-        } catch (e) {
-          console.error('Inference error', e);
-        }
-
-        const now = new Date().toISOString();
-
-        // derive filename based on current stored images count so photosTaken reflects storage
-        let storedCount = 0;
-        try {
-          const all = await this.imageStorage.getAllImages();
-          storedCount = Array.isArray(all) ? all.length : 0;
-        } catch (e) {
-          // fallback to local counter if storage call fails
-          storedCount = this.photosTaken || 0;
-        }
-
-        const filename = this.generateFilename(storedCount + 1);
-
-        const entry: StoredImage = {
-          original: dataUrl,
-          timestamp: now,
-          filename,
-          prediction: prediction || undefined,
-          hasPrediction: !!prediction,
-          statusMessage: prediction ? 'Prediction succeeded' : (inferenceCalled ? 'Prediction failed' : 'No prediction')
-        };
-        await this.imageStorage.addImage(entry);
-        // also add to active session if one exists
-        try {
-          if (this.selectedSessionId && typeof (this.imageStorage.addImageToSession) === 'function') {
-            this.imageStorage.addImageToSession(this.selectedSessionId, entry.original);
-            this.sessionIsPristine = false; // Mark session as no longer pristine
-          }
-          await this.refreshDisplayedImages();
-        } catch (e) {
-          console.warn('[UploadImagePage] Failed to add taken picture to session', e);
-        }
-        // synchronize counters from storage so UI reflects actual stored count
-        await this.updatePhotoCounts();
-        this.savedImage = entry;
-        this.lastPrediction = prediction;
-        return entry;
-      };
-
-      try {
-        // overall timeout: 10s
-        await Promise.race([work(), new Promise((_, rej) => setTimeout(() => rej(new Error('processing-timeout')), 10_000))]);
-      } catch (err: any) {
-        if (err && err.message === 'processing-timeout') {
-          console.warn('[UploadImagePage] takePicture processing timed out');
-          // Persist fallback entry indicating timeout
-          try {
-            let storedCount = 0;
-            try { const all = await this.imageStorage.getAllImages(); storedCount = Array.isArray(all) ? all.length : 0; } catch (e) { storedCount = this.photosTaken || 0; }
-            const filename = this.generateFilename(storedCount + 1);
-            const entry: StoredImage = {
-              original: dataUrl,
-              timestamp: new Date().toISOString(),
-              filename,
-              prediction: undefined,
-              hasPrediction: false,
-              statusMessage: inferenceCalled ? 'Prediction failed' : 'No prediction'
-            };
-            await this.imageStorage.addImage(entry);
-            await this.updatePhotoCounts();
-          } catch (e) {
-            console.warn('[UploadImagePage] Failed to persist fallback entry after timeout', e);
-          }
-        } else {
-          console.error('Failed during takePicture work:', err);
-        }
-      }
-
-  // Keep console.log before clearing isProcessing so callers/UI see processing until logging completes
-  console.log('✅ Prediction stored:', this.lastPrediction);
-      // Print all currently stored images to verify persistence
-      try {
-        const all = await this.imageStorage.getAllImages();
-        console.log('Stored images count:', all.length);
-      } catch (logErr) {
-        console.warn('Could not list stored images', logErr);
-      }
-
-      // Set a user-facing message depending on whether inference ran/succeeded
-      if (inferenceSucceeded) {
-        this.selectedStatusMessage = 'Prediction succeeded';
-      } else if (inferenceCalled) {
-        this.selectedStatusMessage = 'Prediction failed';
-      } else {
-        this.selectedStatusMessage = 'No prediction performed';
-      }
-    } catch (err) {
-      console.error('takePicture error', err);
-    } finally {
-      this.isProcessing = false;
-    }
-  }
-
   /** Resize + normalize image to [1,3,128,128] Float32Array */
   async preprocessImage(dataUrl: string): Promise<Float32Array> {
     const img = new Image();
@@ -477,19 +346,6 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
     }
 
     return data;
-  }
-
-  closePreview() {
-    this.imagePreview = null;
-  }
-
-  toggleCamera() {
-    this.usingFrontCamera = !this.usingFrontCamera;
-    this.initCamera();
-  }
-
-  filterThumbnails(type: string) {
-    //Optional: filtering logic by image origin
   }
 
   goToFeedBackPage() {
@@ -634,10 +490,6 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
     });
   }
 
-  onBoxClick(box: any) {
-    // Your bounding box logic
-  }
-
   async requestCameraPermission() {
     // Only request Capacitor Camera permissions on native platforms.
     try {
@@ -752,7 +604,9 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
       stayBtn.style.padding = '10px';
       stayBtn.style.border = '1px solid #ddd';
       stayBtn.style.borderRadius = '8px';
-      stayBtn.style.background = '#f5f5f5';
+      // stayBtn.style.background = '#f5f5f5';
+      stayBtn.style.background = 'linear-gradient(90deg,#ff512f,#f09819)';
+      stayBtn.style.color = '#fff';
       stayBtn.style.cursor = 'pointer';
       stayBtn.onclick = () => { cleanup('stay'); };
 
@@ -791,19 +645,6 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
   }
 
 
-  loadTestAssets() {
-    try {
-      const base = 'assets/icon/';
-      const items = [
-        { original: base + 'sample1.jpg', withBoxes: base + 'sample1.jpg', fileName: 'sample1.jpg' },
-        { original: base + 'sample2.jpg', withBoxes: base + 'sample2.jpg', fileName: 'sample2.jpg' }
-      ];
-      this.imagePaths = items.concat(this.imagePaths);
-    } catch (e) {
-      console.warn('Could not load test assets', e);
-    }
-  }
-
   /** Pull images from ImageStorageService and map into the gallery format */
   async loadStoredImages() {
     try {
@@ -818,14 +659,6 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
       await this.updatePhotoCounts();
     } catch (e) {
       console.warn('loadStoredImages failed', e);
-    }
-  }
-
-  toggleDebugPanel() {
-    this.showDebugPanel = !this.showDebugPanel;
-    if (this.showDebugPanel) {
-      // populate debug panel with last prediction
-      this.selectedPrediction = this.lastPrediction || null;
     }
   }
 
@@ -1031,12 +864,7 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
       this.selectedImage = this.showWithBoxes ? this.imagePaths[0].withBoxes : this.imagePaths[0].original;
     }
   }
-
-  onScroll(event: any) {
-    // optional: highlight center image later; keep lightweight for now
-    // console.log('gallery scrolled', event);
-  }
-
+  
   /**
    * Draw bounding boxes on the supplied Base64 image and return a new Base64 image.
    * Boxes are expected in mask coordinates; maskW/maskH indicate mask resolution so boxes
@@ -1075,22 +903,6 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
     });
   }
 
-  base64ToBlob(base64Data: string, contentType = ''): Blob {
-    const byteCharacters = atob(base64Data);
-    const byteArrays = [];
-
-    for (let offset = 0; offset < byteCharacters.length; offset += 512) {
-      const slice = byteCharacters.slice(offset, offset + 512);
-      const byteNumbers = new Array(slice.length);
-      for (let i = 0; i < slice.length; i++) {
-        byteNumbers[i] = slice.charCodeAt(i);
-      }
-      const byteArray = new Uint8Array(byteNumbers);
-      byteArrays.push(byteArray);
-    }
-
-    return new Blob(byteArrays, { type: contentType });
-  }
 
   async testWithLocalImage(file: File) {
     const reader = new FileReader();
@@ -1122,13 +934,6 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
     })();
   }
 
-  triggerFileInput() {
-    try {
-      this.fileInputRef.nativeElement.click();
-    } catch (e) {
-      console.warn('triggerFileInput failed', e);
-    }
-  }
 
   /** Mobile image picker — attempts Capacitor Photos API, falls back to camera pick single file */
   async pickImagesMobile() {
@@ -1286,12 +1091,7 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
     }
   }
 
-  onFileSelected2(event: Event) {
-      const input = event.target as HTMLInputElement;
-      if (input.files && input.files[0]) {
-        this.testWithLocalImage(input.files[0]);
-      }
-    }
+
 
 }
 

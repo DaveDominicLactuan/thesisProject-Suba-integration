@@ -319,21 +319,6 @@ export class CameraPage2Page implements AfterViewInit {
     }
   }
 
-  /**
-   * Stub for flash toggle; logs only. Real flash requires native plugin.
-   */
-  toggleFlash() {
-    // stub — native flash control would require plugin access
-    console.log('toggleFlash pressed (stub)');
-  }
-
-  /**
-   * Stub for additional menu actions.
-   */
-  openMore() {
-    // stub for 'more' menu
-    console.log('openMore pressed (stub)');
-  }
 
   /**
    * Show a simple overlay/modal used for quick tests.
@@ -674,69 +659,6 @@ export class CameraPage2Page implements AfterViewInit {
     }
   }
 
-  /**
-   * Create a session from currently selected thumbnail (or all) and persist.
-   */
-  async createSessionFromSelection() {
-    try {
-      const name = prompt('Session name', 'New Session') || `Session ${Date.now()}`;
-      // prefer currently selected thumb, else include all stored images
-      let keys: string[] = [];
-      if (this.selectedThumbSrc) {
-        const found = this.storedImages.find(s => (s as any).withBoxes === this.selectedThumbSrc || s.original === this.selectedThumbSrc);
-        if (found) keys = [found.original];
-      }
-      if (keys.length === 0) keys = this.storedImages.map(i => i.original).filter(Boolean);
-      const s = (this.imageStorage && typeof (this.imageStorage.createSession) === 'function') ? this.imageStorage.createSession(name, keys) : null;
-      await this.loadSessions();
-      alert(s ? `Session created: ${(s as any).id}` : 'Session created (fallback)');
-    } catch (e) {
-      console.warn('[CameraPage] createSessionFromSelection failed', e);
-      alert('Failed to create session. See console.');
-    }
-  }
-
-  /**
-   * Handle session dropdown selection; update current image and counts.
-   */
-  async onSessionSelect(event: Event) {
-    try {
-      const val = (event.target as HTMLSelectElement).value;
-      this.selectedSessionId = val || null;
-      const s = this.sessions.find(x => x.id === val);
-      if (s) {
-        // select first image and update service
-        if (Array.isArray(s.imageKeys) && s.imageKeys.length > 0 && typeof (this.imageStorage.selectImageByOriginal) === 'function') {
-          this.imageStorage.selectImageByOriginal(s.imageKeys[0]);
-        }
-        // refresh displayed thumbnails to match session
-        try { await this.refreshDisplayedImages(); } catch (e) { /* ignore */ }
-      } else {
-        // still refresh display when no session found (fallback to all images)
-        try { await this.refreshDisplayedImages(); } catch (e) { /* ignore */ }
-      }
-
-      // recompute counts for the newly selected session so UI shows correct totals
-      try { await this.updatePhotoCounts(); } catch (e) { /* ignore */ }
-    } catch (e) {
-      console.warn('[CameraPage] onSessionSelect failed', e);
-    }
-  }
-
-  /** Called when user taps a stored-image thumbnail — select it as current in the service and update UI */
-  /**
-   * Select a stored image in ImageStorageService and reflect it in the UI.
-   */
-  onStoredThumbClick(img: StoredImage) {
-    try {
-      this.imageStorage.selectImageByOriginal(img.original);
-    } catch (e) {
-      // ignore
-    }
-    this.selectedThumbSrc = img.withBoxes || img.original;
-    this.selectedImageTitle = img.filename ?? '';
-  }
-
   /** Load all StoredImage entries from the ImageStorageService and update local list */
   /**
    * Load all stored images from ImageStorageService; keep UI selection in sync.
@@ -1052,25 +974,11 @@ export class CameraPage2Page implements AfterViewInit {
   }
 
   /**
-   * Reserved for closing an image preview if one is shown (no-op here).
-   */
-  closePreview() {
-    // this.imagePreview = null;
-  }
-
-  /**
    * Toggle front/back camera and reinitialize the stream.
    */
   toggleCamera() {
     this.usingFrontCamera = !this.usingFrontCamera;
     this.initCamera();
-  }
-
-  /**
-   * Optional filter hook for thumbnail list (not implemented).
-   */
-  filterThumbnails(type: string) {
-    //Optional: filtering logic by image origin
   }
 
   /**
@@ -1088,6 +996,16 @@ export class CameraPage2Page implements AfterViewInit {
    */
   goToHomePage() {
     this.handleGoHome();
+  }
+
+  onStoredThumbClick(img: StoredImage) {
+    try {
+      this.imageStorage.selectImageByOriginal(img.original);
+    } catch (e) {
+      // ignore
+    }
+    this.selectedThumbSrc = img.withBoxes || img.original;
+    this.selectedImageTitle = img.filename ?? '';
   }
 
   /**
@@ -1205,13 +1123,6 @@ export class CameraPage2Page implements AfterViewInit {
         if (e.target === backdrop) cleanup(null);
       });
     });
-  }
-
-  /**
-   * Placeholder for future interactions with drawn bounding boxes.
-   */
-  onBoxClick(box: any) {
-    // Your bounding box logic
   }
 
   /**
@@ -1342,65 +1253,6 @@ export class CameraPage2Page implements AfterViewInit {
     return new Blob(byteArrays, { type: contentType });
   }
 
-  /**
-   * Developer test helper: run inference on a chosen local image file.
-   */
-  async testWithLocalImage(file: File) {
-    const reader = new FileReader();
-    const dataUrl: string = await new Promise((resolve, reject) => {
-      reader.onload = () => resolve(reader.result as string);
-      reader.onerror = reject;
-      reader.readAsDataURL(file);
-    });
-
-    const imageTensor = await this.preprocessImage(dataUrl);
-    const prediction = await this.crackDetectionService.runInference(imageTensor);
-
-    console.log("🧪 Test Prediction:", prediction);
-    this.lastPrediction = prediction;
-  }
-
-  /**
-   * Handle multi-file selection from hidden input; processes each via processFile().
-   * Optimistically updates photosTaken for immediate spinner feedback.
-   */
-  async onFileSelected(event: Event) {
-    const input = event.target as HTMLInputElement;
-    if (!input || !input.files || input.files.length === 0) return;
-
-    const fileArray = Array.from(input.files);
-
-    // Immediately update counters so UI shows the spinner/count right away
-    try {
-      const all = await this.imageStorage.getAllImages();
-      const storedCount = Array.isArray(all) ? all.length : 0;
-      this.photosTaken = storedCount + fileArray.length;
-    } catch (e) {
-      // fallback to local increment if storage read fails
-      this.photosTaken += fileArray.length;
-    }
-    this.isProcessing = true;
-
-    // yield to the event loop so the spinner can render before heavy work
-    await new Promise(resolve => setTimeout(resolve, 20));
-
-    for (const f of fileArray) {
-      try {
-        // reuse existing processFile flow which reads, preprocesses, runs inference and stores
-        await this.processFile(f);
-      } catch (e) {
-        console.warn('Error processing selected file', e);
-        // ensure spinner can clear if something went wrong
-        this.photosProcessed++;
-      }
-    }
-
-    // Clear the input value so selecting the same file(s) again will trigger change event
-    try { input.value = ''; } catch (e) { /* ignore */ }
-
-    // turn off processing if everything finished
-    if (this.photosProcessed >= this.photosTaken) this.isProcessing = false;
-  }
 
   /**
    * Compute which thumbnail is centered in the overlay scroller and select it.
@@ -1502,4 +1354,6 @@ export class CameraPage2Page implements AfterViewInit {
       alert('Failed to delete image. See console for details.');
     }
   }
+
+  
 }

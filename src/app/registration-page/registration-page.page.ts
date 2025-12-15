@@ -125,9 +125,9 @@ async onRegister() {
     return;
   }
 
-  // Check if the selected role is 'parent' (Engineer) and if engineeringID is provided
+  // Check if the selected role is 'engineer' and if engineeringID is provided
   // If it's Engineer role but no ID provided, show error and exit
-  if (this.selectedRole === 'parent' && !engineeringID) {
+  if (this.selectedRole === 'engineer' && !engineeringID) {
     this.registrationError = 'Engineering ID is required for Engineer role.';
     return;
   }
