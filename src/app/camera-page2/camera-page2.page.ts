@@ -464,13 +464,18 @@ export class CameraPage2Page implements AfterViewInit {
       const deleteBtn = document.createElement('button');
       deleteBtn.className = 'function-btn';
       deleteBtn.type = 'button';
-      deleteBtn.style.background = '#ff4d4d';
-      deleteBtn.style.color = '#fff';
       deleteBtn.style.display = 'flex';
       deleteBtn.style.alignItems = 'center';
       deleteBtn.style.justifyContent = 'center';
       deleteBtn.style.height = '40px';
       deleteBtn.style.borderRadius = '10px';
+      // deleteBtn.style.background = '#ff4d4d';
+      // deleteBtn.style.color = '#fff';
+      deleteBtn.style.border = '1px solid transparent';
+      deleteBtn.style.background = 'linear-gradient(#fff, #fff) padding-box, linear-gradient(to right, #ff512f, #f09819) border-box';
+      deleteBtn.style.color = '#ff4d4d';
+      
+     
 
       // text + inline trash SVG icon
       const deleteText = document.createTextNode('Delete Selected Image');
@@ -491,13 +496,17 @@ export class CameraPage2Page implements AfterViewInit {
       const closeBtn = document.createElement('button');
       closeBtn.className = 'function-btn';
       closeBtn.type = 'button';
-      closeBtn.style.background = '#ddd';
-      closeBtn.style.color = '#111';
       closeBtn.style.display = 'flex';
       closeBtn.style.alignItems = 'center';
       closeBtn.style.justifyContent = 'center';
       closeBtn.style.height = '40px';
       closeBtn.style.borderRadius = '10px';
+       closeBtn.style.background = '#ddd';
+      closeBtn.style.color = '#111';
+      closeBtn.style.border = '1px solid transparent';
+      closeBtn.style.background = 'linear-gradient(#fff, #fff) padding-box, linear-gradient(to right, #ff512f, #f09819) border-box';
+      closeBtn.style.color = '#111';
+      
 
       // text + inline check SVG icon for close
       const closeText = document.createTextNode('Close');

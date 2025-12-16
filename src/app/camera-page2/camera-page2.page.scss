@@ -112,12 +112,17 @@ form, input, optgroup, select {
 
 .bottom-top-row { display:flex; justify-content:space-between; padding:6px 8px; }
 .function-btn {
-  background: transparent;
-  border: 2px solid #ccc;
+  // background: transparent;
+  // border: 2px solid #ccc;
+  // border: 2px solid transparent;
   padding: 6px 12px;
   border-radius: 12px;
   font-size: 14px;
   color: black;
+  border: 2px solid transparent;
+  background:
+    linear-gradient(#fff, #fff) padding-box,
+    linear-gradient(to right, #ff512f, #f09819) border-box;
 }
 
 .bottom-bottom-row { display:flex; align-items:center; justify-content:space-between; padding:8px 1.0px; position: relative; }
@@ -225,12 +230,20 @@ position: absolute;
 }
 
 .function-btn {
-  background: transparent;
-  border: 2px solid #ccc;
-  padding: 6px 12px;
+  // background: transparent;
+  // border: 2px solid #ccc;
+  // padding: 6px 12px;
+  // border-radius: 12px;
+  // font-size: 14px;
+  // color: black;
+   padding: 6px 12px;
   border-radius: 12px;
   font-size: 14px;
   color: black;
+  border: 2px solid transparent;
+  background:
+    linear-gradient(#fff, #fff) padding-box,
+    linear-gradient(to right, #ff512f, #f09819) border-box;
 }
 
   /* Ensure small icon images inside function buttons stay contained */
