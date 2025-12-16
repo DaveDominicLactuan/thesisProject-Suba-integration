@@ -221,4 +221,18 @@ export class ImageStorageService {
   getEntryForImage(imageKey: string): StoredImage | undefined {
     return this.images.find(i => i.original === imageKey || (i.withBoxes && i.withBoxes === imageKey));
   }
+
+  /** Remove a session only if it has no images; returns true when removed */
+  removeSessionIfEmpty(sessionId: string): boolean {
+    const idx = this.sessions.findIndex(s => s.id === sessionId);
+    if (idx === -1) return false;
+    const session = this.sessions[idx];
+    if (!session.imageKeys || session.imageKeys.length === 0) {
+      this.sessions.splice(idx, 1);
+      this.persistSessions();
+      return true;
+    }
+    return false;
+  }
+  
 }
