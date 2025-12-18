@@ -19,6 +19,7 @@ export class HomePagePage implements OnInit {
   lastName: string | null = null;
   sessions: any[] = [];
   lastSessionDisplayName: string | null = null;
+  private backButtonSub: any; // hardware back handler
 
   /** Inject auth, router, and image storage services for navigation and data. */
   constructor(private formBuilder: FormBuilder, private router: Router, private authService: AuthService, private navCtrl: NavController, private auth3: Auth3Service, private imageStorage: ImageStorageService) {
@@ -30,9 +31,11 @@ export class HomePagePage implements OnInit {
  * marking ngOnInit async (Angular OnInit expects void).
  */
 ngOnInit(): void {
+  
   // avoid making ngOnInit async (implements OnInit expects void)
   // perform async initialization in a separate method
   this.initialize();
+  try { if (this.backButtonSub && typeof this.backButtonSub.unsubscribe === 'function') this.backButtonSub.unsubscribe(); } catch {}
 }
 
 /** Perform async initialization tasks (profile + sessions). */

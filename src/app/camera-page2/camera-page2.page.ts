@@ -56,6 +56,11 @@ export class CameraPage2Page implements AfterViewInit {
   savedImage: StoredImage | null = null;
   selectedThumbSrc: string | null = null;
   selectedImageTitle: string = '';
+  // Toggle state to switch original vs withBoxes in overlay context
+  showWithBoxes: boolean = false;
+  // Overlay helpers for updating UI after center detection
+  private _overlayTitleEl?: HTMLDivElement;
+  private _overlayUpdateThumbs?: () => void;
   lastPrediction: { type: string; shape: string; severity: string } | null = null;
 
   scaledBoxes = [];
@@ -389,12 +394,53 @@ export class CameraPage2Page implements AfterViewInit {
       box.style.gap = '12px';
       box.style.overflow = 'hidden';
 
+      // Top bar: title on the left, toggle on the right
+      const topBar = document.createElement('div');
+      topBar.style.display = 'flex';
+      topBar.style.justifyContent = 'space-between';
+      topBar.style.alignItems = 'center';
+      topBar.style.width = '100%';
+      topBar.style.padding = '4px 8px';
+
       const title = document.createElement('div');
       title.textContent = this.selectedImageTitle || 'No Image Selected';
       title.style.fontWeight = '600';
       title.style.marginBottom = '4px';
       title.style.color = 'black';
       title.style.marginTop = '10px';
+      title.style.flex = '0 1 auto';
+      this._overlayTitleEl = title;
+
+      const toggleWrapper = document.createElement('div');
+      toggleWrapper.className = 'toggle-wrapper';
+      toggleWrapper.style.display = 'flex';
+      toggleWrapper.style.alignItems = 'center';
+      toggleWrapper.style.gap = '10px';
+      toggleWrapper.style.margin = '10px 0';
+      toggleWrapper.style.flex = '0 0 auto';
+
+      const labelEl = document.createElement('label');
+      labelEl.className = 'switch';
+
+      const inputEl = document.createElement('input');
+      inputEl.type = 'checkbox';
+      inputEl.checked = this.showWithBoxes;
+      inputEl.onchange = () => {
+        this.showWithBoxes = inputEl.checked;
+        // Re-detect center and refresh title/borders
+        this.detectCenterThumbnail();
+        if (this._overlayUpdateThumbs) this._overlayUpdateThumbs();
+      };
+
+      const sliderEl = document.createElement('span');
+      sliderEl.className = 'slider round';
+
+      labelEl.appendChild(inputEl);
+      labelEl.appendChild(sliderEl);
+      toggleWrapper.appendChild(labelEl);
+
+      topBar.appendChild(title);
+      topBar.appendChild(toggleWrapper);
        
 
       const thumbContainer = document.createElement('div');
@@ -424,6 +470,7 @@ export class CameraPage2Page implements AfterViewInit {
           imageElement.style.border = imageElement.src === this.selectedThumbSrc ? '3px solid #2ecc71' : '2px solid #fff';
         });
       };
+      this._overlayUpdateThumbs = updateThumbnails;
 
       if (!this.capturedImages || this.capturedImages.length === 0) {
         const placeholder = document.createElement('div');
@@ -533,7 +580,7 @@ export class CameraPage2Page implements AfterViewInit {
       btnRow.appendChild(deleteBtn);
       btnRow.appendChild(closeBtn);
 
-      box.appendChild(title);
+      box.appendChild(topBar);
       box.appendChild(thumbContainer);
       box.appendChild(btnRow);
       overlay.appendChild(box);
@@ -1447,12 +1494,16 @@ export class CameraPage2Page implements AfterViewInit {
     if (!closestImg) return;
     const src = (closestImg as HTMLImageElement).src;
     const idx = this.capturedImages.indexOf(src);
-    const title = idx >= 0 ? `Captured ${idx + 1}` : src;
+    const newTitle = idx >= 0 ? `Captured ${idx + 1}` : src;
 
     this.selectedThumbSrc = src;
-    this.selectedImageTitle = title;
+    this.selectedImageTitle = newTitle;
+    // Update overlay title if present
+    if (this._overlayTitleEl) this._overlayTitleEl.textContent = this.selectedImageTitle;
+    // Refresh borders to reflect new selection
+    if (this._overlayUpdateThumbs) this._overlayUpdateThumbs();
 
-    console.log('[CameraPage2] Center thumbnail selected:', { title, src });
+    console.log('[CameraPage2] Center thumbnail selected:', { title: newTitle, src });
   }
 
   /**

@@ -40,6 +40,7 @@ formDataMap: {
 
 imagePaths: DisplayImage[] = [];
 showWithBoxes: boolean = false;
+private backButtonSub: any; // hardware back handler
 
 
 
@@ -203,6 +204,7 @@ showWithBoxes: boolean = false;
   ngAfterViewInit() {
   try {
     this.cameraPreview.stopCamera();
+    try { if (this.backButtonSub && typeof this.backButtonSub.unsubscribe === 'function') this.backButtonSub.unsubscribe(); } catch {}
   } catch (e) {
     console.warn('CameraPreview.stopCamera ignored in ngAfterViewInit (not available on web):', e);
   }
