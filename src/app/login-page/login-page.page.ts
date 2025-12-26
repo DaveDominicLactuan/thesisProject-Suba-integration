@@ -45,8 +45,33 @@ signupForm: FormGroup;
     this.error = '';
     try {
       await this.auth3.login(this.email, this.password);
-      // this.navCtrl.navigateRoot('/home');
-       this.router.navigate(['/home-page']);
+      // After successful login, persist login state and basic user data
+      try {
+        const profile = await this.auth3.getUserProfile();
+        const firstName = profile['firstName'] || '';
+        const lastName = profile['lastName'] || '';
+        const engineeringID = profile['engineeringID'] || '';
+        const email = profile['email'] || this.email;
+        const username = (firstName && lastName) ? `${firstName} ${lastName}` : (email || '');
+        const userRole = engineeringID ? 'engineer' : 'user';
+        const userData = { username, userRole, firstName, lastName, engineeringID, email };
+        // Keep component fields updated for template/console visibility
+        this.firstName = firstName;
+        this.lastName = lastName;
+        this.username = username;
+        this.engineeringID = engineeringID;
+        // Print user details for quick verification on login page
+        console.log('[LoginPage] Login succeeded', userData);
+        try { localStorage.setItem('userData', JSON.stringify(userData)); } catch {}
+      } catch (e) {
+        // Even if profile fetch fails, mark as logged in so navigation proceeds
+        console.warn('[LoginPage] getUserProfile failed; proceeding with fallback email only', e);
+      }
+
+      // Mark logged in and navigate to home replacing history so back exits
+      try { localStorage.setItem('isLoggedIn', 'true'); } catch {}
+      console.log('[LoginPage] navigating to /home-page');
+      this.router.navigateByUrl('/home-page', { replaceUrl: true });
 
 
     } catch (err: any) {

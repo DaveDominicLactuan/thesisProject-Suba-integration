@@ -38,6 +38,7 @@ fullName: string = '';
 regForm!: FormGroup; // our single form
   submitted: boolean = false;
   registrationError: string | null = null;
+  registrationSuccess: string | null = null;
 
 // signupForm: FormGroup;
 
@@ -58,7 +59,7 @@ ngOnInit() {
 this.regForm = this.fb.group({
       firstName: ['', Validators.required],
       lastName: ['', Validators.required],
-      engineeringID: ['', Validators.required],
+      engineeringID: [''], // Not required by default, will be validated conditionally
       email: ['', [Validators.required, Validators.email]],
       password: ['', [Validators.required, Validators.minLength(6)]],
       confirmPassword: ['', Validators.required]
@@ -89,6 +90,7 @@ async onRegister() {
   this.submitted = true;
   // Clear any previous registration error messages
   this.registrationError = null;
+  this.registrationSuccess = null;
 
   // Extract all form field values from the reactive form
   const { email, password, firstName, lastName, engineeringID, confirmPassword } = this.regForm.value;
@@ -125,28 +127,31 @@ async onRegister() {
     return;
   }
 
-  // Check if the selected role is 'parent' (Engineer) and if engineeringID is provided
+  // Check if the selected role is 'engineer' and if engineeringID is provided
   // If it's Engineer role but no ID provided, show error and exit
-  if (this.selectedRole === 'parent' && !engineeringID) {
+  if (this.selectedRole === 'engineer' && !engineeringID) {
     this.registrationError = 'Engineering ID is required for Engineer role.';
     return;
   }
-
-  // If all validation passes, attempt to create the user account
   try {
     // Call the auth service to register a new user with provided credentials
+    // selectedRole already contains 'engineer' or 'user'
     await this.auth3.register(
       email ?? '',           // Email address (use empty string if null)
       password ?? '',        // Password (use empty string if null)
       firstName ?? '',       // First name (use empty string if null)
       lastName ?? '',        // Last name (use empty string if null)
-      engineeringID ?? ''    // Engineering ID (use empty string if null)
+      engineeringID ?? '',   // Engineering ID (use empty string if null)
+      this.selectedRole ?? 'user'  // User role ('engineer' or 'user')
     );
 
-    // If registration succeeds, show success alert to the user
-    alert('Account created successfully. Press OK to continue.');
-    // Navigate to landing page and replace the current history entry
-    this.router.navigateByUrl('/landing-page', { replaceUrl: true });
+    // If registration succeeds, set success message and navigate to login
+    this.registrationSuccess = 'Account created successfully. You can now sign in.';
+    console.log('[RegistrationPage] account created', { email, firstName, lastName, engineeringID, role: this.selectedRole });
+    // Give the success message a brief moment before redirecting to login
+    setTimeout(() => {
+      this.router.navigateByUrl('/login', { replaceUrl: true });
+    }, 400);
   } catch (err: any) {
     // If registration fails, extract the error message from the exception
     this.registrationError = err?.message || 'Registration failed';

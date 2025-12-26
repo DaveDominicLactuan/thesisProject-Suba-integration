@@ -59,6 +59,7 @@ private backButtonSub: any; // hardware back handler
    * and prepare to load sessions/images in ngAfterViewInit.
    */
   ngOnInit() {
+    this.loadUserRole();
     this.api.getHelloTest().subscribe((res: any) => {
   console.log('Response:', res);
 });
@@ -73,6 +74,25 @@ private backButtonSub: any; // hardware back handler
   
 
     console.log(this.message)
+  }
+
+  /** Load user role/name from localStorage to control dropdown editability. */
+  private loadUserRole() {
+    try {
+      const cached = localStorage.getItem('userData');
+      if (cached) {
+        const data = JSON.parse(cached);
+        this.userRole = (data.userRole || data.role || 'user') as string;
+        this.firstName = data.firstName || '';
+        this.lastName = data.lastName || '';
+        console.log('[FeedbackPage] loaded user context', { userRole: this.userRole, firstName: this.firstName, lastName: this.lastName });
+      } else {
+        this.userRole = 'user';
+      }
+    } catch (e) {
+      console.warn('[FeedbackPage] loadUserRole failed, defaulting to user', e);
+      this.userRole = 'user';
+    }
   }
 
   /**
@@ -193,6 +213,7 @@ private backButtonSub: any; // hardware back handler
   dropdownOptionsSeverity: string[] = [];
   detectionMessage: string = '';
   detectionResult: string = '';
+  userRole: string | null = null; // User role for access control
 
     
    
@@ -382,6 +403,11 @@ private backButtonSub: any; // hardware back handler
       'single-thumb': count === 1,
       'double-thumb': count === 2,
     };
+  }
+
+  /** Dropdowns are read-only for users; editable for engineers. */
+  get isUserReadOnly(): boolean {
+    return (this.userRole || 'user').toLowerCase() === 'user';
   }
 
 /**

@@ -1,6 +1,7 @@
 import { Injectable } from '@angular/core';
 import { Auth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut } from '@angular/fire/auth';
-import { Firestore, doc, setDoc, serverTimestamp, getDoc } from '@angular/fire/firestore';
+import { Firestore, setDoc, serverTimestamp } from '@angular/fire/firestore';
+import { doc as fbDoc, getDoc as fbGetDoc } from 'firebase/firestore';
 import { onAuthStateChanged, User } from 'firebase/auth';
 
 
@@ -19,18 +20,19 @@ async login(email: string, password: string) {
   return await signInWithEmailAndPassword(this.auth, email, password);
 }
 
-async register(email: string, password: string, firstName: string, lastName: string, engineeringID: string) {
+async register(email: string, password: string, firstName: string, lastName: string, engineeringID: string, role?: string) {
   if (!email) {
     throw new Error('Email is required');
   }
   const userCredential = await createUserWithEmailAndPassword(this.auth, email, password);
   const uid = userCredential.user.uid;
 
-  await setDoc(doc(this.firestore, 'users', uid), {
+  await setDoc(fbDoc(this.firestore, 'users', uid), {
     firstName,
     lastName,
     engineeringID,
     email, // safe here since we already checked
+    role: role || (engineeringID ? 'engineer' : 'user'), // Store role explicitly
     createdAt: serverTimestamp()
   });
 
@@ -63,19 +65,37 @@ async register(email: string, password: string, firstName: string, lastName: str
     return this.auth.currentUser;
   }
 
-  // ✅ Get user profile from Firestore
+  // ✅ Get user profile from Firestore (uses native Firebase SDK to avoid injection warnings)
   async getUserProfile() {
     const user = this.getCurrentUser();
     if (!user) throw new Error('No user logged in');
 
-    const userDoc = await getDoc(doc(this.firestore, 'users', user.uid));
-    if (userDoc.exists()) {
-      const data = userDoc.data();
-      this.firstName = data['firstName'] || '';
-      this.lastName = data['lastName'] || '';
-      return data;
-    } else {
-      throw new Error('User profile not found');
+    try {
+      const userDoc = await fbGetDoc(fbDoc(this.firestore, 'users', user.uid));
+      if (userDoc.exists()) {
+        const data = userDoc.data() as any;
+        this.firstName = data['firstName'] || '';
+        this.lastName = data['lastName'] || '';
+        return data;
+      }
+      // Fallback if doc missing: return auth-derived defaults
+      return {
+        firstName: '',
+        lastName: '',
+        engineeringID: '',
+        email: user.email || '',
+        role: 'user'
+      };
+    } catch (err) {
+      // Handle permission errors gracefully without breaking UI
+      console.warn('[Auth3Service] getUserProfile failed, returning auth fallback', err);
+      return {
+        firstName: '',
+        lastName: '',
+        engineeringID: '',
+        email: user.email || '',
+        role: 'user'
+      };
     }
   }
 

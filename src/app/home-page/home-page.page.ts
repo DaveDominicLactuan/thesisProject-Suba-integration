@@ -1,4 +1,4 @@
-import { Component, OnInit } from '@angular/core';
+import { Component, OnInit, OnDestroy } from '@angular/core';
 import { Router } from '@angular/router';
 import { FormBuilder, FormGroup, Validators } from '@angular/forms';
 import { AuthService } from '../services/auth.service';
@@ -6,6 +6,7 @@ import { NavController } from '@ionic/angular';
 import { User } from 'firebase/auth';
 import { Auth3Service } from '../services/auth3.service';
 import { ImageStorageService } from '../services/image-storage.service';
+import { App } from '@capacitor/app';
 
 @Component({
   selector: 'app-home-page',
@@ -13,13 +14,17 @@ import { ImageStorageService } from '../services/image-storage.service';
   styleUrls: ['./home-page.page.scss'],
   standalone: false
 })
-export class HomePagePage implements OnInit {
+export class HomePagePage implements OnInit, OnDestroy {
   userName: string | null = null;
   firstName: string | null = null;
   lastName: string | null = null;
+  email: string | null = null;
+  engineeringID: string | null = null;
   sessions: any[] = [];
   lastSessionDisplayName: string | null = null;
   private backButtonSub: any; // hardware back handler
+  isLoggedIn: boolean = false;
+  userRole: string | null = null;
 
   /** Inject auth, router, and image storage services for navigation and data. */
   constructor(private formBuilder: FormBuilder, private router: Router, private authService: AuthService, private navCtrl: NavController, private auth3: Auth3Service, private imageStorage: ImageStorageService) {
@@ -36,20 +41,98 @@ ngOnInit(): void {
   // perform async initialization in a separate method
   this.initialize();
   try { if (this.backButtonSub && typeof this.backButtonSub.unsubscribe === 'function') this.backButtonSub.unsubscribe(); } catch {}
+
+  // Handle hardware back button: exit app from home-page
+  try {
+    this.backButtonSub = App.addListener('backButton', ({ canGoBack }) => {
+      // Always exit from home page instead of returning to login
+      App.exitApp();
+    });
+  } catch {}
 }
 
 /** Perform async initialization tasks (profile + sessions). */
 private async initialize(): Promise<void> {
   try {
+    // Ensure Firebase auth state is ready before fetching profile
+    if (!this.auth3.getCurrentUser()) {
+      console.log('[HomePage] waiting for auth state…');
+      await this.waitForUserAuth(8000);
+    }
+
     const profile = await this.auth3.getUserProfile();
     this.firstName = profile['firstName'];
     this.lastName = profile['lastName'];
+    this.engineeringID = profile['engineeringID'] || '';
+    this.email = profile['email'] || '';
+    // Read role from Firestore profile (authoritative source)
+    this.userRole = profile['role'] || (this.engineeringID ? 'engineer' : 'user');
+    this.userName = (this.firstName && this.lastName) ? `${this.firstName} ${this.lastName}` : (this.email || null);
+    console.log('[HomePage] user profile loaded', {
+      firstName: this.firstName,
+      lastName: this.lastName,
+      email: this.email,
+      engineeringID: this.engineeringID,
+      userRole: this.userRole,
+      userName: this.userName
+    });
+    // Persist/refresh local user data for downstream use
+    try {
+      localStorage.setItem('userData', JSON.stringify({
+        username: this.userName || '',
+        userRole: this.userRole || 'user',
+        firstName: this.firstName || '',
+        lastName: this.lastName || '',
+        engineeringID: this.engineeringID || '',
+        email: this.email || ''
+      }));
+      localStorage.setItem('isLoggedIn', 'true');
+    } catch {}
   } catch (error) {
     console.error(error);
+    // Fallback: try to load previously saved user data
+    try {
+      const cached = localStorage.getItem('userData');
+      if (cached) {
+        const data = JSON.parse(cached);
+        this.firstName = data.firstName || null;
+        this.lastName = data.lastName || null;
+        this.userName = data.username || null;
+        this.userRole = data.userRole || 'user';
+        this.email = data.email || null;
+        this.engineeringID = data.engineeringID || null;
+        console.log('[HomePage] loaded user profile from cache', data);
+      }
+    } catch {}
   }
+  // Mark logged-in flag locally
+  try { this.isLoggedIn = (localStorage.getItem('isLoggedIn') === 'true'); } catch { this.isLoggedIn = true; }
   // load sessions from image storage service
   try { await this.loadSessions(); } catch (e) { console.warn('loadSessions failed during init', e); }
 }
+
+  // Wait for Firebase auth to emit a user or timeout
+  private waitForUserAuth(timeoutMs: number = 8000): Promise<User | null> {
+    return new Promise((resolve) => {
+      let settled = false as boolean;
+      const maybeResolve = (u: User | null) => {
+        if (!settled) { settled = true; resolve(u); }
+      };
+      let unsub: any = null;
+      try {
+        unsub = this.auth3.onAuthChange((u) => {
+          if (u) {
+            try { if (unsub) unsub(); } catch {}
+            maybeResolve(u);
+          }
+        });
+      } catch {}
+      setTimeout(() => {
+        try { if (unsub) unsub(); } catch {}
+        maybeResolve(this.auth3.getCurrentUser() || null);
+      }, timeoutMs);
+    });
+  }
 
   // Called by Ionic when page becomes active — refresh sessions/counts
   /** Ionic hook: refresh sessions each time page becomes active. */
@@ -270,10 +353,44 @@ private async initialize(): Promise<void> {
     box.style.textAlign = 'center';
 
     const msg = document.createElement('div');
-    msg.innerText = 'Test overlay';
-    msg.style.marginBottom = '12px';
-    msg.style.fontSize = '16px';
-    msg.style.fontWeight = '600';
+    const fullName = (this.firstName && this.lastName) ? `${this.firstName} ${this.lastName}` : (this.userName || 'N/A');
+    
+    // Create a more organized user info display
+    msg.innerHTML = `
+      <div style="font-weight:600;margin-bottom:12px;font-size:18px;color:#333;">User Profile</div>
+      <div style="background:#f5f5f5;padding:12px;border-radius:6px;text-align:left;">
+        <div style="margin-bottom:8px;">
+          <span style="font-weight:600;color:#555;">Name:</span> 
+          <span style="color:#333;">${fullName || 'N/A'}</span>
+        </div>
+        ${this.firstName ? `<div style="margin-bottom:8px;">
+          <span style="font-weight:600;color:#555;">First Name:</span> 
+          <span style="color:#333;">${this.firstName}</span>
+        </div>` : ''}
+        ${this.lastName ? `<div style="margin-bottom:8px;">
+          <span style="font-weight:600;color:#555;">Last Name:</span> 
+          <span style="color:#333;">${this.lastName}</span>
+        </div>` : ''}
+        <div style="margin-bottom:8px;">
+          <span style="font-weight:600;color:#555;">Role:</span> 
+          <span style="color:#333;text-transform:capitalize;">${this.userRole || 'N/A'}</span>
+        </div>
+        <div style="margin-bottom:8px;">
+          <span style="font-weight:600;color:#555;">Email:</span> 
+          <span style="color:#333;">${this.email || 'N/A'}</span>
+        </div>
+        ${this.engineeringID ? `<div style="margin-bottom:8px;">
+          <span style="font-weight:600;color:#555;">Engineering ID:</span> 
+          <span style="color:#333;">${this.engineeringID}</span>
+        </div>` : ''}
+        <div style="margin-bottom:0;">
+          <span style="font-weight:600;color:#555;">Status:</span> 
+          <span style="color:#28a745;font-weight:600;">${this.isLoggedIn ? 'Logged In' : 'Logged Out'}</span>
+        </div>
+      </div>
+    `;
+    msg.style.marginBottom = '16px';
+    msg.style.fontSize = '14px';
 
     const btn = document.createElement('button');
     btn.innerText = 'Send Notification';
@@ -292,6 +409,16 @@ private async initialize(): Promise<void> {
     btn2.style.background = '#3880ff';
     btn2.style.color = '#fff';
     btn2.style.cursor = 'pointer';
+
+    // Logout button (acts as Log Out via showTestOverlay)
+    const logoutBtn = document.createElement('button');
+    logoutBtn.innerText = 'Log Out';
+    logoutBtn.style.padding = '10px 14px';
+    logoutBtn.style.border = 'none';
+    logoutBtn.style.borderRadius = '6px';
+    logoutBtn.style.background = '#eb445a';
+    logoutBtn.style.color = '#fff';
+    logoutBtn.style.cursor = 'pointer';
 
     // Close button
     const close = document.createElement('button');
@@ -314,6 +441,23 @@ private async initialize(): Promise<void> {
     btn2.addEventListener('click', () => {
       this.clearImageStorage();
       if (document.getElementById('test-overlay')) document.body.removeChild(overlay);
+    });
+
+    // Logout flow
+    logoutBtn.addEventListener('click', async () => {
+      try {
+        await this.auth3.logout();
+      } catch {}
+      try { localStorage.setItem('isLoggedIn', 'false'); } catch {}
+      try { localStorage.removeItem('userData'); } catch {}
+      this.isLoggedIn = false;
+      try { document.body.removeChild(overlay); } catch {}
+      // Navigate to landing page replacing history so next back exits
+      try {
+        this.router.navigateByUrl('/landing-page', { replaceUrl: true });
+      } catch {
+        this.router.navigate(['/landing-page']);
+      }
     });
 
     // Test create session button: create a session populated with stored images and refresh list
@@ -372,21 +516,53 @@ private async initialize(): Promise<void> {
     });
 
     box.appendChild(msg);
-    const btnRow = document.createElement('div');
-    btnRow.style.display = 'flex';
-    btnRow.style.justifyContent = 'center';
-    btnRow.appendChild(btn);
-    btnRow.appendChild(btn2);
-    btnRow.appendChild(createSessionBtn);
-    btnRow.appendChild(close);
-    box.appendChild(btnRow);
+    
+    // Main buttons container (3 buttons in a column)
+    const mainBtnsContainer = document.createElement('div');
+    mainBtnsContainer.style.display = 'flex';
+    mainBtnsContainer.style.flexDirection = 'column';
+    mainBtnsContainer.style.gap = '10px';
+    mainBtnsContainer.style.marginBottom = '16px';
+    
+    // Style buttons to be full width
+    btn.style.width = '100%';
+    btn2.style.width = '100%';
+    createSessionBtn.style.width = '100%';
+    
+    mainBtnsContainer.appendChild(btn);
+    mainBtnsContainer.appendChild(btn2);
+    mainBtnsContainer.appendChild(createSessionBtn);
+    box.appendChild(mainBtnsContainer);
+    
+    // Bottom row with logout and close buttons
+    const bottomRow = document.createElement('div');
+    bottomRow.style.display = 'flex';
+    bottomRow.style.gap = '10px';
+    bottomRow.style.marginTop = '8px';
+    bottomRow.style.paddingTop = '12px';
+    bottomRow.style.borderTop = '1px solid #ddd';
+    
+    logoutBtn.style.flex = '1';
+    close.style.flex = '1';
+    close.style.marginLeft = '0';
+    
+    bottomRow.appendChild(logoutBtn);
+    bottomRow.appendChild(close);
+    box.appendChild(bottomRow);
+    
     overlay.appendChild(box);
 
     document.body.appendChild(overlay);
   }
 
 
-
+  ngOnDestroy(): void {
+    try {
+      if (this.backButtonSub && typeof (this.backButtonSub.remove) === 'function') {
+        this.backButtonSub.remove();
+      }
+    } catch {}
+  }
   
   
 

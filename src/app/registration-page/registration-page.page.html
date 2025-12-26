@@ -26,25 +26,26 @@
     <div class="role-selector">
     <div
       class="role-option"
-      *ngIf="!selectedRole || selectedRole === 'parent'"
-      [class.selected]="selectedRole === 'parent'"
-      (click)="selectRole('parent')"
+      *ngIf="!selectedRole || selectedRole === 'engineer'"
+      [class.selected]="selectedRole === 'engineer'"
+      (click)="selectRole('engineer')"
     >
-      <img src="assets/engIcon.png" alt="Parent Icon" />
+      <img src="assets/engIcon.png" alt="Engineer Icon" />
       <span>Engineer</span>
     </div>
     <div
       class="role-option"
-      *ngIf="!selectedRole || selectedRole === 'child'"
-      [class.selected]="selectedRole === 'child'"
-      (click)="selectRole('child')"
+      *ngIf="!selectedRole || selectedRole === 'user'"
+      [class.selected]="selectedRole === 'user'"
+      (click)="selectRole('user')"
     >
-      <img src="assets/useIcon.png" alt="Child Icon" />
+      <img src="assets/useIcon.png" alt="User Icon" />
       <span>User</span>
     </div>
   </div>
 
   <div *ngIf="registrationError" class="field-error" style="text-align:center;margin-bottom:8px;">{{ registrationError }}</div>
+  <div *ngIf="registrationSuccess" class="field-success" style="text-align:center;margin-bottom:8px;color:#0a8a0a;">{{ registrationSuccess }}</div>
 
 
     <form [formGroup]="regForm" (ngSubmit)="onRegister()">
@@ -63,7 +64,7 @@
 
 
 
-    <div *ngIf="selectedRole === 'parent'">
+    <div *ngIf="selectedRole === 'engineer'">
       <div class="form-field" [class.invalid]="f['engineeringID'].invalid && (f['engineeringID'].touched || submitted)">
         <ion-icon name="id-card-outline"></ion-icon>
         <input type="text" placeholder="Engineering ID" formControlName="engineeringID" />
