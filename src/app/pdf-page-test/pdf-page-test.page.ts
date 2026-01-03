@@ -19,6 +19,7 @@ import { WebView } from '@awesome-cordova-plugins/ionic-webview/ngx';
 })
 export class PdfPageTestPage implements OnInit {
   pdfSrc: SafeResourceUrl | null = null;
+  private backButtonSub: any; // hardware back handler
 
   constructor(
     private sanitizer: DomSanitizer,
@@ -47,6 +48,8 @@ export class PdfPageTestPage implements OnInit {
       } catch (err) {
         console.error('Permission check/request failed:', err);
       }
+
+    
     }
 
     // Show preview immediately

@@ -53,6 +53,7 @@ export class CameraPagePage implements AfterViewInit {
   photosProcessed = 0;
   savedImage: StoredImage | null = null;
   lastPrediction: { type: string; shape: string; severity: string } | null = null;
+  private backButtonSub: any; // hardware back handler
 
   scaledBoxes = [];
 
@@ -161,6 +162,17 @@ export class CameraPagePage implements AfterViewInit {
   }
 
   ngAfterViewInit() {
+
+     if (this.backButtonSub) {
+      try {
+        this.backButtonSub.unsubscribe();
+        this.backButtonSub = null;
+      } catch (e) {
+        console.warn('[UploadImagePage] failed to unsubscribe back button handler', e);
+      }
+    }
+  
+  
     this.platform.ready().then(() => this.initCamera());
   }
 

@@ -1,0 +1,139 @@
+<div class="dashboard-bg">
+  <ion-content class="ion-padding">
+    <!-- Header Card -->
+    <div class="card header-card">
+      <div class="header-row">
+        <div class="title">Tests Result</div>
+        <div class="scope">{{ getScopeText() }}</div>
+      </div>
+      <div class="donut-row">
+        <div class="donut" [ngStyle]="{'--percent': detectionPercent}">
+          <div class="donut-center">{{ detectionPercent }}%</div>
+        </div>
+        <div class="legend">
+          <div class="legend-item"><span class="dot ux"></span> Detected - {{ stats.totalCracks }}</div>
+          <div class="legend-item"><span class="dot motion"></span> Total Images - {{ stats.totalImages }}</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tiles Row -->
+    <div class="tiles">
+      <div class="tile blue">
+        <div class="tile-value">{{ stats.totalCracks }}</div>
+        <div class="tile-label">Total Cracks:</div>
+      </div>
+      <div class="tile red">
+        <div class="tile-value">{{ stats.totalImages }}</div>
+        <div class="tile-label">Total Images</div>
+      </div>
+    </div>
+
+
+
+    <!-- Graph selector + display area -->
+    <div class="sessions-section">
+      <!-- Open Graph Overlay Button -->
+      <div style="display: flex; justify-content: center; margin-bottom: 16px;">
+        <button class="export-btn" (click)="openGraphOverlay()" style="padding: 10px 20px; font-size: 14px;">
+          Open Graph Options ▲
+        </button>
+      </div>
+
+      <!-- Graph Display -->
+      <div class="graph-display" *ngIf="!showGraphOverlay">
+        <!-- Bar Graph -->
+        <div class="graph-card" *ngIf="selectedChartType === 'bar'">
+          <div class="graph-card-title">Bar Graph - {{ getGraphTitle() }} Distribution</div>
+          <div class="bars">
+            <div class="bar" *ngFor="let item of getSelectedData() | keyvalue">
+              <div class="bar-label">{{ item.key }}</div>
+              <div class="bar-track">
+                <div class="bar-fill" [style.width]="((item.value / getMax(getSelectedData())) * 100) + '%'">
+                </div>
+              </div>
+              <div class="bar-value">{{ item.value }}</div>
+            </div>
+          </div>
+        </div>
+        <!-- Pie Graph -->
+        <div class="graph-card subtle" *ngIf="selectedChartType === 'pie'">
+          <div class="graph-card-title">Pie Graph - {{ getGraphTitle() }} Distribution</div>
+          <div class="pie-grid">
+            <div class="mini-card" *ngFor="let item of getSelectedData() | keyvalue">
+              <div class="mini-title">{{ item.key }}</div>
+              <div class="mini-donut" [ngStyle]="{'--percent': Math.round((item.value / getMax(getSelectedData())) * 100)}">
+                <div class="mini-center">{{ item.value }}</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Graph Overlay Modal -->
+    <div class="graph-overlay" *ngIf="showGraphOverlay">
+      <div class="overlay-backdrop" (click)="closeGraphOverlay()"></div>
+      <div class="overlay-content">
+        <div class="overlay-header">
+          <h2>Configure Graph</h2>
+          <button class="close-btn" (click)="closeGraphOverlay()">✕</button>
+        </div>
+        
+        <!-- Type of Graphs Section -->
+        <div class="overlay-section">
+          <h3>Type of Graphs</h3>
+          <div class="overlay-options">
+            <button 
+              class="overlay-option" 
+              [class.active]="selectedChartType === 'bar'"
+              (click)="selectChartType('bar')">
+              Bar Graph
+            </button>
+            <button 
+              class="overlay-option" 
+              [class.active]="selectedChartType === 'pie'"
+              (click)="selectChartType('pie')">
+              Pie Graph
+            </button>
+          </div>
+        </div>
+
+        <!-- Type of Cracks Section -->
+        <div class="overlay-section">
+          <h3>Type of Cracks</h3>
+          <div class="overlay-options">
+            <button 
+              class="overlay-option" 
+              [class.active]="selectedGraphType === 'type'"
+              (click)="selectGraphType('type')">
+              Type
+            </button>
+            <button 
+              class="overlay-option" 
+              [class.active]="selectedGraphType === 'severity'"
+              (click)="selectGraphType('severity')">
+              Severity
+            </button>
+            <button 
+              class="overlay-option" 
+              [class.active]="selectedGraphType === 'shape'"
+              (click)="selectGraphType('shape')">
+              Shape
+            </button>
+          </div>
+        </div>
+
+        <!-- Apply Button -->
+        <div class="overlay-footer">
+          <button class="overlay-apply-btn" (click)="applyGraphSelection()">Apply & View Graph</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Export Button -->
+    <div class="footer">
+      <button class="export-btn" (click)="previewPDF()">Export & Preview PDF Results</button>
+    </div>
+  </ion-content>
+</div>

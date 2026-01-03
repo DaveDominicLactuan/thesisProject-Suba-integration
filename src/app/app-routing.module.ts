@@ -52,6 +52,18 @@ const routes: Routes = [
     loadChildren: () => import('./pdf-page-test03/pdf-page-test03.module').then( m => m.PdfPageTest03PageModule)
   },
   {
+    path: 'pdf-viewer-page',
+    loadChildren: () => import('./pdf-viewer-page/pdf-viewer-page.module').then(m => m.PdfViewerPageModule)
+  },
+  {
+    path: 'pdf-preview-page',
+    loadChildren: () => import('./pdf-preview-page/pdf-preview-page.module').then(m => m.PdfPreviewPageModule)
+  },
+  {
+    path: 'pdf-generator-page',
+    loadChildren: () => import('./pdf-generator-page/pdf-generator-page.module').then(m => m.PdfGeneratorPageModule)
+  },
+  {
 
     path: 'upload-image-page',
     loadChildren: () => import('./upload-image-page/upload-image-page.module').then( m => m.UploadImagePagePageModule)
@@ -72,6 +84,10 @@ const routes: Routes = [
   {
     path: 'results-page',
     loadChildren: () => import('./results-page/results-page.module').then( m => m.ResultsPageModule)
+  },
+  {
+    path: 'results-dashboard',
+    loadChildren: () => import('./results-dashboard/results-dashboard.module').then(m => m.ResultsDashboardModule)
   },
 
 

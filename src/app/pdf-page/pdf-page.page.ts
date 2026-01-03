@@ -20,6 +20,7 @@ import { WebView } from '@awesome-cordova-plugins/ionic-webview/ngx';
 })
 export class PdfPagePage implements OnInit {
   pdfSrc: SafeResourceUrl | null = null;
+  private backButtonSub: any; // hardware back handler
 
   constructor(
     private sanitizer: DomSanitizer,
@@ -37,6 +38,9 @@ export class PdfPagePage implements OnInit {
   console.log('File plugin exists?', !!this.file);
   console.log('FileOpener exists?', !!this.fileOpener);
   console.log('AndroidPermissions exists?', !!this.androidPermissions);
+
+  
+
 }
 
 // Run native plugin code only after the view is active and the bridge is ready
@@ -69,6 +73,15 @@ async ionViewDidEnter() {
     // Browser or iOS testing
     this.previewPDF();
   }
+
+  if (this.backButtonSub) {
+      try {
+        this.backButtonSub.unsubscribe();
+        this.backButtonSub = null;
+      } catch (e) {
+        console.warn('[UploadImagePage] failed to unsubscribe back button handler', e);
+      }
+    }
 }
 
 

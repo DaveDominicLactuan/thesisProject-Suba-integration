@@ -1,0 +1,203 @@
+// Method selector styling
+.method-selector {
+  padding: 16px;
+  background: var(--ion-color-light);
+  border-bottom: 1px solid var(--ion-color-medium);
+}
+
+.method-title {
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 12px;
+  color: var(--ion-color-dark);
+}
+
+.method-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.method-info {
+  margin-top: 8px;
+}
+
+.info-text {
+  font-size: 12px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  background: var(--ion-color-light-shade);
+  
+  &.success {
+    background: rgba(40, 167, 69, 0.1);
+    color: #28a745;
+    border-left: 3px solid #28a745;
+  }
+  
+  &.warning {
+    background: rgba(255, 193, 7, 0.1);
+    color: #ffc107;
+    border-left: 3px solid #ffc107;
+  }
+  
+  &.secondary {
+    background: rgba(99, 102, 241, 0.1);
+    color: #6366f1;
+    border-left: 3px solid #6366f1;
+  }
+}
+
+// PDF Viewer container - CRITICAL for mobile
+.pdf-viewer-container {
+  position: relative;
+  width: 100%;
+  height: calc(100vh - 56px - 120px - 100px); 
+  /* 56px header, 120px method selector, 100px action buttons */
+  overflow-y: auto;
+  overflow-x: hidden;
+  
+  // iOS smooth scrolling - CRITICAL
+  -webkit-overflow-scrolling: touch;
+  
+  background: #f5f5f5;
+  
+  &.loading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+}
+
+// PDF Viewer itself - ensure it takes full width
+pdf-viewer {
+  display: block !important;
+  width: 100% !important;
+  min-height: 100%;
+  
+  // Ensure the internal canvas/container scales properly
+  ::ng-deep {
+    .ng2-pdf-viewer-container {
+      overflow: auto !important;
+      -webkit-overflow-scrolling: touch;
+    }
+    
+    // Force PDF to scale to container width on mobile
+    canvas {
+      max-width: 100% !important;
+      height: auto !important;
+    }
+  }
+}
+
+// Loading spinner overlay
+.spinner-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.9);
+  z-index: 10;
+  
+  p {
+    margin-top: 16px;
+    color: var(--ion-color-medium);
+    font-size: 14px;
+  }
+}
+
+// Placeholder
+.placeholder {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: var(--ion-color-medium);
+  padding: 20px;
+  text-align: center;
+  
+  ion-icon {
+    font-size: 64px;
+    margin-bottom: 16px;
+    opacity: 0.5;
+  }
+  
+  p {
+    font-size: 14px;
+  }
+}
+
+// Action buttons
+.action-buttons {
+  padding: 16px;
+  background: var(--ion-background-color);
+  border-top: 1px solid var(--ion-color-light-shade);
+  
+  ion-button {
+    margin: 0;
+    margin-bottom: 12px;
+  }
+  
+  .button-row {
+    display: flex;
+    gap: 12px;
+    
+    ion-button {
+      flex: 1;
+      margin: 0;
+    }
+  }
+}
+
+// Mobile-specific adjustments
+@media (max-width: 576px) {
+  .method-buttons {
+    ion-button {
+      font-size: 11px;
+      --padding-start: 8px;
+      --padding-end: 8px;
+    }
+  }
+  
+  .pdf-viewer-container {
+    height: calc(100vh - 56px - 140px - 120px);
+  }
+}
+
+// Tablet and larger screens
+@media (min-width: 768px) {
+  .pdf-viewer-container {
+    max-width: 800px;
+    margin: 0 auto;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  }
+  
+  .method-selector,
+  .action-buttons {
+    max-width: 800px;
+    margin: 0 auto;
+  }
+}
+
+// iOS-specific fixes
+@supports (-webkit-touch-callout: none) {
+  .pdf-viewer-container {
+    // Additional iOS-specific scrolling improvements
+    overflow: scroll;
+    -webkit-overflow-scrolling: touch;
+  }
+}
+
+// Android-specific fixes
+@media (hover: none) and (pointer: coarse) {
+  .pdf-viewer-container {
+    // Ensure smooth scrolling on Android devices
+    scroll-behavior: smooth;
+  }
+}

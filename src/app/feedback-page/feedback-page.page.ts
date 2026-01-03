@@ -230,6 +230,16 @@ private backButtonSub: any; // hardware back handler
     console.warn('CameraPreview.stopCamera ignored in ngAfterViewInit (not available on web):', e);
   }
 
+   if (this.backButtonSub) {
+      try {
+        this.backButtonSub.unsubscribe();
+        this.backButtonSub = null;
+      } catch (e) {
+        console.warn('[UploadImagePage] failed to unsubscribe back button handler', e);
+      }
+    }
+  
+
     // Initialize sessions then refresh the displayed images from the active session
     setTimeout(() => {
       // If a session id was passed via query param from Camera, prefer it
@@ -801,9 +811,9 @@ goToSecondPage() {
     // Navigate to results page with current sessionId if available
     const sessionId = this.routeSessionId || null;
     if (sessionId) {
-      this.router.navigate(['/results-page'], { queryParams: { sessionId } });
+      this.router.navigate(['/results-dashboard'], { queryParams: { sessionId } });
     } else {
-      this.router.navigate(['/results-page']);
+      this.router.navigate(['/results-dashboard']);
     }
   }
 

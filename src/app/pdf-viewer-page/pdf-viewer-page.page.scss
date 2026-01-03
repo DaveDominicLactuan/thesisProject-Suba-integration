@@ -1,0 +1,40 @@
+.viewer-container {
+  height: calc(100vh - 56px - var(--ion-safe-area-top));
+  /* 56px default header height on mobile; adjust if toolbars differ */
+  display: flex;
+  flex-direction: column;
+}
+
+ngx-extended-pdf-viewer {
+  width: 100%;
+  height: 100%;
+}
+
+.placeholder {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: var(--ion-color-medium);
+}
+
+.spinner-overlay {
+  position: fixed;
+  top: 56px; /* below header */
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.2);
+  pointer-events: none;
+}
+
+/* Prevent toolbar from being cut off on small screens */
+@media (max-width: 380px) {
+  :host ::ng-deep .toolbar {
+    flex-wrap: wrap;
+  }
+}

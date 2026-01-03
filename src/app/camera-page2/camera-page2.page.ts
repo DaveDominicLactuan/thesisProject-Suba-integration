@@ -628,6 +628,7 @@ export class CameraPage2Page implements AfterViewInit {
   ngAfterViewInit() {
     this.platform.ready().then(() => this.initCamera());
     // Handle Android hardware back: prompt before discarding empty session
+    
     try {
       this.backButtonSub = this.platform.backButton.subscribeWithPriority(10, async () => {
         await this.handleGoHome();
@@ -635,6 +636,8 @@ export class CameraPage2Page implements AfterViewInit {
     } catch (e) {
       console.warn('[CameraPage2] failed to register hardware back handler', e);
     }
+
+    
     // initialize page: load images, sessions and create a new session for this visit
     // read optional sessionId passed via navigation (when opening camera from Sessions list)
     try { this.routeSessionId = this.route.snapshot.queryParamMap.get('sessionId'); } catch (e) { this.routeSessionId = null; }

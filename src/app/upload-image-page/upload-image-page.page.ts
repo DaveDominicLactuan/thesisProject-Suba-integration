@@ -100,6 +100,16 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
   ngAfterViewInit() {
     this.platform.ready().then(() => {
        // Handle Android hardware back: prompt before discarding empty session
+
+    //      if (this.backButtonSub) {
+    //   try {
+    //     this.backButtonSub.unsubscribe();
+    //     this.backButtonSub = null;
+    //   } catch (e) {
+    //     console.warn('[UploadImagePage] failed to unsubscribe back button handler', e);
+    //   }
+    // }
+
        try {
         this.backButtonSub = this.platform.backButton.subscribeWithPriority(10, async () => {
           await this.handleExitToHome();
@@ -107,6 +117,8 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
       } catch (e) {
         console.warn('[UploadImagePage] failed to register hardware back handler', e);
       }
+
+    
       // initialize page: load images, sessions and create a new session for this visit
       this.loadStoredImages()
         .then(() => this.loadSessions())
@@ -657,6 +669,16 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
 
   ngOnDestroy() {
     this.mediaStream?.getTracks().forEach(track => track.stop());
+    
+    // Unsubscribe from hardware back button to disconnect custom behavior
+    if (this.backButtonSub) {
+      try {
+        this.backButtonSub.unsubscribe();
+        this.backButtonSub = null;
+      } catch (e) {
+        console.warn('[UploadImagePage] failed to unsubscribe back button handler', e);
+      }
+    }
   }
 
   async goBack() {

@@ -15,6 +15,11 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker;
 export class PdfPageTest03Page {
   @ViewChild('pdfContent') pdfContent!: ElementRef;
   private pdfBlob: Blob | null = null;
+  private backButtonSub: any; // hardware back handler
+
+  ngOnInit() {
+
+    }
 
   constructor() {}
 

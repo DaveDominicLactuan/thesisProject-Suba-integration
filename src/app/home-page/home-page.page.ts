@@ -7,6 +7,7 @@ import { User } from 'firebase/auth';
 import { Auth3Service } from '../services/auth3.service';
 import { ImageStorageService } from '../services/image-storage.service';
 import { App } from '@capacitor/app';
+import { jsPDF } from 'jspdf';
 
 @Component({
   selector: 'app-home-page',
@@ -40,15 +41,6 @@ ngOnInit(): void {
   // avoid making ngOnInit async (implements OnInit expects void)
   // perform async initialization in a separate method
   this.initialize();
-  try { if (this.backButtonSub && typeof this.backButtonSub.unsubscribe === 'function') this.backButtonSub.unsubscribe(); } catch {}
-
-  // Handle hardware back button: exit app from home-page
-  try {
-    this.backButtonSub = App.addListener('backButton', ({ canGoBack }) => {
-      // Always exit from home page instead of returning to login
-      App.exitApp();
-    });
-  } catch {}
 }
 
 /** Perform async initialization tasks (profile + sessions). */
@@ -88,6 +80,18 @@ private async initialize(): Promise<void> {
       }));
       localStorage.setItem('isLoggedIn', 'true');
     } catch {}
+     // Also persist user profile in sessionStorage for current session
+     try {
+       sessionStorage.setItem('userProfile', JSON.stringify({
+         username: this.userName || '',
+         userRole: this.userRole || 'user',
+         firstName: this.firstName || '',
+         lastName: this.lastName || '',
+         engineeringID: this.engineeringID || '',
+         email: this.email || ''
+       }));
+       sessionStorage.setItem('isLoggedInSession', 'true');
+     } catch {}
   } catch (error) {
     console.error(error);
     // Fallback: try to load previously saved user data
@@ -138,6 +142,16 @@ private async initialize(): Promise<void> {
   /** Ionic hook: refresh sessions each time page becomes active. */
   ionViewWillEnter() {
     this.loadSessions();
+  }
+
+  /** Register hardware back handler only while this view is active. */
+  ionViewDidEnter() {
+    this.registerBackButtonHandler();
+  }
+
+  /** Remove hardware back handler when navigating away so other pages work normally. */
+  ionViewWillLeave() {
+    this.removeBackButtonHandler();
   }
 
   /** Load sessions from ImageStorageService and compute image counts. */
@@ -410,6 +424,73 @@ private async initialize(): Promise<void> {
     btn2.style.color = '#fff';
     btn2.style.cursor = 'pointer';
 
+    // Open PDF Viewer with a sample PDF generated via jsPDF
+    const openPdfViewerBtn = document.createElement('button');
+    openPdfViewerBtn.innerText = 'Open PDF Viewer (Sample)';
+    openPdfViewerBtn.style.padding = '10px 14px';
+    openPdfViewerBtn.style.border = 'none';
+    openPdfViewerBtn.style.borderRadius = '6px';
+    openPdfViewerBtn.style.background = '#3880ff';
+    openPdfViewerBtn.style.color = '#fff';
+    openPdfViewerBtn.style.cursor = 'pointer';
+
+    // Open PDF Preview page with testing interface
+    const openPdfPreviewBtn = document.createElement('button');
+    openPdfPreviewBtn.innerText = 'PDF Preview & Testing';
+    openPdfPreviewBtn.style.padding = '10px 14px';
+    openPdfPreviewBtn.style.border = 'none';
+    openPdfPreviewBtn.style.borderRadius = '6px';
+    openPdfPreviewBtn.style.background = '#6366f1';
+    openPdfPreviewBtn.style.color = '#fff';
+    openPdfPreviewBtn.style.cursor = 'pointer';
+
+    // Open PDF Generator page (pdf-lib + native opener)
+    const openPdfGeneratorBtn = document.createElement('button');
+    openPdfGeneratorBtn.innerText = 'PDF Generator (pdf-lib)';
+    openPdfGeneratorBtn.style.padding = '10px 14px';
+    openPdfGeneratorBtn.style.border = 'none';
+    openPdfGeneratorBtn.style.borderRadius = '6px';
+    openPdfGeneratorBtn.style.background = '#10b981';
+    openPdfGeneratorBtn.style.color = '#fff';
+    openPdfGeneratorBtn.style.cursor = 'pointer';
+
+    // PDF Page Test buttons
+    const pdfPageBtn = document.createElement('button');
+    pdfPageBtn.innerText = 'PDF Page';
+    pdfPageBtn.style.padding = '10px 14px';
+    pdfPageBtn.style.border = 'none';
+    pdfPageBtn.style.borderRadius = '6px';
+    pdfPageBtn.style.background = '#8b5cf6';
+    pdfPageBtn.style.color = '#fff';
+    pdfPageBtn.style.cursor = 'pointer';
+
+    const pdfPageTestBtn = document.createElement('button');
+    pdfPageTestBtn.innerText = 'PDF Page Test';
+    pdfPageTestBtn.style.padding = '10px 14px';
+    pdfPageTestBtn.style.border = 'none';
+    pdfPageTestBtn.style.borderRadius = '6px';
+    pdfPageTestBtn.style.background = '#f59e0b';
+    pdfPageTestBtn.style.color = '#fff';
+    pdfPageTestBtn.style.cursor = 'pointer';
+
+    const pdfPageTest02Btn = document.createElement('button');
+    pdfPageTest02Btn.innerText = 'PDF Page Test 02';
+    pdfPageTest02Btn.style.padding = '10px 14px';
+    pdfPageTest02Btn.style.border = 'none';
+    pdfPageTest02Btn.style.borderRadius = '6px';
+    pdfPageTest02Btn.style.background = '#ec4899';
+    pdfPageTest02Btn.style.color = '#fff';
+    pdfPageTest02Btn.style.cursor = 'pointer';
+
+    const pdfPageTest03Btn = document.createElement('button');
+    pdfPageTest03Btn.innerText = 'PDF Page Test 03';
+    pdfPageTest03Btn.style.padding = '10px 14px';
+    pdfPageTest03Btn.style.border = 'none';
+    pdfPageTest03Btn.style.borderRadius = '6px';
+    pdfPageTest03Btn.style.background = '#14b8a6';
+    pdfPageTest03Btn.style.color = '#fff';
+    pdfPageTest03Btn.style.cursor = 'pointer';
+
     // Logout button (acts as Log Out via showTestOverlay)
     const logoutBtn = document.createElement('button');
     logoutBtn.innerText = 'Log Out';
@@ -440,6 +521,58 @@ private async initialize(): Promise<void> {
     // Delete storage button
     btn2.addEventListener('click', () => {
       this.clearImageStorage();
+      if (document.getElementById('test-overlay')) document.body.removeChild(overlay);
+    });
+
+    // Open viewer with a generated sample PDF
+    openPdfViewerBtn.addEventListener('click', () => {
+      try {
+        const doc = new jsPDF();
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(16);
+        doc.text('Hello from PdfViewerPage! ✅', 20, 30);
+        doc.text('This is a sample PDF generated with jsPDF.', 20, 45);
+        // Use data URL (base64) to pass via route
+        const dataUri = doc.output('datauristring');
+        // Navigate to the viewer with the generated source
+        this.router.navigate(['/pdf-viewer-page'], { queryParams: { src: dataUri } });
+        if (document.getElementById('test-overlay')) document.body.removeChild(overlay);
+      } catch (e) {
+        console.warn('Failed to generate sample PDF', e);
+        alert('Failed to generate sample PDF.');
+      }
+    });
+
+    // Open PDF Preview page with testing interface
+    openPdfPreviewBtn.addEventListener('click', () => {
+      this.router.navigate(['/pdf-preview-page']);
+      if (document.getElementById('test-overlay')) document.body.removeChild(overlay);
+    });
+
+    // Open PDF Generator page with pdf-lib
+    openPdfGeneratorBtn.addEventListener('click', () => {
+      this.router.navigate(['/pdf-generator-page']);
+      if (document.getElementById('test-overlay')) document.body.removeChild(overlay);
+    });
+
+    // PDF Page Test navigation handlers
+    pdfPageBtn.addEventListener('click', () => {
+      this.router.navigate(['/pdf-page']);
+      if (document.getElementById('test-overlay')) document.body.removeChild(overlay);
+    });
+
+    pdfPageTestBtn.addEventListener('click', () => {
+      this.router.navigate(['/pdf-page-test']);
+      if (document.getElementById('test-overlay')) document.body.removeChild(overlay);
+    });
+
+    pdfPageTest02Btn.addEventListener('click', () => {
+      this.router.navigate(['/pdf-page-test02']);
+      if (document.getElementById('test-overlay')) document.body.removeChild(overlay);
+    });
+
+    pdfPageTest03Btn.addEventListener('click', () => {
+      this.router.navigate(['/pdf-page-test03']);
       if (document.getElementById('test-overlay')) document.body.removeChild(overlay);
     });
 
@@ -528,10 +661,24 @@ private async initialize(): Promise<void> {
     btn.style.width = '100%';
     btn2.style.width = '100%';
     createSessionBtn.style.width = '100%';
+    openPdfViewerBtn.style.width = '100%';
+    openPdfPreviewBtn.style.width = '100%';
+    openPdfGeneratorBtn.style.width = '100%';
+    pdfPageBtn.style.width = '100%';
+    pdfPageTestBtn.style.width = '100%';
+    pdfPageTest02Btn.style.width = '100%';
+    pdfPageTest03Btn.style.width = '100%';
     
     mainBtnsContainer.appendChild(btn);
     mainBtnsContainer.appendChild(btn2);
     mainBtnsContainer.appendChild(createSessionBtn);
+    mainBtnsContainer.appendChild(openPdfViewerBtn);
+    mainBtnsContainer.appendChild(openPdfPreviewBtn);
+    mainBtnsContainer.appendChild(openPdfGeneratorBtn);
+    mainBtnsContainer.appendChild(pdfPageBtn);
+    mainBtnsContainer.appendChild(pdfPageTestBtn);
+    mainBtnsContainer.appendChild(pdfPageTest02Btn);
+    mainBtnsContainer.appendChild(pdfPageTest03Btn);
     box.appendChild(mainBtnsContainer);
     
     // Bottom row with logout and close buttons
@@ -555,13 +702,32 @@ private async initialize(): Promise<void> {
     document.body.appendChild(overlay);
   }
 
-
-  ngOnDestroy(): void {
+  /** Register a one-page-only back button listener that exits the app from home. */
+  private registerBackButtonHandler() {
     try {
-      if (this.backButtonSub && typeof (this.backButtonSub.remove) === 'function') {
+      // Remove any previous handler to avoid duplicates when re-entering the view
+      this.removeBackButtonHandler();
+      this.backButtonSub = App.addListener('backButton', () => {
+        App.exitApp();
+      });
+    } catch {}
+  }
+
+  /** Remove the home-page back handler so other pages can handle back navigation normally. */
+  private removeBackButtonHandler() {
+    try {
+      if (this.backButtonSub && typeof this.backButtonSub.remove === 'function') {
         this.backButtonSub.remove();
+      } else if (this.backButtonSub && typeof this.backButtonSub.unsubscribe === 'function') {
+        this.backButtonSub.unsubscribe();
       }
     } catch {}
+    this.backButtonSub = null;
+  }
+
+
+  ngOnDestroy(): void {
+    this.removeBackButtonHandler();
   }
   
   
