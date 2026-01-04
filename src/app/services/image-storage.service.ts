@@ -22,6 +22,8 @@ export interface ImageSession {
   name: string;
   imageKeys: string[];
   created: string;
+  // cumulative number of bounding boxes across all images in this session
+  totalBoundingBoxes?: number;
 }
 
 @Injectable({
@@ -132,7 +134,13 @@ export class ImageStorageService {
 
   /** Sessions */
   createSession(name: string, imageKeys: string[] = []): ImageSession {
-    const s: ImageSession = { id: `s-${Date.now()}`, name, imageKeys: [...imageKeys], created: new Date().toISOString() };
+    // compute total bounding boxes for provided keys
+    let totalBoxes = 0;
+    for (const k of imageKeys) {
+      const img = this.images.find(i => i.original === k || (i.withBoxes && i.withBoxes === k));
+      if (img && Array.isArray((img as any).boxes)) totalBoxes += (img as any).boxes.length;
+    }
+    const s: ImageSession = { id: `s-${Date.now()}`, name, imageKeys: [...imageKeys], created: new Date().toISOString(), totalBoundingBoxes: totalBoxes };
     this.sessions.unshift(s);
     // persist sessions
     this.persistSessions();
@@ -153,6 +161,11 @@ export class ImageStorageService {
     const s = this.sessions.find(x => x.id === sessionId);
     if (!s) return false;
     if (!s.imageKeys.includes(imageKey)) s.imageKeys.push(imageKey);
+    // if the image entry exists and has boxes, add to session total
+    const img = this.images.find(i => i.original === imageKey || (i.withBoxes && i.withBoxes === imageKey));
+    if (img && Array.isArray((img as any).boxes)) {
+      s.totalBoundingBoxes = (s.totalBoundingBoxes || 0) + (img as any).boxes.length;
+    }
     this.persistSessions();
     return true;
   }
@@ -185,6 +198,9 @@ export class ImageStorageService {
    */
   async removeImageByOriginal(original: string): Promise<boolean> {
     const before = this.images.length;
+    // find the image being removed so we can adjust session counts
+    const removedImage = this.images.find(img => img.original === original || (img.withBoxes && img.withBoxes === original));
+    const removedBoxes = removedImage && Array.isArray((removedImage as any).boxes) ? (removedImage as any).boxes.length : 0;
     this.images = this.images.filter(img => img.original !== original);
     const after = this.images.length;
     if (after < before) {
@@ -193,8 +209,13 @@ export class ImageStorageService {
       let sessionsChanged = false;
       for (const s of this.sessions) {
         const prevLen = s.imageKeys.length;
+        const hadKey = s.imageKeys.includes(original);
         s.imageKeys = s.imageKeys.filter(k => k !== original);
         if (s.imageKeys.length !== prevLen) sessionsChanged = true;
+        // subtract removed boxes from session total if applicable
+        if (hadKey && removedBoxes > 0) {
+          s.totalBoundingBoxes = Math.max(0, (s.totalBoundingBoxes || 0) - removedBoxes);
+        }
       }
       if (sessionsChanged) await this.persistSessions();
       console.log(`🗑️ Removed image. Remaining images: ${this.images.length}`);

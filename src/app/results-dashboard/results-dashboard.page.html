@@ -67,6 +67,9 @@
               </div>
             </div>
           </div>
+          <div class="graph-subtitle" style="text-align:center; margin-top:12px; color:var(--ion-color-medium);">
+            {{ getGraphSubtitle() }}
+          </div>
         </div>
       </div>
     </div>
@@ -124,6 +127,18 @@
           </div>
         </div>
 
+        <!-- Session Images Selection (visible when session present) -->
+        <div class="overlay-section" *ngIf="sessionId && availableSessionImages.length > 0">
+          <h3>Select Images (Session)</h3>
+          <div class="image-list" style="max-height:200px; overflow:auto; padding:8px 0;">
+            <label *ngFor="let img of availableSessionImages" style="display:flex; align-items:center; gap:8px; margin:6px 0;">
+              <input type="checkbox" [checked]="isSelectedImage(img)" (change)="toggleImageSelection(img)" />
+              <span>{{ getImageKey(img) }}</span>
+            </label>
+          </div>
+          <div style="font-size:12px; color:var(--ion-color-medium);">Toggling images updates the graph immediately.</div>
+        </div>
+
         <!-- Apply Button -->
         <div class="overlay-footer">
           <button class="overlay-apply-btn" (click)="applyGraphSelection()">Apply & View Graph</button>
@@ -133,7 +148,7 @@
 
     <!-- Export Button -->
     <div class="footer">
-      <button class="export-btn" (click)="previewPDF()">Export & Preview PDF Results</button>
+      <button class="export-btn" (click)="ExportPDF()">Export & Preview PDF Results</button>
     </div>
   </ion-content>
 </div>

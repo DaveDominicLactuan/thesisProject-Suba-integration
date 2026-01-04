@@ -45,9 +45,11 @@ signupForm: FormGroup;
     this.error = '';
     try {
       await this.auth3.login(this.email, this.password);
+      console.log('[LoginPage] Auth login succeeded for', this.email);
       // After successful login, persist login state and basic user data
       try {
         const profile = await this.auth3.getUserProfile();
+        console.log('[LoginPage] Retrieved user profile from Firestore:', profile);
         const firstName = profile['firstName'] || '';
         const lastName = profile['lastName'] || '';
         const engineeringID = profile['engineeringID'] || '';

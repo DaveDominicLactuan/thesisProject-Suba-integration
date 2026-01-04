@@ -69,25 +69,63 @@ export class PdfPageTest02Page {
    * This is the single source of truth for all PDF content
    */
   private getDocumentDefinition(): TDocumentDefinitions {
+    // Placeholder base64 images - replace these with your actual crack images
+    const imgPlain = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+    const imgBox = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+
     const content: Content[] = [
       {
-        text: 'Ionic PDF Example',
+        text: 'Crack',
         style: 'header',
         alignment: 'center',
-        margin: [0, 0, 0, 20]
+        margin: [0, 0, 0, 0]
       },
       {
-        text: 'Hello from Ionic + pdfMake!',
+        text: 'Damage',
+        style: 'header',
         alignment: 'center',
-        margin: [0, 0, 0, 10]
+        margin: [0, 0, 0, 0]
       },
       {
-        text: 'This PDF was generated in an Ionic app using pdfMake.'
+        text: 'Report',
+        style: 'header',
+        alignment: 'center',
+        margin: [0, 0, 0, 30]
       },
       {
-        text: 'Enjoy!',
-        style: 'subheader',
-        margin: [0, 10, 0, 0]
+        text: [
+          'The crack shown in image 1 (increment based of img) is a ',
+          { text: '(insert crack type here for image)', bold: true },
+          ', the shape of the crack is ',
+          { text: '(insert crack shape here)', bold: true },
+          ' and it is a ',
+          { text: '(insert crack severity here)', bold: true },
+          ' in severity'
+        ],
+        alignment: 'justify',
+        margin: [0, 0, 0, 30]
+      },
+      {
+        text: 'Img 1 without boxes and img 2 with boxes',
+        alignment: 'center',
+        margin: [0, 0, 0, 20],
+        fontSize: 12,
+        italics: true
+      },
+      {
+        columns: [
+          {
+            image: imgPlain,
+            width: 250,
+            alignment: 'center'
+          },
+          {
+            image: imgBox,
+            width: 250,
+            alignment: 'center'
+          }
+        ],
+        columnGap: 10
       }
     ];
 
@@ -97,14 +135,9 @@ export class PdfPageTest02Page {
       content,
       styles: {
         header: {
-          fontSize: 22,
+          fontSize: 24,
           bold: true,
-          color: '#2196F3'
-        },
-        subheader: {
-          fontSize: 16,
-          italics: true,
-          color: '#666'
+          color: '#000000'
         }
       }
     };

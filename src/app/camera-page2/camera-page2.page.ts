@@ -78,6 +78,7 @@ export class CameraPage2Page implements AfterViewInit {
   // Track if this session is brand new and no images have been added during this visit
   sessionIsPristine: boolean = false;
   imagesUploadedThisSession: number = 0; // Track number of images uploaded during this page visit
+  totalBoundingBoxesCreated: number = 0; // Counter for cumulative bounding boxes across all images
 
   /**
    * Remaining images to finish processing.
@@ -269,6 +270,8 @@ export class CameraPage2Page implements AfterViewInit {
       }
     } finally {
       this.isProcessing = false;
+      // Log cumulative bounding box count after processing
+      this.logBoundingBoxStats();
     }
   }
 
@@ -467,12 +470,45 @@ export class CameraPage2Page implements AfterViewInit {
         const thumbnails = thumbScroll.querySelectorAll('img.thumbnail2');
         thumbnails.forEach((img) => {
           const imageElement = img as HTMLImageElement; // Cast to HTMLImageElement
+          // If this thumbnail corresponds to a stored image, swap src based on toggle
+          const storedIndex = imageElement.dataset['storedIndex'];
+          if (storedIndex !== undefined && storedIndex !== '') {
+            const si = parseInt(storedIndex, 10);
+            const entry = this.storedImages && this.storedImages[si];
+            if (entry) {
+              imageElement.src = this.showWithBoxes ? (entry as any).withBoxes || entry.original : entry.original;
+            }
+          }
+          // update border highlighting
           imageElement.style.border = imageElement.src === this.selectedThumbSrc ? '3px solid #2ecc71' : '2px solid #fff';
         });
       };
       this._overlayUpdateThumbs = updateThumbnails;
 
-      if (!this.capturedImages || this.capturedImages.length === 0) {
+      // Prefer storedImages (persisted) when available so we can toggle between original/withBoxes
+      if (this.storedImages && this.storedImages.length > 0) {
+        this.storedImages.forEach((entry, idx) => {
+          const img = document.createElement('img');
+          img.className = 'thumbnail2';
+          img.style.display = 'block';
+          img.style.maxWidth = '85%';
+          img.style.maxHeight = '60vh';
+          img.style.objectFit = 'contain';
+          img.style.borderRadius = '6px';
+          img.style.boxShadow = '0 0 6px rgba(0,0,0,0.12)';
+          img.style.cursor = 'pointer';
+          img.dataset['storedIndex'] = String(idx);
+          img.src = this.showWithBoxes ? (entry as any).withBoxes || entry.original : entry.original;
+          img.style.border = img.src === this.selectedThumbSrc ? '3px solid #2ecc71' : '2px solid #fff';
+          img.onclick = () => {
+            this.selectedThumbSrc = img.src;
+            this.selectedImageTitle = entry.filename || `Stored ${idx + 1}`;
+            title.textContent = this.selectedImageTitle;
+            updateThumbnails();
+          };
+          thumbScroll.appendChild(img);
+        });
+      } else if (!this.capturedImages || this.capturedImages.length === 0) {
         const placeholder = document.createElement('div');
         placeholder.textContent = 'No thumbnails available';
         placeholder.style.padding = '18px';
@@ -1072,7 +1108,24 @@ export class CameraPage2Page implements AfterViewInit {
     } finally {
       // Always clear processing flag so UI is responsive again
       this.isProcessing = false;
+      // Log cumulative bounding box count
+      this.logBoundingBoxStats();
     }
+  }
+
+  /**
+   * Log current bounding box statistics
+   */
+  private logBoundingBoxStats() {
+    console.log(`
+╔════════════════════════════════════════╗
+║   📊 BOUNDING BOX STATISTICS           ║
+╠════════════════════════════════════════╣
+║ Total Images Captured/Processed: ${String(this.photosTaken).padEnd(13)}║
+║ Total Bounding Boxes Created: ${String(this.totalBoundingBoxesCreated).padEnd(18)}║
+║ Avg Boxes Per Image: ${(this.photosTaken > 0 ? (this.totalBoundingBoxesCreated / this.photosTaken).toFixed(2) : '0').padEnd(23)}║
+╚════════════════════════════════════════╝
+    `);
   }
 
   /** Resize + normalize image to [1,3,128,128] Float32Array */
@@ -1386,6 +1439,10 @@ export class CameraPage2Page implements AfterViewInit {
           ctx.strokeRect(x, y, w, h);
         });
 
+        // Increment total bounding box counter and log
+        this.totalBoundingBoxesCreated += boxes.length;
+        console.log(`📦 Bounding boxes drawn: ${boxes.length} | 📊 Total cumulative boxes: ${this.totalBoundingBoxesCreated}`);
+
         resolve(canvas.toDataURL('image/jpeg'));
       };
       // in case image is already cached
@@ -1496,8 +1553,15 @@ export class CameraPage2Page implements AfterViewInit {
 
     if (!closestImg) return;
     const src = (closestImg as HTMLImageElement).src;
-    const idx = this.capturedImages.indexOf(src);
-    const newTitle = idx >= 0 ? `Captured ${idx + 1}` : src;
+    // Prefer storedImages (which may have withBoxes) when resolving title
+    let newTitle = src;
+    const storedIdx = this.storedImages ? this.storedImages.findIndex(s => (s as any).withBoxes === src || s.original === src) : -1;
+    if (storedIdx !== -1) {
+      newTitle = this.storedImages[storedIdx].filename || `Stored ${storedIdx + 1}`;
+    } else {
+      const idx = this.capturedImages.indexOf(src);
+      if (idx >= 0) newTitle = `Captured ${idx + 1}`;
+    }
 
     this.selectedThumbSrc = src;
     this.selectedImageTitle = newTitle;

@@ -2,6 +2,7 @@
 .ion-padding{--background:#008799;background:#008799}
 
 .card{background:#fff;border-radius:12px;box-shadow:0 4px 12px rgba(0,0,0,.15);padding:16px;margin:12px auto;max-width:360px}
+.card.header-card{margin-top:7px}
 .header-card .header-row{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
 .header-card .title{font-weight:700;color:#000c2e}
 .header-card .scope{font-size:12px;color:#666}
@@ -17,8 +18,8 @@
 
 .tiles{display:flex;gap:16px;justify-content:center;margin:16px}
 .tile{width:150px;height:150px;border-radius:12px;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#fff;box-shadow:0 6px 18px rgba(0,0,0,.2)}
-.tile.blue{background:#1E39FF}
-.tile.red{background:#FF1E1E}
+.tile.blue{background:linear-gradient(to right,#ff512f,#f09819)}
+.tile.red{background:linear-gradient(to right,#ff512f,#f09819)}
 .tile-value{font-size:36px;font-weight:800}
 .tile-label{margin-top:6px;font-weight:600}
 

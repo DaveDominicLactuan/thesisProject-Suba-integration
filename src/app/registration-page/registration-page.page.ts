@@ -69,7 +69,7 @@ this.regForm = this.fb.group({
 }
 
 //Function to check if the password and confirmPassword are the same
-
+/*  firstName, lastName, engineeringID, email
  /**
   * Cross-field validator to ensure password and confirmPassword match.
   */
@@ -136,7 +136,7 @@ async onRegister() {
   try {
     // Call the auth service to register a new user with provided credentials
     // selectedRole already contains 'engineer' or 'user'
-    await this.auth3.register(
+    const userCredential = await this.auth3.register(
       email ?? '',           // Email address (use empty string if null)
       password ?? '',        // Password (use empty string if null)
       firstName ?? '',       // First name (use empty string if null)
@@ -144,6 +144,30 @@ async onRegister() {
       engineeringID ?? '',   // Engineering ID (use empty string if null)
       this.selectedRole ?? 'user'  // User role ('engineer' or 'user')
     );
+
+    // Log that the registration call succeeded at the auth layer
+    const createdUid = userCredential?.user?.uid;
+    console.log('[RegistrationPage] Auth registration succeeded for', email, 'uid=', createdUid);
+
+    // If registration succeeds, attempt to write the user's profile to Firestore
+    try {
+      const uid = userCredential?.user?.uid;
+      if (uid) {
+        await this.firestore.collection('users').doc(uid).set({
+          firstName: firstName ?? '',
+          lastName: lastName ?? '',
+          engineeringID: engineeringID ?? '',
+          email: email ?? '',
+          role: this.selectedRole ?? 'user',
+          created: new Date()
+        });
+        console.log(`[RegistrationPage] Firestore profile written for uid: ${uid}`);
+      } else {
+        console.warn('[RegistrationPage] could not determine uid after register; profile not written');
+      }
+    } catch (fireErr) {
+      console.warn('[RegistrationPage] Firestore write failed:', fireErr);
+    }
 
     // If registration succeeds, set success message and navigate to login
     this.registrationSuccess = 'Account created successfully. You can now sign in.';

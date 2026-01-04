@@ -38,6 +38,9 @@ export class ResultsDashboardPage implements OnInit {
   selectedGraphType: 'type' | 'shape' | 'severity' = 'type'; // track which data to display
   selectedChartType: 'bar' | 'pie' = 'bar'; // bar or pie chart
   showGraphOverlay = false; // overlay visibility
+  // Session image selection
+  availableSessionImages: StoredImage[] = [];
+  selectedImageKeys: string[] = [];
   Math = Math;
   private backButtonSub: any; // hardware back handler
 
@@ -59,6 +62,11 @@ export class ResultsDashboardPage implements OnInit {
     this.route.queryParams.subscribe((params) => {
       this.sessionId = params['sessionId'] || null;
       this.loadData();
+      try {
+        this.printSessionObjects();
+      } catch (e) {
+        console.warn('printSessionObjects failed:', e);
+      }
     });
 
      
@@ -67,15 +75,55 @@ export class ResultsDashboardPage implements OnInit {
   private loadData(): void {
     const all = this.storage.getAllImages();
     let imgs: StoredImage[] = all;
-
     if (this.sessionId) {
       const s = this.storage.getSession(this.sessionId);
       if (s) {
-        imgs = all.filter((i) => s.imageKeys.includes(i.filename));
+        // filter images by session keys - match by original or filename for compatibility
+        imgs = all.filter((i) => s.imageKeys.includes(i.original) || s.imageKeys.includes(i.filename));
+        // populate available session images and default selection to all
+        this.availableSessionImages = imgs;
+        this.selectedImageKeys = imgs.map((i) => this.getImageKey(i));
+        // aggregate based on selected images (initially all)
+        this.aggregateSelectedImages();
+        // Use stored session totalBoundingBoxes if available for totalCracks (keeps previous behaviour)
+        if (typeof (s as any).totalBoundingBoxes === 'number') {
+          // prefer stored session totalBoundingBoxes if available for totalCracks
+          this.stats.totalCracks = (s as any).totalBoundingBoxes || 0;
+        }
+        // set totalImages to the actual number of images present in storage for this session
+        this.stats.totalImages = imgs.length;
+        return;
       }
     }
 
+    // No session specified or session not found -> aggregate across all images
     this.aggregate(imgs, all.length);
+  }
+
+  // Return a stable key for an image (filename preferred, fallback to original)
+  getImageKey(img: StoredImage): string {
+    return (img as any).filename || (img as any).original || '';
+  }
+
+  isSelectedImage(img: StoredImage): boolean {
+    return this.selectedImageKeys.includes(this.getImageKey(img));
+  }
+
+  toggleImageSelection(img: StoredImage): void {
+    const key = this.getImageKey(img);
+    const idx = this.selectedImageKeys.indexOf(key);
+    if (idx > -1) this.selectedImageKeys.splice(idx, 1);
+    else this.selectedImageKeys.push(key);
+    // re-aggregate using the updated selection
+    this.aggregateSelectedImages();
+  }
+
+  // Aggregate only images currently selected for the session
+  private aggregateSelectedImages(): void {
+    if (!this.availableSessionImages || this.availableSessionImages.length === 0) return;
+    const selected = this.availableSessionImages.filter((i) => this.selectedImageKeys.includes(this.getImageKey(i)));
+    const totalImages = selected.length;
+    this.aggregate(selected, totalImages);
   }
 
   private aggregate(images: StoredImage[], totalImages: number): void {
@@ -87,10 +135,12 @@ export class ResultsDashboardPage implements OnInit {
     images.forEach((img) => {
       const p = img.prediction;
       if (!p) return;
-      totalCracks++;
-      if (p.type) type[p.type] = (type[p.type] || 0) + 1;
-      if (p.severity) severity[p.severity] = (severity[p.severity] || 0) + 1;
-      if (p.shape) shape[p.shape] = (shape[p.shape] || 0) + 1;
+      // If the image has multiple detection boxes, count each box as a separate detection.
+      const boxCount = Array.isArray((img as any).boxes) && (img as any).boxes.length > 0 ? (img as any).boxes.length : 1;
+      totalCracks += boxCount;
+      if (p.type) type[p.type] = (type[p.type] || 0) + boxCount;
+      if (p.severity) severity[p.severity] = (severity[p.severity] || 0) + boxCount;
+      if (p.shape) shape[p.shape] = (shape[p.shape] || 0) + boxCount;
     });
 
     this.stats = { type, severity, shape, totalCracks, totalImages };
@@ -173,6 +223,48 @@ export class ResultsDashboardPage implements OnInit {
         return 'Severity';
       default:
         return 'Type';
+    }
+  }
+
+  // Short descriptive subtitle for pie graph explaining example categories
+  getGraphSubtitle(): string {
+    switch (this.selectedGraphType) {
+      case 'type':
+        return 'Examples: diagonal, horizontal, bar-like';
+      case 'severity':
+        return 'Examples: minor';
+      case 'shape':
+        return 'Examples: branching, straight';
+      default:
+        return '';
+    }
+  }
+
+  ExportPDF() {
+    const queryParams: any = {};
+    if (this.sessionId) queryParams.sessionId = this.sessionId;
+    this.router.navigate(['/pdf-page-test03'], { queryParams });
+  }
+
+  /**
+   * Print the current session objects to the console for debugging.
+   */
+  private printSessionObjects(): void {
+    try {
+      console.log('--- Session Objects (ResultsDashboard) ---');
+      console.log('sessionId:', this.sessionId);
+      const storedSession = this.sessionId ? this.storage.getSession(this.sessionId) : null;
+      console.log('storedSession:', storedSession);
+      if (this.availableSessionImages && this.availableSessionImages.length > 0) {
+        console.log(`availableSessionImages (${this.availableSessionImages.length}):`, this.availableSessionImages);
+      } else {
+        console.log('availableSessionImages: none');
+      }
+      console.log('selectedImageKeys:', this.selectedImageKeys);
+      console.log('stats:', this.stats);
+      console.log('------------------------------------------');
+    } catch (err) {
+      console.warn('Error while printing session objects:', err);
     }
   }
 }

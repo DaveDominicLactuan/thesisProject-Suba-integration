@@ -672,10 +672,10 @@ private async initialize(): Promise<void> {
     mainBtnsContainer.appendChild(btn);
     mainBtnsContainer.appendChild(btn2);
     mainBtnsContainer.appendChild(createSessionBtn);
-    mainBtnsContainer.appendChild(openPdfViewerBtn);
-    mainBtnsContainer.appendChild(openPdfPreviewBtn);
-    mainBtnsContainer.appendChild(openPdfGeneratorBtn);
-    mainBtnsContainer.appendChild(pdfPageBtn);
+    // mainBtnsContainer.appendChild(openPdfViewerBtn);
+    // mainBtnsContainer.appendChild(openPdfPreviewBtn);
+    // mainBtnsContainer.appendChild(openPdfGeneratorBtn);
+    // mainBtnsContainer.appendChild(pdfPageBtn);
     mainBtnsContainer.appendChild(pdfPageTestBtn);
     mainBtnsContainer.appendChild(pdfPageTest02Btn);
     mainBtnsContainer.appendChild(pdfPageTest03Btn);
@@ -734,5 +734,32 @@ private async initialize(): Promise<void> {
 
   // Additional methods can be added here
 
+  /**
+   * Return the currently-authenticated Firebase user and Firestore profile (if available).
+   * Uses `Auth3Service` which exposes `getCurrentUser()` and `getUserProfile()`.
+   */
+  async getCurrentUserInfo(): Promise<{ user: any | null; profile: any | null } | null> {
+    try {
+      const user = this.auth3.getCurrentUser ? this.auth3.getCurrentUser() : null;
+      const profile = user && this.auth3.getUserProfile ? await this.auth3.getUserProfile() : null;
+      console.log('[HomePage] getCurrentUserInfo', { user, profile });
+      return { user, profile };
+    } catch (err) {
+      console.warn('[HomePage] getCurrentUserInfo failed', err);
+      return null;
+    }
+  }
+
+  /**
+   * Synchronous accessor for the underlying Firebase User object (may be null).
+   */
+  getCurrentUserSync(): any | null {
+    try {
+      return this.auth3.getCurrentUser ? this.auth3.getCurrentUser() : null;
+    } catch (err) {
+      console.warn('[HomePage] getCurrentUserSync failed', err);
+      return null;
+    }
+  }
 
 }

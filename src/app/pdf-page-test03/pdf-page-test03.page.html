@@ -1,23 +1,29 @@
+<!-- <ion-header>
+  <ion-toolbar>
+    <ion-title>PDF Preview</ion-title>
+  </ion-toolbar>
+</ion-header> -->
 
+<ion-content [fullscreen]="true">
+  <!-- <ion-button expand="full" (click)="previewPdf()">Generate & Preview PDF</ion-button> -->
+  <div #pdfContainer style="display: flex; justify-content: center; align-items: flex-start; width: 100%; margin-top: 0; padding-top: 0;"></div>
 
-<ion-content padding>
-
-  <!-- PDF Source Content -->
-  <div #pdfContent id="pdf-content" class="pdf-content">
-    <h2>Sample Multi-page Invoice</h2>
-    <p>This is a long list to ensure multiple pages are generated.</p>
-    <ul>
-      <li *ngFor="let i of [].constructor(50); let idx = index">
-        Item {{ idx + 1 }} - Example description for invoice
-      </li>
-    </ul>
+  <div class="bottom-actions">
+    <ion-button fill="clear" (click)="openPDF()">
+      <ion-icon name="open-outline"></ion-icon>
+      <span>Open</span>
+    </ion-button>
+    <ion-button fill="clear" (click)="previewPDF2()">
+      <ion-icon name="document-text-outline"></ion-icon>
+      <span>Preview</span>
+    </ion-button>
+    <ion-button fill="clear" (click)="previewPdf()">
+      <ion-icon name="open-outline"></ion-icon>
+      <span>Generate & Preview PDF</span>
+    </ion-button>
+    <ion-button fill="clear" (click)="downloadPDF()">
+      <ion-icon name="download-outline"></ion-icon>
+      <span>Download</span>
+    </ion-button>
   </div>
-
-  <!-- Buttons -->
-  <button ion-button block (click)="generatePdf()">Generate & Preview</button>
-  <button ion-button block color="secondary" (click)="downloadPdf()">Download</button>
-
-  <!-- Preview Area -->
-  <div id="pdf-preview" class="pdf-preview"></div>
-
 </ion-content>

@@ -71,6 +71,7 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
   selectedSessionId: string | null = null;
   sessionIsPristine: boolean = false; // Tracks if current session has had images added during this visit
   imagesUploadedThisSession: number = 0; // Track number of images uploaded during this page visit
+  totalBoundingBoxesCreated: number = 0; // Counter for cumulative bounding boxes across all images
   private backButtonSub: any; // hardware back handler
 
   get countdown() {
@@ -457,7 +458,24 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
       console.error('takePicture error', err);
     } finally {
       this.isProcessing = false;
+      // Log cumulative bounding box stats after capture processing
+      this.logBoundingBoxStats();
     }
+  }
+
+  /**
+   * Log current bounding box statistics
+   */
+  private logBoundingBoxStats() {
+    console.log(`
+╔════════════════════════════════════════╗
+║   📊 BOUNDING BOX STATISTICS           ║
+╠════════════════════════════════════════╣
+║ Total Images Captured/Processed: ${String(this.photosTaken).padEnd(13)}║
+║ Total Bounding Boxes Created: ${String(this.totalBoundingBoxesCreated).padEnd(18)}║
+║ Avg Boxes Per Image: ${(this.photosTaken > 0 ? (this.totalBoundingBoxesCreated / this.photosTaken).toFixed(2) : '0').padEnd(23)}║
+╚════════════════════════════════════════╝
+    `);
   }
 
   /** Resize + normalize image to [1,3,128,128] Float32Array */
@@ -1083,6 +1101,11 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
           const h = Math.round(b.h * scaleY);
           ctx.strokeRect(x, y, w, h);
         });
+
+        // Increment total bounding box counter and log
+        this.totalBoundingBoxesCreated += boxes.length;
+        console.log(`📦 Bounding boxes drawn: ${boxes.length} | 📊 Total cumulative boxes: ${this.totalBoundingBoxesCreated}`);
+
         resolve(canvas.toDataURL('image/png'));
       };
       if (img.complete && img.naturalWidth) img.onload!(null as any);
@@ -1297,6 +1320,8 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
     } finally {
       // Do NOT increment photosProcessed here - let updatePhotoCounts handle it from storage
       this.isProcessing = false;
+      // Log cumulative bounding box stats after upload processing
+      this.logBoundingBoxStats();
     }
   }
 
