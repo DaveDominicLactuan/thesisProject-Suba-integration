@@ -389,14 +389,6 @@ private async initialize(): Promise<void> {
           <span style="font-weight:600;color:#555;">Role:</span> 
           <span style="color:#333;text-transform:capitalize;">${this.userRole || 'N/A'}</span>
         </div>
-        <div style="margin-bottom:8px;">
-          <span style="font-weight:600;color:#555;">Email:</span> 
-          <span style="color:#333;">${this.email || 'N/A'}</span>
-        </div>
-        ${this.engineeringID ? `<div style="margin-bottom:8px;">
-          <span style="font-weight:600;color:#555;">Engineering ID:</span> 
-          <span style="color:#333;">${this.engineeringID}</span>
-        </div>` : ''}
         <div style="margin-bottom:0;">
           <span style="font-weight:600;color:#555;">Status:</span> 
           <span style="color:#28a745;font-weight:600;">${this.isLoggedIn ? 'Logged In' : 'Logged Out'}</span>
@@ -669,16 +661,16 @@ private async initialize(): Promise<void> {
     pdfPageTest02Btn.style.width = '100%';
     pdfPageTest03Btn.style.width = '100%';
     
-    mainBtnsContainer.appendChild(btn);
-    mainBtnsContainer.appendChild(btn2);
-    mainBtnsContainer.appendChild(createSessionBtn);
+    // mainBtnsContainer.appendChild(btn);
+    // mainBtnsContainer.appendChild(btn2);
+    // mainBtnsContainer.appendChild(createSessionBtn);
     // mainBtnsContainer.appendChild(openPdfViewerBtn);
     // mainBtnsContainer.appendChild(openPdfPreviewBtn);
     // mainBtnsContainer.appendChild(openPdfGeneratorBtn);
     // mainBtnsContainer.appendChild(pdfPageBtn);
-    mainBtnsContainer.appendChild(pdfPageTestBtn);
-    mainBtnsContainer.appendChild(pdfPageTest02Btn);
-    mainBtnsContainer.appendChild(pdfPageTest03Btn);
+    // mainBtnsContainer.appendChild(pdfPageTestBtn);
+    // mainBtnsContainer.appendChild(pdfPageTest02Btn);
+    // mainBtnsContainer.appendChild(pdfPageTest03Btn);
     box.appendChild(mainBtnsContainer);
     
     // Bottom row with logout and close buttons

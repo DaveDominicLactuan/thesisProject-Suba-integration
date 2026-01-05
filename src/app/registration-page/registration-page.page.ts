@@ -173,8 +173,10 @@ async onRegister() {
     this.registrationSuccess = 'Account created successfully. You can now sign in.';
     console.log('[RegistrationPage] account created', { email, firstName, lastName, engineeringID, role: this.selectedRole });
     // Give the success message a brief moment before redirecting to login
+    // this.router.navigate(['/landing-page'])
     setTimeout(() => {
-      this.router.navigateByUrl('/login', { replaceUrl: true });
+      // this.router.navigateByUrl('/login', { replaceUrl: true });
+      this.router.navigate(['/landing-page'])
     }, 400);
   } catch (err: any) {
     // If registration fails, extract the error message from the exception
