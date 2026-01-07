@@ -8,9 +8,9 @@
   <p *ngIf="firstName && lastName" class="profileName">
      {{ firstName }} {{ lastName }}
   </p>
-  <p *ngIf="userRole" style="font-size:14px;color:#666;margin-top:4px;">
+  <!-- <p *ngIf="userRole" style="font-size:14px;color:#666;margin-top:4px;">
     Role: {{ userRole | titlecase }}
-  </p>
+  </p> -->
   <p *ngIf="(!firstName || !lastName) && userName" class="profileName">
     {{ userName }}
   </p>

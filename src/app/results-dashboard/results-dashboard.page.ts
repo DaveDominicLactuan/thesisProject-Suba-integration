@@ -35,7 +35,7 @@ export class ResultsDashboardPage implements OnInit {
 
   // UI state
   showBar = true; // toggle between BAR and PIE sections
-  selectedGraphType: 'type' | 'shape' | 'severity' = 'type'; // track which data to display
+  selectedGraphType: 'type' | 'shape' | 'severity' | 'all' = 'type'; // track which data to display
   selectedChartType: 'bar' | 'pie' = 'bar'; // bar or pie chart
   showGraphOverlay = false; // overlay visibility
   // Session image selection
@@ -69,6 +69,14 @@ export class ResultsDashboardPage implements OnInit {
       }
     });
 
+    /**
+     * Lifecycle hook invoked after component construction.
+     * - Reads `sessionId` from query params.
+     * - Loads session/image data via `loadData()`.
+     * - Attempts a debug dump via `printSessionObjects()`.
+     * Interaction: entry point for initializing UI state and statistics.
+     */
+
      
   }
 
@@ -79,7 +87,21 @@ export class ResultsDashboardPage implements OnInit {
       const s = this.storage.getSession(this.sessionId);
       if (s) {
         // filter images by session keys - match by original or filename for compatibility
-        imgs = all.filter((i) => s.imageKeys.includes(i.original) || s.imageKeys.includes(i.filename));
+        // Match session image keys against multiple possible stored-image identifiers
+        imgs = all.filter((i) =>
+          s.imageKeys.includes(i.original) ||
+          (i.withBoxes && s.imageKeys.includes(i.withBoxes)) ||
+          (i.filename && s.imageKeys.includes(i.filename))
+        );
+        // Deduplicate by original key in case of accidental duplicates
+        const seen = new Set<string>();
+        imgs = imgs.filter(i => {
+          const key = i.original || i.filename || (i.withBoxes as string) || '';
+          if (!key) return false;
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        });
         // populate available session images and default selection to all
         this.availableSessionImages = imgs;
         this.selectedImageKeys = imgs.map((i) => this.getImageKey(i));
@@ -105,6 +127,12 @@ export class ResultsDashboardPage implements OnInit {
     return (img as any).filename || (img as any).original || '';
   }
 
+  /**
+   * Return a stable key for an image used in selection and lookup.
+   * Prefers `filename`, falls back to `original`.
+   * Interaction: used by selection helpers and to deduplicate images.
+   */
+
   isSelectedImage(img: StoredImage): boolean {
     return this.selectedImageKeys.includes(this.getImageKey(img));
   }
@@ -117,6 +145,12 @@ export class ResultsDashboardPage implements OnInit {
     // re-aggregate using the updated selection
     this.aggregateSelectedImages();
   }
+
+  /**
+   * Toggle selection state for an image and re-aggregate stats.
+   * Interaction: updates `selectedImageKeys` then calls `aggregateSelectedImages()`
+   * to refresh `stats` displayed in the UI.
+   */
 
   // Aggregate only images currently selected for the session
   private aggregateSelectedImages(): void {
@@ -133,9 +167,21 @@ export class ResultsDashboardPage implements OnInit {
     let totalCracks = 0;
 
     images.forEach((img) => {
+      // Prefer `rawPrediction` array if present: each entry counts as one detection
+      const raw = (img as any).rawPrediction;
+      if (Array.isArray(raw) && raw.length > 0) {
+        raw.forEach((rp: any) => {
+          totalCracks += 1;
+          if (rp.type) type[rp.type] = (type[rp.type] || 0) + 1;
+          if (rp.severity) severity[rp.severity] = (severity[rp.severity] || 0) + 1;
+          if (rp.shape) shape[rp.shape] = (shape[rp.shape] || 0) + 1;
+        });
+        return; // move to next image
+      }
+
+      // Fallback: maintain previous behaviour using single prediction + optional boxes
       const p = img.prediction;
       if (!p) return;
-      // If the image has multiple detection boxes, count each box as a separate detection.
       const boxCount = Array.isArray((img as any).boxes) && (img as any).boxes.length > 0 ? (img as any).boxes.length : 1;
       totalCracks += boxCount;
       if (p.type) type[p.type] = (type[p.type] || 0) + boxCount;
@@ -151,6 +197,11 @@ export class ResultsDashboardPage implements OnInit {
     if (this.stats.totalImages === 0) return 0;
     return Math.round((this.stats.totalCracks / this.stats.totalImages) * 100);
   }
+
+  /**
+   * Computed percent used for donut-style indicators.
+   * Interaction: reads `stats.totalCracks` and `stats.totalImages`.
+   */
 
   getScopeText(): string {
     return this.sessionId ? 'This Session' : 'All Sessions';
@@ -175,7 +226,12 @@ export class ResultsDashboardPage implements OnInit {
     this.router.navigate(['/pdf-preview-page'], { queryParams });
   }
 
-  selectGraphType(type: 'type' | 'shape' | 'severity') {
+  /**
+   * Navigate to the PDF preview page for the current scope.
+   * Interaction: builds `queryParams` including `sessionId` and navigates.
+   */
+
+  selectGraphType(type: 'type' | 'shape' | 'severity' | 'all') {
     this.selectedGraphType = type;
     console.log(`[Graph Selection] Data Type selected: ${type}`);
   }
@@ -201,6 +257,32 @@ export class ResultsDashboardPage implements OnInit {
   }
 
   getSelectedData(): { [k: string]: number } {
+    // If user wants to view all categories, merge them with readable prefixes
+    if (this.selectedGraphType === 'all') {
+      const out: { [k: string]: number } = {};
+      const hasType = this.stats.type && Object.keys(this.stats.type).length > 0;
+      const hasShape = this.stats.shape && Object.keys(this.stats.shape).length > 0;
+      const hasSeverity = this.stats.severity && Object.keys(this.stats.severity).length > 0;
+
+      if (hasType) {
+        Object.entries(this.stats.type).forEach(([k, v]) => { out[`Type - ${k}`] = v; });
+      }
+      if (hasShape) {
+        Object.entries(this.stats.shape).forEach(([k, v]) => { out[`Shape - ${k}`] = v; });
+      }
+      if (hasSeverity) {
+        Object.entries(this.stats.severity).forEach(([k, v]) => { out[`Severity - ${k}`] = v; });
+      }
+
+      // If no real stats available, fall back to placeholder combined view
+      if (Object.keys(out).length === 0) {
+        Object.entries(this.placeholderData.type).forEach(([k, v]) => { out[`Type - ${k}`] = v; });
+        Object.entries(this.placeholderData.shape).forEach(([k, v]) => { out[`Shape - ${k}`] = v; });
+        Object.entries(this.placeholderData.severity).forEach(([k, v]) => { out[`Severity - ${k}`] = v; });
+      }
+      return out;
+    }
+
     switch (this.selectedGraphType) {
       case 'type':
         return this.stats.type && Object.keys(this.stats.type).length > 0 ? this.stats.type : this.placeholderData.type;
@@ -221,6 +303,8 @@ export class ResultsDashboardPage implements OnInit {
         return 'Shape';
       case 'severity':
         return 'Severity';
+      case 'all':
+        return 'All Categories';
       default:
         return 'Type';
     }
@@ -235,6 +319,8 @@ export class ResultsDashboardPage implements OnInit {
         return 'Examples: minor';
       case 'shape':
         return 'Examples: branching, straight';
+      case 'all':
+        return 'Combined: type, severity and shape';
       default:
         return '';
     }

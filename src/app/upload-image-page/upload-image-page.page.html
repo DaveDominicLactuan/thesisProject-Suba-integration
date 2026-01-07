@@ -5,13 +5,18 @@
     <button class="back-btn" type="button" (click)="onBack()">
       <img src="assets/wArrow.png" alt="Back" class="back-icon" />
     </button>
-    <button class="top-btn right" (click)="goToFeedBackPage()">↻</button>
+    <div class="toggle-wrapper">
+      <label class="switch">
+        <input type="checkbox" [(ngModel)]="showWithBoxes" (change)="detectCenterThumbnail()" />
+        <span class="slider round"></span>
+      </label>
+    </div>
   </div>
 
 
   <div *ngIf="imagePaths.length === 0 && capturedImages.length === 0" class="thumbnail-placeholder"></div>
   <div *ngIf="imagePaths.length > 0" class="thumbnail-scroll2" #thumbScroll (scroll)="onThumbnailScroll($event)" [ngClass]="getThumbClasses(imagePaths.length)">
-    <img *ngFor="let img of imagePaths" [src]="img.original" class="thumbnail2" [style.border]="selectedThumbSrc===img.original ? '3px solid #2ecc71' : 'none'" (click)="onStoredThumbClick(img)" />
+    <img *ngFor="let img of imagePaths" [src]="(showWithBoxes && img.withBoxes) ? img.withBoxes : img.original" class="thumbnail2" [style.border]="selectedThumbSrc===((showWithBoxes && img.withBoxes) ? img.withBoxes : img.original) ? '3px solid #2ecc71' : 'none'" (click)="onStoredThumbClick(img)" />
   </div>
   <div *ngIf="imagePaths.length === 0 && capturedImages.length > 0" class="thumbnail-scroll2" #thumbScroll (scroll)="onThumbnailScroll($event)" [ngClass]="getThumbClasses(capturedImages.length)">
     <img *ngFor="let img of capturedImages" [src]="img" class="thumbnail2" [style.border]="selectedThumbSrc===img ? '3px solid #2ecc71' : 'none'" (click)="onStoredThumbClick({ original: img, withBoxes: img, fileName: '' })" />

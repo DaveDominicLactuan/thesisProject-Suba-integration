@@ -124,6 +124,12 @@
               (click)="selectGraphType('shape')">
               Shape
             </button>
+            <button 
+              class="overlay-option" 
+              [class.active]="selectedGraphType === 'all'"
+              (click)="selectGraphType('all')">
+              All
+            </button>
           </div>
         </div>
 

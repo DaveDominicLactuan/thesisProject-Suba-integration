@@ -249,7 +249,8 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
     } catch (e) {
       console.warn('onStoredThumbClick: selectImage failed', e);
     }
-    this.selectedThumbSrc = img.withBoxes ?? img.original;
+    // Respect the current toggle: show boxed version when toggled on, otherwise show original
+    this.selectedThumbSrc = this.showWithBoxes ? (img.withBoxes ?? img.original) : (img.original ?? img.withBoxes ?? '');
     this.selectedImageTitle = img.fileName ?? '';
     
     // Auto-scroll to center the selected item (Android Recent Apps style)

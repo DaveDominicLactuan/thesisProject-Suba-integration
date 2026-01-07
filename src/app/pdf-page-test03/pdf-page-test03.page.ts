@@ -290,27 +290,87 @@ export class PdfPageTest03Page {
         const screenWidth = window.innerWidth;
         const canvasWidth = screenWidth * 0.95;
 
-        // Render every page and append a canvas for each
-        for (let p = 1; p <= numPages; p++) {
-          const page = await pdf.getPage(p);
-          const originalViewport = page.getViewport({ scale: 1.0 });
-          const scale = canvasWidth / originalViewport.width;
-          const viewport = page.getViewport({ scale });
+        // Render every page. If there are multiple session images, stack
+        // the rendered pages vertically in a single tall canvas so the
+        // document appears centered and vertically ordered.
+        const sessionCount = Array.isArray(this.sessionImages) ? this.sessionImages.length : 0;
+        const extraMultiplier = sessionCount >= 2 ? Math.max(1, sessionCount - 1) : 1;
+        const outputScale = window.devicePixelRatio || 1;
 
-          const canvas = document.createElement('canvas');
-          const context = canvas.getContext('2d')!;
-          canvas.width = viewport.width;
-          canvas.height = viewport.height;
+        if (extraMultiplier > 1) {
+          // Create one tall canvas that will contain all pages stacked vertically
+          // Use the first page to determine per-page pixel dimensions
+          const firstPage = await pdf.getPage(1);
+          const firstViewport = firstPage.getViewport({ scale: canvasWidth / firstPage.getViewport({ scale: 1.0 }).width });
+          const pagePixelWidth = Math.floor(firstViewport.width * outputScale);
+          const pagePixelHeight = Math.floor(firstViewport.height * outputScale);
 
-          await page.render({ canvasContext: context, viewport }).promise;
+          const mainCanvas = document.createElement('canvas');
+          const mainCtx = mainCanvas.getContext('2d')!;
+          mainCanvas.width = pagePixelWidth;
+          mainCanvas.height = pagePixelHeight * extraMultiplier;
 
-          // Style each canvas: 2px top margin, center, responsive
-          canvas.style.display = 'block';
-          canvas.style.margin = '2px auto 0';
-          canvas.style.maxWidth = '95%';
-          canvas.style.height = 'auto';
+          // CSS for centered, responsive display
+          mainCanvas.style.display = 'block';
+          mainCanvas.style.margin = '2px auto 0';
+          mainCanvas.style.maxWidth = '95%';
+          mainCanvas.style.width = '95%';
+          mainCanvas.style.height = 'auto';
 
-          containerEl.appendChild(canvas);
+          // For each page, render into an offscreen canvas and blit into the main canvas
+          for (let p = 1; p <= numPages; p++) {
+            const page = await pdf.getPage(p);
+            const originalViewport = page.getViewport({ scale: 1.0 });
+            const scale = canvasWidth / originalViewport.width;
+            const viewport = page.getViewport({ scale });
+
+            // Offscreen canvas for per-page rendering (pixel-sized)
+            const offCanvas = document.createElement('canvas');
+            const offCtx = offCanvas.getContext('2d')!;
+            offCanvas.width = Math.floor(viewport.width * outputScale);
+            offCanvas.height = Math.floor(viewport.height * outputScale);
+
+            if (outputScale !== 1) {
+              offCtx.setTransform(outputScale, 0, 0, outputScale, 0, 0);
+            }
+
+            await page.render({ canvasContext: offCtx, viewport }).promise;
+
+            // Compute vertical offset (in pixels) inside main canvas
+            const yOffset = (p - 1) * offCanvas.height;
+            mainCtx.drawImage(offCanvas, 0, yOffset);
+          }
+
+          containerEl.appendChild(mainCanvas);
+        } else {
+          // Single or default behavior: render one canvas per page (existing behavior)
+          for (let p = 1; p <= numPages; p++) {
+            const page = await pdf.getPage(p);
+            const originalViewport = page.getViewport({ scale: 1.0 });
+            const scale = canvasWidth / originalViewport.width;
+            const viewport = page.getViewport({ scale });
+
+            const canvas = document.createElement('canvas');
+            const context = canvas.getContext('2d')!;
+
+            canvas.width = Math.floor(viewport.width * outputScale);
+            canvas.height = Math.floor(viewport.height * outputScale);
+
+            // Keep canvas responsive and maintain aspect ratio
+            canvas.style.display = 'block';
+            canvas.style.margin = '2px auto 0';
+            canvas.style.maxWidth = '95%';
+            canvas.style.width = '95%';
+            canvas.style.height = 'auto';
+
+            if (outputScale !== 1) {
+              context.setTransform(outputScale, 0, 0, outputScale, 0, 0);
+            }
+
+            await page.render({ canvasContext: context, viewport }).promise;
+
+            containerEl.appendChild(canvas);
+          }
         }
 
         // Safety guard: try to bring the container to the top of the viewport
