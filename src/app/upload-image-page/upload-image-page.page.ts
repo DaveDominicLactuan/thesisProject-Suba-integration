@@ -1236,13 +1236,43 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
 
       // Create a withBoxes image if boxes are present
       try {
+        // helper to compute a single box covering all predicted boxes
+        const computeAggregatedBox = (boxes: any[]) => {
+          if (!Array.isArray(boxes) || boxes.length === 0) return null;
+          let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+          boxes.forEach((b: any) => {
+            const bx = Number(b.x) || 0;
+            const by = Number(b.y) || 0;
+            const bw = Number(b.w) || 0;
+            const bh = Number(b.h) || 0;
+            minX = Math.min(minX, bx);
+            minY = Math.min(minY, by);
+            maxX = Math.max(maxX, bx + bw);
+            maxY = Math.max(maxY, by + bh);
+          });
+          return { x: minX, y: minY, w: Math.max(0, maxX - minX), h: Math.max(0, maxY - minY) };
+        };
+
         if (prediction && Array.isArray(prediction.boxes) && prediction.boxes.length > 0) {
-          const maskW = prediction.maskWidth || 128;
-          const maskH = prediction.maskHeight || 128;
-          const withBoxesDataUrl = await this.drawBoxesOnImage(dataUrl, prediction.boxes, maskW, maskH);
-          (entry as any).withBoxes = withBoxesDataUrl;
-          (entry as any).boxes = prediction.boxes;
-          (entry as any).detectionMessage = `Detected ${prediction.boxes.length} region(s)`;
+          const rawBoxes = prediction.boxes;
+          const agg = computeAggregatedBox(rawBoxes);
+          const boxesToDraw = agg ? [agg] : rawBoxes.map((b: any) => ({ x: b.x, y: b.y, w: b.w, h: b.h }));
+
+          const maskW = prediction.maskWidth || prediction.maskW || 128;
+          const maskH = prediction.maskHeight || prediction.maskH || 128;
+
+          try {
+            const withBoxesDataUrl = await this.drawBoxesOnImage(dataUrl, boxesToDraw, maskW, maskH);
+            (entry as any).withBoxes = withBoxesDataUrl;
+            (entry as any).boxes = boxesToDraw;
+            (entry as any).detectionMessage = `Rendered ${boxesToDraw.length} aggregated/simplified box(es) from ${rawBoxes.length} prediction box(es)`;
+            this.totalBoundingBoxesCreated += boxesToDraw.length;
+          } catch (renderErr) {
+            console.warn('[UploadImagePage] drawBoxesOnImage failed', renderErr);
+            (entry as any).withBoxes = dataUrl;
+            (entry as any).boxes = [];
+            (entry as any).detectionMessage = 'Box rendering failed';
+          }
         } else {
           (entry as any).withBoxes = dataUrl;
           (entry as any).boxes = [];

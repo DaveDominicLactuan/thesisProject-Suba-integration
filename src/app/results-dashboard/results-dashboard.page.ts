@@ -1,6 +1,6 @@
 import { Component, OnInit } from '@angular/core';
 import { ActivatedRoute, Router } from '@angular/router';
-import { NavController } from '@ionic/angular';
+import { NavController, Platform } from '@ionic/angular';
 import { ImageStorageService, StoredImage } from '../services/image-storage.service';
 
 interface ChartSlice {
@@ -55,7 +55,8 @@ export class ResultsDashboardPage implements OnInit {
     private storage: ImageStorageService,
     private route: ActivatedRoute,
     private navCtrl: NavController,
-    private router: Router
+    private router: Router,
+    private platform: Platform
   ) {}
 
   ngOnInit(): void {
@@ -244,11 +245,48 @@ export class ResultsDashboardPage implements OnInit {
   openGraphOverlay() {
     this.showGraphOverlay = true;
     console.log('[Graph Overlay] Overlay opened');
+    // no-op: page-level back handler will close overlay when active
   }
 
   closeGraphOverlay() {
     this.showGraphOverlay = false;
     console.log('[Graph Overlay] Overlay closed');
+    // overlay closed; nothing else required — page-level handler will remain active
+  }
+
+  ionViewDidEnter() {
+    this.registerBackButtonHandler();
+  }
+
+  ionViewWillLeave() {
+    this.removeBackButtonHandler();
+  }
+
+  private registerBackButtonHandler() {
+    try {
+      this.removeBackButtonHandler();
+      // High priority so overlay-close takes precedence over lower-priority nav handlers
+      this.backButtonSub = this.platform.backButton.subscribeWithPriority(100, () => {
+        if (this.showGraphOverlay) {
+          this.closeGraphOverlay();
+        } else {
+          try { this.navCtrl.back(); } catch (e) { console.warn('nav back failed', e); }
+        }
+      });
+    } catch (e) {
+      console.warn('[ResultsDashboard] registerBackButtonHandler failed', e);
+    }
+  }
+
+  private removeBackButtonHandler() {
+    try {
+      if (this.backButtonSub && typeof this.backButtonSub.unsubscribe === 'function') {
+        try { this.backButtonSub.unsubscribe(); } catch (e) {}
+      } else if (this.backButtonSub && typeof this.backButtonSub.remove === 'function') {
+        try { this.backButtonSub.remove(); } catch (e) {}
+      }
+    } catch (e) {}
+    this.backButtonSub = null;
   }
 
   applyGraphSelection() {

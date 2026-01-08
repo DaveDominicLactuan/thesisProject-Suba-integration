@@ -194,13 +194,44 @@ export class CameraPage2Page implements AfterViewInit {
 
       // If the model returned bounding boxes, create a "withBoxes" image and attach boxes
       try {
+        // helper to compute a single box covering all predicted boxes
+        const computeAggregatedBox = (boxes: any[]) => {
+          if (!Array.isArray(boxes) || boxes.length === 0) return null;
+          let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+          boxes.forEach((b: any) => {
+            const bx = Number(b.x) || 0;
+            const by = Number(b.y) || 0;
+            const bw = Number(b.w) || 0;
+            const bh = Number(b.h) || 0;
+            minX = Math.min(minX, bx);
+            minY = Math.min(minY, by);
+            maxX = Math.max(maxX, bx + bw);
+            maxY = Math.max(maxY, by + bh);
+          });
+          return { x: minX, y: minY, w: Math.max(0, maxX - minX), h: Math.max(0, maxY - minY) };
+        };
+
         if (prediction && Array.isArray(prediction.boxes) && prediction.boxes.length > 0) {
-          const maskW = prediction.maskWidth || 128;
-          const maskH = prediction.maskHeight || 128;
-          const withBoxesDataUrl = await this.drawBoxesOnImage(dataUrl, prediction.boxes, maskW, maskH);
-          (entry as any).withBoxes = withBoxesDataUrl;
-          (entry as any).boxes = prediction.boxes;
-          (entry as any).detectionMessage = `Detected ${prediction.boxes.length} region(s)`;
+          const rawBoxes = prediction.boxes;
+          // compute aggregated (max-extents) box and fallback to original boxes if aggregation fails
+          const agg = computeAggregatedBox(rawBoxes);
+          const boxesToDraw = agg ? [agg] : rawBoxes.map((b: any) => ({ x: b.x, y: b.y, w: b.w, h: b.h }));
+
+          const maskW = prediction.maskWidth || prediction.maskW || 128;
+          const maskH = prediction.maskHeight || prediction.maskH || 128;
+
+          try {
+            const withBoxesDataUrl = await this.drawBoxesOnImage(dataUrl, boxesToDraw, maskW, maskH);
+            (entry as any).withBoxes = withBoxesDataUrl;
+            (entry as any).boxes = boxesToDraw;
+            (entry as any).detectionMessage = `Rendered ${boxesToDraw.length} aggregated/simplified box(es) from ${rawBoxes.length} prediction box(es)`;
+            this.totalBoundingBoxesCreated += boxesToDraw.length;
+          } catch (renderErr) {
+            console.warn('[CameraPage2] drawBoxesOnImage failed', renderErr);
+            (entry as any).withBoxes = dataUrl;
+            (entry as any).boxes = [];
+            (entry as any).detectionMessage = 'Box rendering failed';
+          }
         } else {
           (entry as any).withBoxes = dataUrl;
           (entry as any).boxes = [];
@@ -574,9 +605,20 @@ export class CameraPage2Page implements AfterViewInit {
       deleteIcon.src = 'assets/Trash.png';
       deleteBtn.appendChild(deleteText);
       deleteBtn.appendChild(deleteIcon);
+      // local cleanup helper unsubscribes overlay back-button subscription and removes overlay
+      let overlayBackBtnSub: any = null;
+      const cleanupOverlay = () => {
+        try {
+          if (overlayBackBtnSub && typeof overlayBackBtnSub.unsubscribe === 'function') {
+            try { overlayBackBtnSub.unsubscribe(); } catch (e) {}
+          }
+        } catch (e) {}
+        try { overlay.remove(); } catch (e) {}
+      };
+
       deleteBtn.onclick = () => {
         this.deleteSelectedImage();
-        try { overlay.remove(); } catch (e) {}
+        cleanupOverlay();
       };
 
       const closeBtn = document.createElement('button');
@@ -606,7 +648,7 @@ export class CameraPage2Page implements AfterViewInit {
       closeIcon.src = 'assets/Check_Black.png';
       closeBtn.appendChild(closeText);
       closeBtn.appendChild(closeIcon);
-      closeBtn.onclick = () => { try { overlay.remove(); } catch (e) {} };
+      closeBtn.onclick = () => { cleanupOverlay(); };
 
       // make buttons visually fill available space like in bottom-top-row
       deleteBtn.style.flex = '1 1 auto';
@@ -622,10 +664,19 @@ export class CameraPage2Page implements AfterViewInit {
       overlay.appendChild(box);
 
       overlay.addEventListener('click', (ev) => {
-        if (ev.target === overlay) overlay.remove();
+        if (ev.target === overlay) cleanupOverlay();
       });
 
       document.body.appendChild(overlay);
+      // subscribe to hardware back while overlay is open so back closes it
+      try {
+        overlayBackBtnSub = this.platform.backButton.subscribeWithPriority(20, () => {
+          cleanupOverlay();
+        });
+      } catch (e) {
+        console.warn('[CameraPage2] overlay back button subscription failed', e);
+      }
+
       this.detectCenterThumbnail(); // Detect center thumbnail when overlay is opened
       updateThumbnails();
     } catch (e) {

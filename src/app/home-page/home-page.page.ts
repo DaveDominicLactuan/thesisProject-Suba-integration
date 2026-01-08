@@ -2,7 +2,7 @@ import { Component, OnInit, OnDestroy } from '@angular/core';
 import { Router } from '@angular/router';
 import { FormBuilder, FormGroup, Validators } from '@angular/forms';
 import { AuthService } from '../services/auth.service';
-import { NavController } from '@ionic/angular';
+import { NavController, Platform } from '@ionic/angular';
 import { User } from 'firebase/auth';
 import { Auth3Service } from '../services/auth3.service';
 import { ImageStorageService } from '../services/image-storage.service';
@@ -28,7 +28,7 @@ export class HomePagePage implements OnInit, OnDestroy {
   userRole: string | null = null;
 
   /** Inject auth, router, and image storage services for navigation and data. */
-  constructor(private formBuilder: FormBuilder, private router: Router, private authService: AuthService, private navCtrl: NavController, private auth3: Auth3Service, private imageStorage: ImageStorageService) {
+  constructor(private formBuilder: FormBuilder, private router: Router, private authService: AuthService, private navCtrl: NavController, private auth3: Auth3Service, private imageStorage: ImageStorageService, private platform: Platform) {
 
   }
 
@@ -507,13 +507,13 @@ private async initialize(): Promise<void> {
     btn.addEventListener('click', () => {
       // simple notification: alert (could be replaced with Ionic Toast/Notification)
       alert('Hello it worked');
-      document.body.removeChild(overlay);
+      cleanupOverlay();
     });
 
     // Delete storage button
     btn2.addEventListener('click', () => {
       this.clearImageStorage();
-      if (document.getElementById('test-overlay')) document.body.removeChild(overlay);
+      cleanupOverlay();
     });
 
     // Open viewer with a generated sample PDF
@@ -528,7 +528,7 @@ private async initialize(): Promise<void> {
         const dataUri = doc.output('datauristring');
         // Navigate to the viewer with the generated source
         this.router.navigate(['/pdf-viewer-page'], { queryParams: { src: dataUri } });
-        if (document.getElementById('test-overlay')) document.body.removeChild(overlay);
+        cleanupOverlay();
       } catch (e) {
         console.warn('Failed to generate sample PDF', e);
         alert('Failed to generate sample PDF.');
@@ -538,34 +538,34 @@ private async initialize(): Promise<void> {
     // Open PDF Preview page with testing interface
     openPdfPreviewBtn.addEventListener('click', () => {
       this.router.navigate(['/pdf-preview-page']);
-      if (document.getElementById('test-overlay')) document.body.removeChild(overlay);
+      cleanupOverlay();
     });
 
     // Open PDF Generator page with pdf-lib
     openPdfGeneratorBtn.addEventListener('click', () => {
       this.router.navigate(['/pdf-generator-page']);
-      if (document.getElementById('test-overlay')) document.body.removeChild(overlay);
+      cleanupOverlay();
     });
 
     // PDF Page Test navigation handlers
     pdfPageBtn.addEventListener('click', () => {
       this.router.navigate(['/pdf-page']);
-      if (document.getElementById('test-overlay')) document.body.removeChild(overlay);
+      cleanupOverlay();
     });
 
     pdfPageTestBtn.addEventListener('click', () => {
       this.router.navigate(['/pdf-page-test']);
-      if (document.getElementById('test-overlay')) document.body.removeChild(overlay);
+      cleanupOverlay();
     });
 
     pdfPageTest02Btn.addEventListener('click', () => {
       this.router.navigate(['/pdf-page-test02']);
-      if (document.getElementById('test-overlay')) document.body.removeChild(overlay);
+      cleanupOverlay();
     });
 
     pdfPageTest03Btn.addEventListener('click', () => {
       this.router.navigate(['/pdf-page-test03']);
-      if (document.getElementById('test-overlay')) document.body.removeChild(overlay);
+      cleanupOverlay();
     });
 
     // Logout flow
@@ -576,7 +576,7 @@ private async initialize(): Promise<void> {
       try { localStorage.setItem('isLoggedIn', 'false'); } catch {}
       try { localStorage.removeItem('userData'); } catch {}
       this.isLoggedIn = false;
-      try { document.body.removeChild(overlay); } catch {}
+      try { cleanupOverlay(); } catch {}
       // Navigate to landing page replacing history so next back exits
       try {
         this.router.navigateByUrl('/landing-page', { replaceUrl: true });
@@ -630,13 +630,13 @@ private async initialize(): Promise<void> {
     });
 
     close.addEventListener('click', () => {
-      if (document.getElementById('test-overlay')) document.body.removeChild(overlay);
+      cleanupOverlay();
     });
 
     // clicking backdrop closes overlay
     overlay.addEventListener('click', (ev) => {
       if (ev.target === overlay) {
-        if (document.getElementById('test-overlay')) document.body.removeChild(overlay);
+        cleanupOverlay();
       }
     });
 
@@ -691,18 +691,36 @@ private async initialize(): Promise<void> {
     
     overlay.appendChild(box);
 
+    // local cleanup helper removes overlay element
+    const cleanupOverlay = () => {
+      try {
+        const el = document.getElementById('test-overlay');
+        if (el && el.parentElement) el.parentElement.removeChild(el);
+      } catch (e) {}
+    };
+
     document.body.appendChild(overlay);
+    // No local back subscription: page-level handler will close the overlay when present
   }
 
   /** Register a one-page-only back button listener that exits the app from home. */
   private registerBackButtonHandler() {
     try {
-      // Remove any previous handler to avoid duplicates when re-entering the view
       this.removeBackButtonHandler();
-      this.backButtonSub = App.addListener('backButton', () => {
-        App.exitApp();
+      // priority 10: high enough to intercept overlay/back behavior on this page
+      this.backButtonSub = this.platform.backButton.subscribeWithPriority(10, () => {
+        try {
+          const overlay = document.getElementById('test-overlay');
+          if (overlay) {
+            try { overlay.remove(); } catch (e) {}
+            return;
+          }
+        } catch (e) {}
+        try { App.exitApp(); } catch (e) { console.warn('App.exitApp failed', e); }
       });
-    } catch {}
+    } catch (e) {
+      console.warn('[HomePage] registerBackButtonHandler failed', e);
+    }
   }
 
   /** Remove the home-page back handler so other pages can handle back navigation normally. */
