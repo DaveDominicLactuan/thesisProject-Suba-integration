@@ -32,7 +32,7 @@
       <!-- Images processed block (spinner on top, label below) -->
       <div class="func-action" (click)="goToFeedBackPage()">
         <div class="spinner-container-rect">
-          <svg *ngIf="photosProcessed < photosTaken" class="rect-spinner" width="70" height="40">
+          <svg *ngIf="isProcessing" class="rect-spinner" width="70" height="40">
             <rect x="2" y="2" width="66" height="36" rx="12" ry="12" class="rect-spinner-path" />
           </svg>
           <div class="center-value-rect">{{ photosProcessed }}/{{ photosTaken }}</div>

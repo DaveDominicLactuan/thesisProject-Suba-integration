@@ -4,7 +4,7 @@ import { Component, ViewChild, ElementRef,OnInit } from '@angular/core';
 import { ActivatedRoute, Router } from '@angular/router';
 import { PDFDocument } from 'pdf-lib';
 import { Filesystem, Directory } from '@capacitor/filesystem';
-import { Platform } from '@ionic/angular';
+import { Platform, NavController } from '@ionic/angular';
 import * as pdfjsLib from 'pdfjs-dist';
 import { getDocument } from 'pdfjs-dist';
 import { AndroidPermissions } from '@awesome-cordova-plugins/android-permissions/ngx';
@@ -44,7 +44,8 @@ export class PdfPageTest03Page {
       private route: ActivatedRoute,
       private router: Router,
       private imageStorage: ImageStorageService,
-    ) {}
+      private navCtrl: NavController,
+      ) {}
   
     async ngOnInit() {
 
@@ -115,6 +116,41 @@ export class PdfPageTest03Page {
       });
     }
 
+  ionViewDidEnter() {
+    this.registerBackButtonHandler();
+  }
+
+  ionViewWillLeave() {
+    this.removeBackButtonHandler();
+  }
+
+  private registerBackButtonHandler() {
+    try {
+      this.removeBackButtonHandler();
+      // High priority so this page handles back before Home's exit handler
+      this.backButtonSub = this.platform.backButton.subscribeWithPriority(100, () => {
+        try {
+          this.navCtrl.back();
+        } catch (e) {
+          try { window.history.back(); } catch (err) { try { this.router.navigateByUrl('/results-dashboard'); } catch (_) { /* noop */ } }
+        }
+      });
+    } catch (e) {
+      console.warn('[PdfPageTest03] registerBackButtonHandler failed', e);
+    }
+  }
+
+  private removeBackButtonHandler() {
+    try {
+      if (this.backButtonSub && typeof this.backButtonSub.unsubscribe === 'function') {
+        try { this.backButtonSub.unsubscribe(); } catch (e) {}
+      } else if (this.backButtonSub && typeof this.backButtonSub.remove === 'function') {
+        try { this.backButtonSub.remove(); } catch (e) {}
+      }
+    } catch (e) {}
+    this.backButtonSub = null;
+  }
+
     /**
      * Log image extraction/processing result for each session image
      */
@@ -145,12 +181,54 @@ export class PdfPageTest03Page {
       ];
 
       // If sessionImages exist, create one section per image
+      // Helper to safely extract prediction values from multiple possible shapes
+      const extractPred = (imgObj: any, field: string): string | null => {
+        if (!imgObj) return null;
+        const tryValues: any[] = [];
+
+        // Direct top-level fields
+        tryValues.push(imgObj[field]);
+
+        // Common alternate locations
+        if (imgObj.rawPrediction) {
+          tryValues.push(imgObj.rawPrediction[field]);
+          tryValues.push(imgObj.rawPrediction.prediction && imgObj.rawPrediction.prediction[field]);
+          tryValues.push(imgObj.rawPrediction.predictions && imgObj.rawPrediction.predictions[0] && imgObj.rawPrediction.predictions[0][field]);
+          tryValues.push(imgObj.rawPrediction[0] && imgObj.rawPrediction[0][field]);
+        }
+        if (imgObj.prediction) {
+          tryValues.push(imgObj.prediction[field]);
+          tryValues.push(imgObj.prediction[0] && imgObj.prediction[0][field]);
+        }
+        if (imgObj.predictions) {
+          tryValues.push(imgObj.predictions[0] && imgObj.predictions[0][field]);
+        }
+
+        // Some backends use generic labels
+        tryValues.push(imgObj.label);
+        tryValues.push(imgObj.class);
+        tryValues.push(imgObj.type);
+        tryValues.push(imgObj.shape);
+        tryValues.push(imgObj.severity);
+
+        for (const v of tryValues) {
+          if (v === undefined || v === null) continue;
+          const s = String(v).trim();
+          if (!s) continue;
+          // ignore literal placeholder tokens that some codepaths may produce
+          const lower = s.toLowerCase();
+          if (['type', 'shape', 'severity', '(insert crack type here for image)', '(insert crack shape here)', '(insert crack severity here)'].includes(lower)) continue;
+          return s;
+        }
+        return null;
+      };
+
       if (this.sessionImages && this.sessionImages.length > 0) {
         this.sessionImages.forEach((img: any, idx: number) => {
           const i = idx + 1;
-          const type = img?.rawPrediction?.type ?? img?.dropdown1 ?? img?.type ?? img?.fileName ?? 'Type';
-          const shape = img?.rawPrediction?.shape ?? img?.dropdown2 ?? img?.shape ?? 'Shape';
-          const severity = img?.rawPrediction?.severity ?? img?.dropdown3 ?? img?.severity ?? 'Severity';
+          const type = extractPred(img, 'type') ?? img?.dropdown1 ?? img?.fileName ?? '(unknown)';
+          const shape = extractPred(img, 'shape') ?? img?.dropdown2 ?? '(unknown)';
+          const severity = extractPred(img, 'severity') ?? img?.dropdown3 ?? '(unknown)';
 
           // Insert descriptive paragraph with values inserted and bolded
           content.push({
@@ -405,7 +483,8 @@ export class PdfPageTest03Page {
       if (this.platform.is('hybrid') && this.platform.is('android')) {
         try {
           const fileName = this.sessionId ? `sample-${this.sessionId}.pdf` : 'sample.pdf';
-          const filePath = await this.savePDF(fileName);
+          // Save into public Downloads so file managers can see it
+          const filePath = await this.savePDF(fileName, true);
           await this.fileOpener.open(filePath, 'application/pdf');
           console.log('PDF opened');
         } catch (err) {
@@ -419,18 +498,57 @@ export class PdfPageTest03Page {
     /**
      * Save PDF to device storage
      */
-    private async savePDF(fileName: string): Promise<string> {
+    /**
+     * Save PDF to device. If `usePublicDownloads` is true, attempt to save
+     * to the public Downloads folder so the file is visible in file managers.
+     */
+    private async savePDF(fileName: string, usePublicDownloads = false): Promise<string> {
       try {
         const blob = await this.generatePdfBlob();
-        const fileEntry = await this.file.writeFile(
-          this.file.externalDataDirectory, 
-          fileName, 
-          blob, 
-          { replace: true }
-        );
-        return this.file.externalDataDirectory + fileName;
+
+        // Ensure permission for writing to external storage on older Android versions
+        if (this.platform.is('android')) {
+          try {
+            const status = await this.androidPermissions.checkPermission(this.androidPermissions.PERMISSION.WRITE_EXTERNAL_STORAGE);
+            if (!status.hasPermission) {
+              await this.androidPermissions.requestPermission(this.androidPermissions.PERMISSION.WRITE_EXTERNAL_STORAGE);
+            }
+          } catch (permErr) {
+            console.warn('Permission check/request failed in savePDF:', permErr);
+          }
+        }
+
+        const publicDownloadDir = this.getPublicDownloadDirectory();
+        const targetDir = usePublicDownloads && publicDownloadDir ? publicDownloadDir : this.file.externalDataDirectory;
+
+        // Attempt to write to the chosen directory. If it fails, fallback to app external data dir.
+        try {
+          const fileEntry = await this.file.writeFile(targetDir, fileName, blob, { replace: true });
+          // Prefer nativeURL if available
+          return fileEntry.nativeURL || (targetDir + fileName);
+        } catch (writeErr) {
+          console.warn('Write to targetDir failed, falling back to externalDataDirectory:', writeErr);
+          const fallbackEntry = await this.file.writeFile(this.file.externalDataDirectory, fileName, blob, { replace: true });
+          return fallbackEntry.nativeURL || (this.file.externalDataDirectory + fileName);
+        }
       } catch (err) {
         throw new Error(`Failed to save PDF: ${err}`);
+      }
+    }
+
+    /**
+     * Returns a best-effort path for the public Downloads directory.
+     * Uses the Cordova File plugin's `externalRootDirectory` if present.
+     */
+    private getPublicDownloadDirectory(): string | null {
+      try {
+        // some devices expose externalRootDirectory
+        if ((this.file as any).externalRootDirectory) {
+          return (this.file as any).externalRootDirectory + 'Download/';
+        }
+        return null;
+      } catch (e) {
+        return null;
       }
     }
   
@@ -478,17 +596,12 @@ export class PdfPageTest03Page {
       if (this.platform.is('hybrid') && this.platform.is('android')) {
         // Android: Save to external storage
         try {
-          const blob = await this.generatePdfBlob();
           const fileName = this.sessionId ? `sample-${this.sessionId}.pdf` : 'sample.pdf';
-          const fileEntry = await this.file.writeFile(
-            this.file.externalDataDirectory, 
-            fileName, 
-            blob, 
-            { replace: true }
-          );
-          this.savedPdfPath = fileEntry.nativeURL;
+          // Save to public Downloads (with fallback inside savePDF)
+          const savedPath = await this.savePDF(fileName, true);
+          this.savedPdfPath = savedPath;
           console.log('PDF saved at', this.savedPdfPath);
-          
+
           // Show success notification
           await this.showDownloadNotification(fileName);
         } catch (err) {

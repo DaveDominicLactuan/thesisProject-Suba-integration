@@ -138,6 +138,23 @@ private async initialize(): Promise<void> {
     });
   }
 
+  
+  /**
+   * Return the currently-authenticated Firebase user and Firestore profile (if available).
+   * Uses `Auth3Service` which exposes `getCurrentUser()` and `getUserProfile()`.
+   */
+  async getCurrentUserInfo(): Promise<{ user: any | null; profile: any | null } | null> {
+    try {
+      const user = this.auth3.getCurrentUser ? this.auth3.getCurrentUser() : null;
+      const profile = user && this.auth3.getUserProfile ? await this.auth3.getUserProfile() : null;
+      console.log('[HomePage] getCurrentUserInfo', { user, profile });
+      return { user, profile };
+    } catch (err) {
+      console.warn('[HomePage] getCurrentUserInfo failed', err);
+      return null;
+    }
+  }
+
   // Called by Ionic when page becomes active — refresh sessions/counts
   /** Ionic hook: refresh sessions each time page becomes active. */
   ionViewWillEnter() {
@@ -203,23 +220,21 @@ private async initialize(): Promise<void> {
     }
   }
 
-  recommendedCourses = [
-    {
-      title: 'Morning textbook',
-      rating: 8.6,
-      favorited: true,
-    },
-    {
-      title: 'English reading',
-      rating: 8.0,
-      favorited: false,
-    },
-    {
-      title: 'Illustration',
-      rating: 7.5,
-      favorited: false,
-    },
-  ];
+  // Additional methods can be added here
+
+
+  /**
+   * Synchronous accessor for the underlying Firebase User object (may be null).
+   */
+  getCurrentUserSync(): any | null {
+    try {
+      return this.auth3.getCurrentUser ? this.auth3.getCurrentUser() : null;
+    } catch (err) {
+      console.warn('[HomePage] getCurrentUserSync failed', err);
+      return null;
+    }
+  }
+
 
   /** Navigate to legacy camera page route. */
   goToHomePage() {
@@ -272,6 +287,9 @@ private async initialize(): Promise<void> {
       }
     } catch (e) { console.warn('goToSession warning', e); }
     try {
+      // Ensure HomePage back handler is removed so destination page can control back behavior
+      try { this.removeBackButtonHandler(); } catch (e) { /* ignore */ }
+
       const params: any = {};
       if (session && session.id) params.sessionId = session.id;
       // Navigate to feedback page and include sessionId so feedback page can load the session
@@ -742,34 +760,6 @@ private async initialize(): Promise<void> {
   
   
 
-  // Additional methods can be added here
-
-  /**
-   * Return the currently-authenticated Firebase user and Firestore profile (if available).
-   * Uses `Auth3Service` which exposes `getCurrentUser()` and `getUserProfile()`.
-   */
-  async getCurrentUserInfo(): Promise<{ user: any | null; profile: any | null } | null> {
-    try {
-      const user = this.auth3.getCurrentUser ? this.auth3.getCurrentUser() : null;
-      const profile = user && this.auth3.getUserProfile ? await this.auth3.getUserProfile() : null;
-      console.log('[HomePage] getCurrentUserInfo', { user, profile });
-      return { user, profile };
-    } catch (err) {
-      console.warn('[HomePage] getCurrentUserInfo failed', err);
-      return null;
-    }
-  }
-
-  /**
-   * Synchronous accessor for the underlying Firebase User object (may be null).
-   */
-  getCurrentUserSync(): any | null {
-    try {
-      return this.auth3.getCurrentUser ? this.auth3.getCurrentUser() : null;
-    } catch (err) {
-      console.warn('[HomePage] getCurrentUserSync failed', err);
-      return null;
-    }
-  }
+  
 
 }

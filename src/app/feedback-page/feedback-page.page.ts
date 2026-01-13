@@ -1,5 +1,6 @@
 import { Component, OnInit, ViewChild, ElementRef, AfterViewInit } from '@angular/core';
 import { Router, ActivatedRoute } from '@angular/router';
+import { NavController, Platform } from '@ionic/angular';
 import { ApiService } from '../api.service';
 import { ImageStorageService, StoredImage } from '../services/image-storage.service';
 import { CameraPreview, CameraPreviewOptions } from '@awesome-cordova-plugins/camera-preview/ngx';
@@ -52,7 +53,15 @@ private backButtonSub: any; // hardware back handler
    * Inject router, API, storage service, and CameraPreview (native).
    * CameraPreview is stopped on init to ensure camera UI is released.
    */
-  constructor(private router: Router, private route: ActivatedRoute, private api: ApiService, private imageStorageService: ImageStorageService, private cameraPreview: CameraPreview) { }
+  constructor(
+    private router: Router,
+    private route: ActivatedRoute,
+    private api: ApiService,
+    private imageStorageService: ImageStorageService,
+    private cameraPreview: CameraPreview,
+    private navCtrl: NavController,
+    private platform: Platform
+  ) { }
 
   /**
    * Lifecycle: stop camera preview (if native), fetch a quick API test,
@@ -674,39 +683,7 @@ addEntry() {
   console.log(`Form saved for ${this.selectedImageTitle}`);
 }
 
-/**
- * Call the demo API and log/assign the message response.
- */
-testApi() {
 
-  this.api.getHelloTest().subscribe((res: any) => {
-      this.message = res.message;
-    });
-
-    console.log(this.message)
-
-}
-
-
-/**
- * Navigate to PDF page variant.
- */
-goToSecondPage() {
-    this.router.navigate(['/pdfpage01']);
-    console.log('Navigating to Sign Up page');
-  }
-
-  /** Navigate to sample PDF page route. */
-  gotoPDFPage() {
-    this.router.navigate(['/pdf-page']);
-    console.log('Navigating to Sign Up page');
-  }
-
-  /** Navigate to alternate PDF test page. */
-  gopdfPage() {
-      this.router.navigate(['/pdf-page-test']);
-      console.log('camera page');
-    }
 
   /**
    * Delete the currently-selected image from storage and update the UI.
@@ -792,15 +769,60 @@ goToSecondPage() {
   /** Navigate back to Home Page, fallback to history.back on failure. */
   goBack() {
     try {
+      // Try to navigate back in app history (preferred)
+      try { this.navCtrl.back(); return; } catch (e) { /* ignore and fallback */ }
+
+      // Fallback to browser history.back when navController isn't effective
+      if (window.history.length > 1) {
+        window.history.back();
+        return;
+      }
+
+      // Final fallback: navigate to home page
       this.router.navigateByUrl('/home-page');
     } catch (e) {
-      window.history.back();
+      try { window.history.back(); } catch (err) { /* no-op */ }
     }
   }
 
   /** Template shim for hardware/back-button wiring. */
   onBack() {
     this.goBack();
+  }
+
+  ionViewDidEnter() {
+    this.registerBackButtonHandler();
+  }
+
+  ionViewWillLeave() {
+    this.removeBackButtonHandler();
+  }
+
+  private registerBackButtonHandler() {
+    try {
+      this.removeBackButtonHandler();
+      // Use a modest priority so page-level handlers override default nav
+      this.backButtonSub = this.platform.backButton.subscribeWithPriority(100, () => {
+        try {
+          this.navCtrl.back();
+        } catch (e) {
+          try { window.history.back(); } catch (err) { this.router.navigateByUrl('/home-page'); }
+        }
+      });
+    } catch (e) {
+      console.warn('[FeedbackPage] registerBackButtonHandler failed', e);
+    }
+  }
+
+  private removeBackButtonHandler() {
+    try {
+      if (this.backButtonSub && typeof this.backButtonSub.unsubscribe === 'function') {
+        try { this.backButtonSub.unsubscribe(); } catch (e) {}
+      } else if (this.backButtonSub && typeof this.backButtonSub.remove === 'function') {
+        try { this.backButtonSub.remove(); } catch (e) {}
+      }
+    } catch (e) {}
+    this.backButtonSub = null;
   }
 
   /**

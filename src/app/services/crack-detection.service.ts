@@ -73,6 +73,16 @@ export class CrackDetectionService {
       const feeds: Record<string, any> = { input: tensor };
 
       const results = await this.session.run(feeds);
+
+      console.log(
+        '[ORT OUTPUTS]',
+        Object.entries(results).map(([name, t]: any) => ({
+          name,
+          dims: t.dims,
+          length: t.data?.length
+        }))
+      );
+
       return this.mapResults(results);
     } catch (err) {
       console.warn('[CrackDetectionService] runInference failed — returning fallback prediction:', err);

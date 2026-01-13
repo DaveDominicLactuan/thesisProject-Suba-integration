@@ -80,6 +80,347 @@ export class CameraPage2Page implements AfterViewInit {
   imagesUploadedThisSession: number = 0; // Track number of images uploaded during this page visit
   totalBoundingBoxesCreated: number = 0; // Counter for cumulative bounding boxes across all images
 
+  constructor(
+    private platform: Platform,
+    private router: Router,
+    private sanitizer: DomSanitizer,
+    private crackDetectionService: CrackDetectionService,
+    private imageStorage: ImageStorageService,
+    private route: ActivatedRoute
+  ) {
+    this.requestCameraPermission();
+    // subscribe to current image changes so UI can react when another page selects one
+    try {
+      this.imageStorage.getCurrentImage$().subscribe(img => {
+        if (img) {
+          // update selected thumbnail reference and title
+          this.selectedThumbSrc = img.withBoxes || img.original;
+          this.selectedImageTitle = img.filename ?? '';
+        }
+      });
+    } catch (e) {
+      // ignore if observable not available
+      console.warn('Failed to subscribe to ImageStorage current image', e);
+    }
+  }
+
+  /**
+   * Lifecycle: once view is ready, initialize camera and storage/session state.
+   * Honors optional route `sessionId` to reuse an existing session.
+   */
+  ngAfterViewInit() {
+    this.platform.ready().then(() => this.initCamera());
+    // Handle Android hardware back: prompt before discarding empty session
+    
+    try {
+      this.backButtonSub = this.platform.backButton.subscribeWithPriority(10, async () => {
+        await this.handleGoHome();
+      });
+    } catch (e) {
+      console.warn('[CameraPage2] failed to register hardware back handler', e);
+    }
+
+    
+    // initialize page: load images, sessions and create a new session for this visit
+    // read optional sessionId passed via navigation (when opening camera from Sessions list)
+    try { this.routeSessionId = this.route.snapshot.queryParamMap.get('sessionId'); } catch (e) { this.routeSessionId = null; }
+
+    this.loadStoredImages()
+      .then(() => this.loadSessions())
+      .then(async () => {
+        if (this.routeSessionId) {
+          // Use existing session instead of creating a new one
+          this.selectedSessionId = this.routeSessionId;
+          try { await this.refreshDisplayedImages(); } catch (e) { /* ignore */ }
+        } else {
+          // No session requested; create a new one for this camera visit
+          try { await this.createSessionOnEnter(); } catch (e) { /* ignore */ }
+        }
+      })
+      .catch(e => console.warn('[CameraPage2] initialization failed', e));
+  }
+
+  
+  /** Initialize live camera feed */
+  /**
+   * Start the live camera preview using getUserMedia (or Capacitor on mobile).
+   * Cleans prior streams; wires video element; alerts on permission/device issues.
+   */
+  async initCamera() {
+    if (Capacitor.getPlatform() === 'android' || Capacitor.getPlatform() === 'ios') {
+      const permissions = await Camera.requestPermissions();
+      if (permissions.camera !== 'granted') {
+        alert('Camera permission denied. Please enable it in system settings.');
+        return;
+      }
+    }
+
+    if (this.mediaStream) {
+      this.mediaStream.getTracks().forEach(track => track.stop());
+      this.mediaStream = null;
+    }
+
+    try {
+      const constraints: MediaStreamConstraints = { video: { facingMode: 'environment' }, audio: false };
+      this.mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
+      const videoEl = this.videoRef.nativeElement;
+      videoEl.srcObject = this.mediaStream;
+      await new Promise<void>(resolve => {
+        videoEl.onloadedmetadata = () => {
+          videoEl.play();
+          resolve();
+        };
+      });
+      console.log('✅ Live camera preview started');
+    } catch (error) {
+      console.error('Camera access error:', error);
+      alert('Failed to access camera. Please check permissions and device compatibility.');
+    }
+  }
+
+  /** Capture a frame, preprocess, run inference, and save result */
+  /**
+   * Capture current frame → preprocess → run inference → store entry.
+   * Debounced via cooldown; updates session, counters, and lastPrediction.
+   */
+  async takePicture() {
+    // Prevent spamming the shutter: if currently cooling down, ignore
+    if (this.isCooldown) {
+      console.log('[CameraPage2] takePicture blocked: cooldown active');
+      return;
+    }
+    // Ensure UI shows processing state immediately
+    this.isProcessing = true;
+    // bump taken so spinner shows while inference runs
+    this.photosTaken += 1;
+
+    // start cooldown immediately and show a short visual flash
+    this.isCooldown = true;
+    this.showFlash = true;
+    // hide flash shortly after
+    setTimeout(() => { this.showFlash = false; }, this.flashDurationMs);
+    // release cooldown after configured ms
+    setTimeout(() => { this.isCooldown = false; }, this.cooldownMs);
+    // photosTaken will be derived from storage after save so don't increment here
+    // track whether inference was invoked and whether it succeeded
+    let inferenceCalled = false;
+    let inferenceSucceeded = false;
+
+    try {
+      const video = this.videoRef.nativeElement;
+      const canvas = this.canvasRef.nativeElement;
+      const ctx = canvas.getContext('2d')!;
+
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+      const now = new Date().toISOString();
+      const dataUrl = canvas.toDataURL('image/png');
+      this.capturedImages.unshift(dataUrl);
+
+      // Wrap inference + save into a cancellable-timeout-aware sequence
+      const work = async () => {
+        // Preprocess → inference → save
+        const imageTensor = await this.preprocessImage(dataUrl);
+        // call the backend/model
+        let prediction = null;
+        try {
+          inferenceCalled = true;
+          prediction = await this.crackDetectionService.runInference(imageTensor);
+          inferenceSucceeded = true;
+        } catch (e) {
+          console.warn('Inference failed:', e);
+          inferenceSucceeded = false;
+        }
+
+        const nowInner = new Date().toISOString();
+        // derive filename based on current stored images count so photosTaken reflects storage
+        let storedCount = 0;
+        try {
+          const all = await this.imageStorage.getAllImages();
+          storedCount = Array.isArray(all) ? all.length : 0;
+        } catch (e) {
+          storedCount = this.photosTaken || 0;
+        }
+
+        const filename = this.generateFilename(storedCount + 1);
+
+        const entry: StoredImage = {
+          original: dataUrl,
+          timestamp: nowInner,
+          filename,
+          prediction: prediction || undefined,
+          hasPrediction: !!prediction,
+          statusMessage: (inferenceCalled && inferenceSucceeded && prediction) ? 'Prediction succeeded' : (inferenceCalled ? 'Prediction failed' : 'No prediction')
+        };
+
+        // Render boxes (if any) and attach withBoxes data
+        try {
+          if (prediction && Array.isArray(prediction.boxes) && prediction.boxes.length > 0) {
+            const maskW = prediction.maskWidth || 128;
+            const maskH = prediction.maskHeight || 128;
+            const withBoxesDataUrl = await this.drawBoxesOnImage(dataUrl, prediction.boxes, maskW, maskH);
+            (entry as any).withBoxes = withBoxesDataUrl;
+            (entry as any).boxes = prediction.boxes;
+            (entry as any).detectionMessage = `Detected ${prediction.boxes.length} region(s)`;
+          } else {
+            (entry as any).withBoxes = dataUrl;
+            (entry as any).boxes = [];
+            (entry as any).detectionMessage = 'No boxes detected';
+          }
+        } catch (e) {
+          console.warn('[CameraPage2] Failed to render boxes for taken picture', e);
+          (entry as any).withBoxes = dataUrl;
+          (entry as any).boxes = [];
+          (entry as any).detectionMessage = 'Box rendering failed';
+        }
+
+        await this.imageStorage.addImage(entry);
+        // add to current session if present
+        try {
+          if (this.selectedSessionId && typeof (this.imageStorage.addImageToSession) === 'function') {
+            this.imageStorage.addImageToSession(this.selectedSessionId, entry.original);
+            this.sessionIsPristine = false; // Mark as no longer pristine since we added an image
+          }
+          await this.refreshDisplayedImages();
+        } catch (e) {
+          console.warn('[CameraPage2] Failed to add taken picture to session', e);
+        }
+        this.savedImage = entry;
+        this.lastPrediction = prediction;
+        // Increment upload counter for this session
+        this.imagesUploadedThisSession += 1;
+
+        if (inferenceCalled && inferenceSucceeded && prediction) this.photosProcessed += 1;
+        // update UI counters from authoritative storage
+        await this.updatePhotoCounts();
+        return entry;
+      };
+
+      // Overall timeout for the inference+save sequence: 10s
+      try {
+        await Promise.race([work(), new Promise((_, rej) => setTimeout(() => rej(new Error('processing-timeout')), 10_000))]);
+      } catch (err: any) {
+        if (err && err.message === 'processing-timeout') {
+          console.warn('[CameraPage2] takePicture processing timed out');
+          // Persist a fallback entry indicating timeout (prediction failed or no prediction)
+          try {
+            let storedCount = 0;
+            try {
+              const all = await this.imageStorage.getAllImages();
+              storedCount = Array.isArray(all) ? all.length : 0;
+            } catch (e) { storedCount = this.photosTaken || 0; }
+            const filename = this.generateFilename(storedCount + 1);
+            const entry: StoredImage = {
+              original: dataUrl,
+              timestamp: now,
+              filename,
+              prediction: undefined,
+              hasPrediction: false,
+              statusMessage: inferenceCalled ? 'Prediction failed' : 'No prediction'
+            };
+            await this.imageStorage.addImage(entry);
+            try {
+              if (this.selectedSessionId && typeof (this.imageStorage.addImageToSession) === 'function') {
+                this.imageStorage.addImageToSession(this.selectedSessionId, entry.original);
+                this.sessionIsPristine = false; // Mark as no longer pristine since we added an image
+              }
+              await this.refreshDisplayedImages();
+            } catch (err) {
+              console.warn('[CameraPage2] Failed to add fallback taken picture to session', err);
+            }
+            // Increment upload counter for this session
+            this.imagesUploadedThisSession += 1;
+            // update UI counters from authoritative storage
+            await this.updatePhotoCounts();
+          } catch (e) {
+            console.warn('[CameraPage2] Failed to store fallback entry after timeout', e);
+          }
+        } else {
+          console.error('Failed during takePicture work:', err);
+        }
+      }
+
+      // Keep console.log before clearing isProcessing so callers/UI see processing until logging completes
+  console.log('✅ Prediction stored:', this.lastPrediction);
+      // Print all currently stored images to verify persistence
+      try {
+        // getAllImages might be synchronous (returns array) or asynchronous in other implementations.
+        const allOrPromise = this.imageStorage.getAllImages();
+        let all: any[];
+        if (allOrPromise && typeof (allOrPromise as any).then === 'function') {
+          // await the promise-like value
+          all = await (allOrPromise as any);
+        } else {
+          all = allOrPromise as any;
+        }
+        // Stringify for more reliable remote/device console output, and also print a table if possible
+        try {
+          console.log('📂 Currently stored images (latest first):', JSON.stringify(all));
+          if (Array.isArray(all) && (console as any).table) (console as any).table(all);
+        } catch (e) {
+          console.log('📂 Currently stored images (latest first):', all);
+        }
+      } catch (logErr) {
+        console.warn('Failed to read stored images for verification:', logErr);
+      }
+
+      // Set a user-facing message depending on whether inference ran/succeeded
+      if (inferenceCalled && inferenceSucceeded && this.lastPrediction) {
+        // TypeScript can't infer that `lastPrediction` is non-null from the booleans above,
+        // so check explicitly before accessing properties.
+        const { type, shape, severity } = (this.lastPrediction as any);
+        this.extraText = `✅ Inference: ${type}, ${shape}, ${severity}`;
+      } else if (inferenceCalled && !inferenceSucceeded) {
+        this.extraText = '⚠️ Inference was called but failed.';
+      } else {
+        this.extraText = '⚠️ Inference was not called.';
+      }
+    } catch (err) {
+      console.error('Failed to take picture / run inference:', err);
+      // If inference was called but threw, mark as such
+      if (inferenceCalled && !inferenceSucceeded) {
+        this.extraText = '❌ Inference call failed. See console for details.';
+      } else if (!inferenceCalled) {
+        this.extraText = '❌ Capture or preprocessing failed before inference.';
+      } else {
+        this.extraText = '❌ Unknown error during capture/inference.';
+      }
+      alert('Failed to capture/process image. See console for details.');
+    } finally {
+      // Always clear processing flag so UI is responsive again
+      this.isProcessing = false;
+      // Log cumulative bounding box count
+      this.logBoundingBoxStats();
+    }
+  }
+
+  /** Create a new session for this camera visit and set it active */
+  /**
+   * Create a new empty session for this visit and mark it pristine.
+   * Persists via ImageStorageService and refreshes counts and thumbnails.
+   */
+  async createSessionOnEnter() {
+    try {
+      const name = `Session ${new Date().toLocaleString()}`;
+      const s = (this.imageStorage && typeof (this.imageStorage.createSession) === 'function') ? this.imageStorage.createSession(name, []) : null;
+      if (s) {
+        this.selectedSessionId = (s as any).id;
+        this.sessionIsPristine = true; // Mark as new/pristine (no images added yet)
+        this.imagesUploadedThisSession = 0; // Reset counter when creating new session
+        try { (this.imageStorage as any).setLastCreatedSession((s as any).id, (s as any).name); } catch {}
+        await this.loadSessions();
+        await this.refreshDisplayedImages();
+        // ensure counts reflect the newly created/selected session
+        try { await this.updatePhotoCounts(); } catch (e) { /* ignore */ }
+      }
+    } catch (e) {
+      console.warn('[CameraPage2] createSessionOnEnter failed', e);
+    }
+  }
+
+
   /**
    * Remaining images to finish processing.
    * Interacts with UI spinner; derived from ImageStorage via updatePhotoCounts().
@@ -88,31 +429,39 @@ export class CameraPage2Page implements AfterViewInit {
     return this.photosTaken - this.photosProcessed;
   }
 
-  /**
-   * Open the hidden file input to select images from device storage.
-   * Used by the Upload Image button; forwards to onFileSelected().
+    /**
+   * Request camera permissions (Capacitor) on mobile; fall back to web flow.
+   * Attempts to initialize the camera after permission resolution.
    */
-  triggerFileInput() {
+  async requestCameraPermission() {
+    // Only request Capacitor Camera permissions on native platforms.
     try {
-      this.uploadInputRef.nativeElement.click();
-    } catch (e) {
-      console.warn('triggerFileInput failed', e);
+      const platform = Capacitor.getPlatform();
+      if (platform === 'android' || platform === 'ios') {
+        const permission = await Camera.requestPermissions();
+
+        if (permission.camera === 'granted') {
+          console.log('✅ Camera permission granted');
+          this.initCamera(); // Call your custom camera init
+        } else {
+          alert('❌ Camera permission denied. Please allow it in system settings.');
+        }
+      } else {
+        // Web: permissions handled by the browser when calling getUserMedia
+        console.log('Skipping Capacitor Camera.requestPermissions on web platform:', platform);
+        // still attempt to init the camera for browser
+        this.initCamera();
+      }
+    } catch (error) {
+      // Some Capacitor methods throw on web (Not implemented) — ignore but log.
+      console.warn('Permission request failed (continuing):', error);
+      // Attempt to initialize camera using browser APIs as a fallback
+      try { await this.initCamera(); } catch (e) { /* ignore */ }
     }
   }
 
-  /**
-   * Read an image File as Data URL and forward to processDataUrl().
-   * Ensures consistent processing pipeline with capture and mobile picker.
-   */
-  async processFile(file: File) {
-    const reader = new FileReader();
-    const dataUrl: string = await new Promise((resolve, reject) => {
-      reader.onload = () => resolve(reader.result as string);
-      reader.onerror = reject;
-      reader.readAsDataURL(file);
-    });
-    await this.processDataUrl(dataUrl, file.name, false);
-  }
+
+
 
   /**
    * Mobile image picker — attempts to use Capacitor Photos API and forwards result to processDataUrl
@@ -305,6 +654,110 @@ export class CameraPage2Page implements AfterViewInit {
       this.logBoundingBoxStats();
     }
   }
+
+    /** Resize + normalize image to [1,3,128,128] Float32Array */
+  /**
+   * Produce Float32 tensor [1,3,128,128] normalized to [-1,1] from a dataUrl.
+   * Used by both photo capture and upload flows prior to inference.
+   */
+  async preprocessImage(dataUrl: string): Promise<Float32Array> {
+    const img = new Image();
+    img.src = dataUrl;
+    await new Promise(resolve => (img.onload = resolve));
+
+    const canvas = document.createElement('canvas');
+    canvas.width = 128;
+    canvas.height = 128;
+    const ctx = canvas.getContext('2d')!;
+    ctx.drawImage(img, 0, 0, 128, 128);
+
+    const imageData = ctx.getImageData(0, 0, 128, 128);
+    const data = new Float32Array(1 * 3 * 128 * 128);
+
+    for (let i = 0; i < 128 * 128; i++) {
+      data[i] = (imageData.data[i * 4] / 255 - 0.5) / 0.5;           // R
+      data[i + 128 * 128] = (imageData.data[i * 4 + 1] / 255 - 0.5) / 0.5; // G
+      data[i + 2 * 128 * 128] = (imageData.data[i * 4 + 2] / 255 - 0.5) / 0.5; // B
+    }
+
+    return data;
+  }
+
+    // allow passing an explicit index (useful when deriving name from storage)
+  /**
+   * Generate a short filename like P{index}{HH}{MM}.jpg for new entries.
+   */
+  generateFilename(count?: number): string {
+    const now = new Date();
+    const hh = String(now.getHours()).padStart(2, '0');
+    const mm = String(now.getMinutes()).padStart(2, '0');
+    const idx = typeof count === 'number' ? count : this.photosTaken;
+    return `P${idx}${hh}${mm}.jpg`;
+  }
+
+
+  
+  /**
+   * Draw bounding boxes on the supplied Base64 image and return a new Base64 image.
+   * Boxes are expected to be in mask coordinates; maskW/maskH indicate the mask resolution
+   * so boxes can be scaled to the image natural size.
+   */
+  async drawBoxesOnImage(Base64: string, boxes: BoundingBox[], maskW = 128, maskH = 128): Promise<string> {
+    const img = new Image();
+    img.src = Base64;
+
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d')!;
+
+    return new Promise((resolve) => {
+      img.onload = () => {
+        // Use actual image size so boxes are drawn in correct place
+        const imgW = img.naturalWidth || img.width || 1280;
+        const imgH = img.naturalHeight || img.height || 720;
+        canvas.width = imgW;
+        canvas.height = imgH;
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        ctx.strokeStyle = 'red';
+        ctx.lineWidth = Math.max(2, Math.round(Math.max(canvas.width, canvas.height) / 400));
+
+        const scaleX = maskW > 0 ? canvas.width / maskW : 1;
+        const scaleY = maskH > 0 ? canvas.height / maskH : 1;
+
+        boxes.forEach(box => {
+          const x = Math.round(box.x * scaleX);
+          const y = Math.round(box.y * scaleY);
+          const w = Math.round(box.w * scaleX);
+          const h = Math.round(box.h * scaleY);
+          ctx.strokeRect(x, y, w, h);
+        });
+
+        // Increment total bounding box counter and log
+        this.totalBoundingBoxesCreated += boxes.length;
+        console.log(`📦 Bounding boxes drawn: ${boxes.length} | 📊 Total cumulative boxes: ${this.totalBoundingBoxesCreated}`);
+
+        resolve(canvas.toDataURL('image/jpeg'));
+      };
+      // in case image is already cached
+      if (img.complete && img.naturalWidth) img.onload!(null as any);
+    });
+  }
+
+  /**
+   * Convert a base64-encoded string to a Blob; utility for uploads/exports.
+   */
+  base64ToBlob(base64Data: string, contentType = ''): Blob {
+    const byteCharacters = atob(base64Data);
+    const byteArrays = [];
+
+    for (let offset = 0; offset < byteCharacters.length; offset += 512) {
+      const slice = byteCharacters.slice(offset, offset + 512);
+      const byteNumbers = Array.from(slice).map(c => c.charCodeAt(0));
+      byteArrays.push(new Uint8Array(byteNumbers));
+    }
+
+    return new Blob(byteArrays, { type: contentType });
+  }
+
 
   /**
    * Synchronize photosTaken/photosProcessed from the ImageStorageService
@@ -684,899 +1137,7 @@ export class CameraPage2Page implements AfterViewInit {
     }
   }
 
-  constructor(
-    private platform: Platform,
-    private router: Router,
-    private sanitizer: DomSanitizer,
-    private crackDetectionService: CrackDetectionService,
-    private imageStorage: ImageStorageService,
-    private route: ActivatedRoute
-  ) {
-    this.requestCameraPermission();
-    // subscribe to current image changes so UI can react when another page selects one
-    try {
-      this.imageStorage.getCurrentImage$().subscribe(img => {
-        if (img) {
-          // update selected thumbnail reference and title
-          this.selectedThumbSrc = img.withBoxes || img.original;
-          this.selectedImageTitle = img.filename ?? '';
-        }
-      });
-    } catch (e) {
-      // ignore if observable not available
-      console.warn('Failed to subscribe to ImageStorage current image', e);
-    }
-  }
-
-  /**
-   * Lifecycle: once view is ready, initialize camera and storage/session state.
-   * Honors optional route `sessionId` to reuse an existing session.
-   */
-  ngAfterViewInit() {
-    this.platform.ready().then(() => this.initCamera());
-    // Handle Android hardware back: prompt before discarding empty session
-    
-    try {
-      this.backButtonSub = this.platform.backButton.subscribeWithPriority(10, async () => {
-        await this.handleGoHome();
-      });
-    } catch (e) {
-      console.warn('[CameraPage2] failed to register hardware back handler', e);
-    }
-
-    
-    // initialize page: load images, sessions and create a new session for this visit
-    // read optional sessionId passed via navigation (when opening camera from Sessions list)
-    try { this.routeSessionId = this.route.snapshot.queryParamMap.get('sessionId'); } catch (e) { this.routeSessionId = null; }
-
-    this.loadStoredImages()
-      .then(() => this.loadSessions())
-      .then(async () => {
-        if (this.routeSessionId) {
-          // Use existing session instead of creating a new one
-          this.selectedSessionId = this.routeSessionId;
-          try { await this.refreshDisplayedImages(); } catch (e) { /* ignore */ }
-        } else {
-          // No session requested; create a new one for this camera visit
-          try { await this.createSessionOnEnter(); } catch (e) { /* ignore */ }
-        }
-      })
-      .catch(e => console.warn('[CameraPage2] initialization failed', e));
-  }
-
-  /** Create a new session for this camera visit and set it active */
-  /**
-   * Create a new empty session for this visit and mark it pristine.
-   * Persists via ImageStorageService and refreshes counts and thumbnails.
-   */
-  async createSessionOnEnter() {
-    try {
-      const name = `Session ${new Date().toLocaleString()}`;
-      const s = (this.imageStorage && typeof (this.imageStorage.createSession) === 'function') ? this.imageStorage.createSession(name, []) : null;
-      if (s) {
-        this.selectedSessionId = (s as any).id;
-        this.sessionIsPristine = true; // Mark as new/pristine (no images added yet)
-        this.imagesUploadedThisSession = 0; // Reset counter when creating new session
-        try { (this.imageStorage as any).setLastCreatedSession((s as any).id, (s as any).name); } catch {}
-        await this.loadSessions();
-        await this.refreshDisplayedImages();
-        // ensure counts reflect the newly created/selected session
-        try { await this.updatePhotoCounts(); } catch (e) { /* ignore */ }
-      }
-    } catch (e) {
-      console.warn('[CameraPage2] createSessionOnEnter failed', e);
-    }
-  }
-
-  /** Refresh the `storedImages` array to match the active session (or show all if none) */
-  /**
-   * Sync this.storedImages with either the active session or all stored images.
-   * Uses ImageStorageService helpers to resolve image entries by key.
-   */
-  async refreshDisplayedImages() {
-    try {
-      if (this.selectedSessionId) {
-        const session = this.sessions.find(s => s.id === this.selectedSessionId);
-        if (session && Array.isArray(session.imageKeys) && session.imageKeys.length > 0) {
-          const imgs: StoredImage[] = [];
-          for (const k of session.imageKeys) {
-            const e = (this.imageStorage as any).getEntryForImage ? (this.imageStorage as any).getEntryForImage(k) : undefined;
-            if (e) imgs.push(e);
-          }
-          this.storedImages = imgs;
-        } else {
-          this.storedImages = [];
-        }
-      } else {
-        const all = await this.imageStorage.getAllImages();
-        this.storedImages = Array.isArray(all) ? all.slice() : [];
-      }
-    } catch (e) {
-      console.warn('[CameraPage2] refreshDisplayedImages failed', e);
-      try { this.storedImages = (await this.imageStorage.getAllImages()) || []; } catch { this.storedImages = []; }
-    }
-  }
-
-  /**
-   * Load available sessions from ImageStorageService into this.sessions.
-   */
-  async loadSessions() {
-    try {
-      if (typeof (this.imageStorage as any).pruneEmptySessions === 'function') {
-        (this.imageStorage as any).pruneEmptySessions();
-      }
-      const s = (this.imageStorage && typeof (this.imageStorage.getSessions) === 'function') ? this.imageStorage.getSessions() : [];
-      this.sessions = Array.isArray(s) ? s.slice() : [];
-    } catch (e) {
-      console.warn('[CameraPage] loadSessions failed', e);
-      this.sessions = [];
-    }
-  }
-
-  /**
-   * Create a session from currently selected thumbnail (or all) and persist.
-   */
-  async createSessionFromSelection() {
-    try {
-      const name = prompt('Session name', 'New Session') || `Session ${Date.now()}`;
-      // prefer currently selected thumb, else include all stored images
-      let keys: string[] = [];
-      if (this.selectedThumbSrc) {
-        const found = this.storedImages.find(s => (s as any).withBoxes === this.selectedThumbSrc || s.original === this.selectedThumbSrc);
-        if (found) keys = [found.original];
-      }
-      if (keys.length === 0) keys = this.storedImages.map(i => i.original).filter(Boolean);
-      const s = (this.imageStorage && typeof (this.imageStorage.createSession) === 'function') ? this.imageStorage.createSession(name, keys) : null;
-      await this.loadSessions();
-      alert(s ? `Session created: ${(s as any).id}` : 'Session created (fallback)');
-    } catch (e) {
-      console.warn('[CameraPage] createSessionFromSelection failed', e);
-      alert('Failed to create session. See console.');
-    }
-  }
-
-  /**
-   * Handle session dropdown selection; update current image and counts.
-   */
-  async onSessionSelect(event: Event) {
-    try {
-      const val = (event.target as HTMLSelectElement).value;
-      this.selectedSessionId = val || null;
-      const s = this.sessions.find(x => x.id === val);
-      if (s) {
-        // select first image and update service
-        if (Array.isArray(s.imageKeys) && s.imageKeys.length > 0 && typeof (this.imageStorage.selectImageByOriginal) === 'function') {
-          this.imageStorage.selectImageByOriginal(s.imageKeys[0]);
-        }
-        // refresh displayed thumbnails to match session
-        try { await this.refreshDisplayedImages(); } catch (e) { /* ignore */ }
-      } else {
-        // still refresh display when no session found (fallback to all images)
-        try { await this.refreshDisplayedImages(); } catch (e) { /* ignore */ }
-      }
-
-      // recompute counts for the newly selected session so UI shows correct totals
-      try { await this.updatePhotoCounts(); } catch (e) { /* ignore */ }
-    } catch (e) {
-      console.warn('[CameraPage] onSessionSelect failed', e);
-    }
-  }
-
-  /** Called when user taps a stored-image thumbnail — select it as current in the service and update UI */
-  /**
-   * Select a stored image in ImageStorageService and reflect it in the UI.
-   */
-  onStoredThumbClick(img: StoredImage) {
-    try {
-      this.imageStorage.selectImageByOriginal(img.original);
-    } catch (e) {
-      // ignore
-    }
-    this.selectedThumbSrc = img.withBoxes || img.original;
-    this.selectedImageTitle = img.filename ?? '';
-  }
-
-  /** Load all StoredImage entries from the ImageStorageService and update local list */
-  /**
-   * Load all stored images from ImageStorageService; keep UI selection in sync.
-   */
-  async loadStoredImages(): Promise<void> {
-    try {
-      // prefer async getter if available
-      if (typeof (this.imageStorage as any).getAllImages === 'function') {
-        const imgs = await (this.imageStorage as any).getAllImages();
-        if (Array.isArray(imgs)) {
-          this.storedImages = imgs;
-        }
-      } else if (typeof (this.imageStorage as any).getImages === 'function') {
-        const imgs = (this.imageStorage as any).getImages();
-        if (Array.isArray(imgs)) this.storedImages = imgs;
-      }
-      // ensure counts stay in sync
-      this.updatePhotoCounts();
-      // if a current image is set in the service, reflect it in the UI
-      try {
-        const cur = (this.imageStorage as any).getCurrentImage ? (this.imageStorage as any).getCurrentImage() : null;
-        if (cur) {
-          this.selectedThumbSrc = cur.withBoxes || cur.original;
-          this.selectedImageTitle = cur.filename ?? '';
-        }
-      } catch (e) {
-        // ignore
-      }
-    } catch (err) {
-      console.warn('loadStoredImages failed', err);
-    }
-  }
-
-  /** Initialize live camera feed */
-  /**
-   * Start the live camera preview using getUserMedia (or Capacitor on mobile).
-   * Cleans prior streams; wires video element; alerts on permission/device issues.
-   */
-  async initCamera() {
-    if (Capacitor.getPlatform() === 'android' || Capacitor.getPlatform() === 'ios') {
-      const permissions = await Camera.requestPermissions();
-      if (permissions.camera !== 'granted') {
-        alert('Camera permission denied. Please enable it in system settings.');
-        return;
-      }
-    }
-
-    if (this.mediaStream) {
-      this.mediaStream.getTracks().forEach(track => track.stop());
-      this.mediaStream = null;
-    }
-
-    try {
-      const constraints: MediaStreamConstraints = { video: { facingMode: 'environment' }, audio: false };
-      this.mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
-      const videoEl = this.videoRef.nativeElement;
-      videoEl.srcObject = this.mediaStream;
-      await new Promise<void>(resolve => {
-        videoEl.onloadedmetadata = () => {
-          videoEl.play();
-          resolve();
-        };
-      });
-      console.log('✅ Live camera preview started');
-    } catch (error) {
-      console.error('Camera access error:', error);
-      alert('Failed to access camera. Please check permissions and device compatibility.');
-    }
-  }
-
-  /** Capture a frame, preprocess, run inference, and save result */
-  /**
-   * Capture current frame → preprocess → run inference → store entry.
-   * Debounced via cooldown; updates session, counters, and lastPrediction.
-   */
-  async takePicture() {
-    // Prevent spamming the shutter: if currently cooling down, ignore
-    if (this.isCooldown) {
-      console.log('[CameraPage2] takePicture blocked: cooldown active');
-      return;
-    }
-    // Ensure UI shows processing state immediately
-    this.isProcessing = true;
-    // bump taken so spinner shows while inference runs
-    this.photosTaken += 1;
-
-    // start cooldown immediately and show a short visual flash
-    this.isCooldown = true;
-    this.showFlash = true;
-    // hide flash shortly after
-    setTimeout(() => { this.showFlash = false; }, this.flashDurationMs);
-    // release cooldown after configured ms
-    setTimeout(() => { this.isCooldown = false; }, this.cooldownMs);
-    // photosTaken will be derived from storage after save so don't increment here
-    // track whether inference was invoked and whether it succeeded
-    let inferenceCalled = false;
-    let inferenceSucceeded = false;
-
-    try {
-      const video = this.videoRef.nativeElement;
-      const canvas = this.canvasRef.nativeElement;
-      const ctx = canvas.getContext('2d')!;
-
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-
-      const now = new Date().toISOString();
-      const dataUrl = canvas.toDataURL('image/png');
-      this.capturedImages.unshift(dataUrl);
-
-      // Wrap inference + save into a cancellable-timeout-aware sequence
-      const work = async () => {
-        // Preprocess → inference → save
-        const imageTensor = await this.preprocessImage(dataUrl);
-        // call the backend/model
-        let prediction = null;
-        try {
-          inferenceCalled = true;
-          prediction = await this.crackDetectionService.runInference(imageTensor);
-          inferenceSucceeded = true;
-        } catch (e) {
-          console.warn('Inference failed:', e);
-          inferenceSucceeded = false;
-        }
-
-        const nowInner = new Date().toISOString();
-        // derive filename based on current stored images count so photosTaken reflects storage
-        let storedCount = 0;
-        try {
-          const all = await this.imageStorage.getAllImages();
-          storedCount = Array.isArray(all) ? all.length : 0;
-        } catch (e) {
-          storedCount = this.photosTaken || 0;
-        }
-
-        const filename = this.generateFilename(storedCount + 1);
-
-        const entry: StoredImage = {
-          original: dataUrl,
-          timestamp: nowInner,
-          filename,
-          prediction: prediction || undefined,
-          hasPrediction: !!prediction,
-          statusMessage: (inferenceCalled && inferenceSucceeded && prediction) ? 'Prediction succeeded' : (inferenceCalled ? 'Prediction failed' : 'No prediction')
-        };
-
-        // Render boxes (if any) and attach withBoxes data
-        try {
-          if (prediction && Array.isArray(prediction.boxes) && prediction.boxes.length > 0) {
-            const maskW = prediction.maskWidth || 128;
-            const maskH = prediction.maskHeight || 128;
-            const withBoxesDataUrl = await this.drawBoxesOnImage(dataUrl, prediction.boxes, maskW, maskH);
-            (entry as any).withBoxes = withBoxesDataUrl;
-            (entry as any).boxes = prediction.boxes;
-            (entry as any).detectionMessage = `Detected ${prediction.boxes.length} region(s)`;
-          } else {
-            (entry as any).withBoxes = dataUrl;
-            (entry as any).boxes = [];
-            (entry as any).detectionMessage = 'No boxes detected';
-          }
-        } catch (e) {
-          console.warn('[CameraPage2] Failed to render boxes for taken picture', e);
-          (entry as any).withBoxes = dataUrl;
-          (entry as any).boxes = [];
-          (entry as any).detectionMessage = 'Box rendering failed';
-        }
-
-        await this.imageStorage.addImage(entry);
-        // add to current session if present
-        try {
-          if (this.selectedSessionId && typeof (this.imageStorage.addImageToSession) === 'function') {
-            this.imageStorage.addImageToSession(this.selectedSessionId, entry.original);
-            this.sessionIsPristine = false; // Mark as no longer pristine since we added an image
-          }
-          await this.refreshDisplayedImages();
-        } catch (e) {
-          console.warn('[CameraPage2] Failed to add taken picture to session', e);
-        }
-        this.savedImage = entry;
-        this.lastPrediction = prediction;
-        // Increment upload counter for this session
-        this.imagesUploadedThisSession += 1;
-
-        if (inferenceCalled && inferenceSucceeded && prediction) this.photosProcessed += 1;
-        // update UI counters from authoritative storage
-        await this.updatePhotoCounts();
-        return entry;
-      };
-
-      // Overall timeout for the inference+save sequence: 10s
-      try {
-        await Promise.race([work(), new Promise((_, rej) => setTimeout(() => rej(new Error('processing-timeout')), 10_000))]);
-      } catch (err: any) {
-        if (err && err.message === 'processing-timeout') {
-          console.warn('[CameraPage2] takePicture processing timed out');
-          // Persist a fallback entry indicating timeout (prediction failed or no prediction)
-          try {
-            let storedCount = 0;
-            try {
-              const all = await this.imageStorage.getAllImages();
-              storedCount = Array.isArray(all) ? all.length : 0;
-            } catch (e) { storedCount = this.photosTaken || 0; }
-            const filename = this.generateFilename(storedCount + 1);
-            const entry: StoredImage = {
-              original: dataUrl,
-              timestamp: now,
-              filename,
-              prediction: undefined,
-              hasPrediction: false,
-              statusMessage: inferenceCalled ? 'Prediction failed' : 'No prediction'
-            };
-            await this.imageStorage.addImage(entry);
-            try {
-              if (this.selectedSessionId && typeof (this.imageStorage.addImageToSession) === 'function') {
-                this.imageStorage.addImageToSession(this.selectedSessionId, entry.original);
-                this.sessionIsPristine = false; // Mark as no longer pristine since we added an image
-              }
-              await this.refreshDisplayedImages();
-            } catch (err) {
-              console.warn('[CameraPage2] Failed to add fallback taken picture to session', err);
-            }
-            // Increment upload counter for this session
-            this.imagesUploadedThisSession += 1;
-            // update UI counters from authoritative storage
-            await this.updatePhotoCounts();
-          } catch (e) {
-            console.warn('[CameraPage2] Failed to store fallback entry after timeout', e);
-          }
-        } else {
-          console.error('Failed during takePicture work:', err);
-        }
-      }
-
-      // Keep console.log before clearing isProcessing so callers/UI see processing until logging completes
-  console.log('✅ Prediction stored:', this.lastPrediction);
-      // Print all currently stored images to verify persistence
-      try {
-        // getAllImages might be synchronous (returns array) or asynchronous in other implementations.
-        const allOrPromise = this.imageStorage.getAllImages();
-        let all: any[];
-        if (allOrPromise && typeof (allOrPromise as any).then === 'function') {
-          // await the promise-like value
-          all = await (allOrPromise as any);
-        } else {
-          all = allOrPromise as any;
-        }
-        // Stringify for more reliable remote/device console output, and also print a table if possible
-        try {
-          console.log('📂 Currently stored images (latest first):', JSON.stringify(all));
-          if (Array.isArray(all) && (console as any).table) (console as any).table(all);
-        } catch (e) {
-          console.log('📂 Currently stored images (latest first):', all);
-        }
-      } catch (logErr) {
-        console.warn('Failed to read stored images for verification:', logErr);
-      }
-
-      // Set a user-facing message depending on whether inference ran/succeeded
-      if (inferenceCalled && inferenceSucceeded && this.lastPrediction) {
-        // TypeScript can't infer that `lastPrediction` is non-null from the booleans above,
-        // so check explicitly before accessing properties.
-        const { type, shape, severity } = (this.lastPrediction as any);
-        this.extraText = `✅ Inference: ${type}, ${shape}, ${severity}`;
-      } else if (inferenceCalled && !inferenceSucceeded) {
-        this.extraText = '⚠️ Inference was called but failed.';
-      } else {
-        this.extraText = '⚠️ Inference was not called.';
-      }
-    } catch (err) {
-      console.error('Failed to take picture / run inference:', err);
-      // If inference was called but threw, mark as such
-      if (inferenceCalled && !inferenceSucceeded) {
-        this.extraText = '❌ Inference call failed. See console for details.';
-      } else if (!inferenceCalled) {
-        this.extraText = '❌ Capture or preprocessing failed before inference.';
-      } else {
-        this.extraText = '❌ Unknown error during capture/inference.';
-      }
-      alert('Failed to capture/process image. See console for details.');
-    } finally {
-      // Always clear processing flag so UI is responsive again
-      this.isProcessing = false;
-      // Log cumulative bounding box count
-      this.logBoundingBoxStats();
-    }
-  }
-
-  /**
-   * Log current bounding box statistics
-   */
-  private logBoundingBoxStats() {
-    console.log(`
-╔════════════════════════════════════════╗
-║   📊 BOUNDING BOX STATISTICS           ║
-╠════════════════════════════════════════╣
-║ Total Images Captured/Processed: ${String(this.photosTaken).padEnd(13)}║
-║ Total Bounding Boxes Created: ${String(this.totalBoundingBoxesCreated).padEnd(18)}║
-║ Avg Boxes Per Image: ${(this.photosTaken > 0 ? (this.totalBoundingBoxesCreated / this.photosTaken).toFixed(2) : '0').padEnd(23)}║
-╚════════════════════════════════════════╝
-    `);
-  }
-
-  /** Resize + normalize image to [1,3,128,128] Float32Array */
-  /**
-   * Produce Float32 tensor [1,3,128,128] normalized to [-1,1] from a dataUrl.
-   * Used by both photo capture and upload flows prior to inference.
-   */
-  async preprocessImage(dataUrl: string): Promise<Float32Array> {
-    const img = new Image();
-    img.src = dataUrl;
-    await new Promise(resolve => (img.onload = resolve));
-
-    const canvas = document.createElement('canvas');
-    canvas.width = 128;
-    canvas.height = 128;
-    const ctx = canvas.getContext('2d')!;
-    ctx.drawImage(img, 0, 0, 128, 128);
-
-    const imageData = ctx.getImageData(0, 0, 128, 128);
-    const data = new Float32Array(1 * 3 * 128 * 128);
-
-    for (let i = 0; i < 128 * 128; i++) {
-      data[i] = (imageData.data[i * 4] / 255 - 0.5) / 0.5;           // R
-      data[i + 128 * 128] = (imageData.data[i * 4 + 1] / 255 - 0.5) / 0.5; // G
-      data[i + 2 * 128 * 128] = (imageData.data[i * 4 + 2] / 255 - 0.5) / 0.5; // B
-    }
-
-    return data;
-  }
-
-  /**
-   * Reserved for closing an image preview if one is shown (no-op here).
-   */
-  closePreview() {
-    // this.imagePreview = null;
-  }
-
-  /**
-   * Toggle front/back camera and reinitialize the stream.
-   */
-  toggleCamera() {
-    this.usingFrontCamera = !this.usingFrontCamera;
-    this.initCamera();
-  }
-
-  /**
-   * Optional filter hook for thumbnail list (not implemented).
-   */
-  filterThumbnails(type: string) {
-    //Optional: filtering logic by image origin
-  }
-
-  /**
-   * Navigate to Feedback page, passing active sessionId when available.
-   */
-  goToFeedBackPage() {
-    const params: any = {};
-    if (this.selectedSessionId) params.sessionId = this.selectedSessionId;
-    this.router.navigate(['/feedback-page'], { queryParams: params });
-    console.log('Navigating to Feedback page', params);
-  }
-
-  /**
-   * Navigate back to Home; if session is empty, offer to delete it first.
-   */
-  goToHomePage() {
-    this.handleGoHome();
-  }
-
-
-  /**
-   * Show a lightweight inline popup offering to delete an empty session.
-   * Returns 'delete', 'stay', or null (dismiss).
-   */
-  private showSessionEmptyPopup(): Promise<'delete' | 'stay' | null> {
-    return new Promise((resolve) => {
-      const html = `
-        <div style="
-          position: fixed;
-          top: 0;
-          left: 0;
-          width: 100%;
-          height: 100%;
-          background: rgba(0,0,0,0.6);
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          z-index: 9999;
-        ">
-          <div style="
-            background: #fff;
-            border-radius: 12px;
-            padding: 24px;
-            max-width: 90%;
-            width: 320px;
-            box-shadow: 0 8px 24px rgba(0,0,0,0.2);
-          ">
-            <div style="
-              font-size: 18px;
-              font-weight: 600;
-              color: #000;
-              margin-bottom: 12px;
-              text-align: center;
-            ">Empty Session</div>
-            <div style="
-              font-size: 14px;
-              color: #666;
-              margin-bottom: 20px;
-              text-align: center;
-            ">
-              This session has no images. Would you like to delete it and go back to home?
-            </div>
-            <div style="
-              display: flex;
-              gap: 12px;
-              justify-content: center;
-            ">
-              <button style="
-                flex: 1;
-                padding: 10px;
-                border: 1px solid #ddd;
-                border-radius: 8px;
-                background: #f5f5f5;
-                color: #000;
-                font-size: 14px;
-                cursor: pointer;
-              " onclick="window.__popupResult('stay')">
-                Continue Session
-              </button>
-              <button style="
-                flex: 1;
-                padding: 10px;
-                border: none;
-                border-radius: 8px;
-                background: linear-gradient(to right, #ff512f, #f09819);
-                color: #fff;
-                font-size: 14px;
-                cursor: pointer;
-              " onclick="window.__popupResult('delete')">
-                Delete & Go Home
-              </button>
-            </div>
-          </div>
-        </div>
-      `;
-
-      const container = document.createElement('div');
-      container.innerHTML = html;
-      document.body.appendChild(container);
-
-      (window as any).__popupResult = (result: 'delete' | 'stay') => {
-        document.body.removeChild(container);
-        resolve(result);
-      };
-
-      // Auto-cancel if user clicks outside (on the backdrop)
-      setTimeout(() => {
-        const backdrop = container.firstElementChild as HTMLElement;
-        if (backdrop) {
-          backdrop.addEventListener('click', (e) => {
-            if (e.target === backdrop) {
-              document.body.removeChild(container);
-              resolve(null);
-            }
-          });
-        }
-      }, 0);
-    });
-  }
-
-  /**
-   * Placeholder for future interactions with drawn bounding boxes.
-   */
-  onBoxClick(box: any) {
-    // Your bounding box logic
-  }
-
-  /**
-   * Request camera permissions (Capacitor) on mobile; fall back to web flow.
-   * Attempts to initialize the camera after permission resolution.
-   */
-  async requestCameraPermission() {
-    // Only request Capacitor Camera permissions on native platforms.
-    try {
-      const platform = Capacitor.getPlatform();
-      if (platform === 'android' || platform === 'ios') {
-        const permission = await Camera.requestPermissions();
-
-        if (permission.camera === 'granted') {
-          console.log('✅ Camera permission granted');
-          this.initCamera(); // Call your custom camera init
-        } else {
-          alert('❌ Camera permission denied. Please allow it in system settings.');
-        }
-      } else {
-        // Web: permissions handled by the browser when calling getUserMedia
-        console.log('Skipping Capacitor Camera.requestPermissions on web platform:', platform);
-        // still attempt to init the camera for browser
-        this.initCamera();
-      }
-    } catch (error) {
-      // Some Capacitor methods throw on web (Not implemented) — ignore but log.
-      console.warn('Permission request failed (continuing):', error);
-      // Attempt to initialize camera using browser APIs as a fallback
-      try { await this.initCamera(); } catch (e) { /* ignore */ }
-    }
-  }
-
-  // allow passing an explicit index (useful when deriving name from storage)
-  /**
-   * Generate a short filename like P{index}{HH}{MM}.jpg for new entries.
-   */
-  generateFilename(count?: number): string {
-    const now = new Date();
-    const hh = String(now.getHours()).padStart(2, '0');
-    const mm = String(now.getMinutes()).padStart(2, '0');
-    const idx = typeof count === 'number' ? count : this.photosTaken;
-    return `P${idx}${hh}${mm}.jpg`;
-  }
-
-  /**
-   * Lifecycle: stop media tracks to release camera on component destroy.
-   */
-  ngOnDestroy() {
-    this.mediaStream?.getTracks().forEach(track => track.stop());
-    this.pruneEmptySession();
-    try { if (this.backButtonSub && typeof this.backButtonSub.unsubscribe === 'function') this.backButtonSub.unsubscribe(); } catch {}
-  }
-
-  /**
-   * Navigate back to Home Page; falls back to history.back on failure.
-   */
-  async goBack() {
-    await this.handleGoHome();
-  }
-
-  // shim so templates can call onBack()
-  onBack() {
-    this.goBack();
-  }
-
-    /**
-   * Implements the Home navigation with an empty-session confirmation flow.
-   */
-  private async handleGoHome() {
-    try {
-      const activeId = this.selectedSessionId;
-      const count = (activeId && typeof this.imageStorage.getSessionImageCount === 'function') ? this.imageStorage.getSessionImageCount(activeId) : 0;
-      const isEmptySession = !!activeId && count === 0;
-
-      if (isEmptySession) {
-        const choice = await this.showExitOverlay();
-        if (choice === 'discard') {
-          if (typeof this.imageStorage.removeSessionIfEmpty === 'function') {
-            this.imageStorage.removeSessionIfEmpty(activeId);
-          } else if (typeof this.imageStorage.removeSession === 'function') {
-            this.imageStorage.removeSession(activeId);
-          }
-          this.router.navigate(['/home-page']);
-          return;
-        }
-        if (choice === 'stay' || choice === null) return;
-      }
-
-      this.router.navigate(['/home-page']);
-    } catch (e) {
-      console.warn('handleGoHome failed', e);
-      this.router.navigate(['/home-page']);
-    }
-  }
-
-  
-  /** Drop active session if it contains zero images */
-  private pruneEmptySession() {
-    if (this.selectedSessionId && typeof this.imageStorage.removeSessionIfEmpty === 'function') {
-      this.imageStorage.removeSessionIfEmpty(this.selectedSessionId);
-    }
-  }
-
-  /**
-   * Draw bounding boxes on the supplied Base64 image and return a new Base64 image.
-   * Boxes are expected to be in mask coordinates; maskW/maskH indicate the mask resolution
-   * so boxes can be scaled to the image natural size.
-   */
-  async drawBoxesOnImage(Base64: string, boxes: BoundingBox[], maskW = 128, maskH = 128): Promise<string> {
-    const img = new Image();
-    img.src = Base64;
-
-    const canvas = document.createElement('canvas');
-    const ctx = canvas.getContext('2d')!;
-
-    return new Promise((resolve) => {
-      img.onload = () => {
-        // Use actual image size so boxes are drawn in correct place
-        const imgW = img.naturalWidth || img.width || 1280;
-        const imgH = img.naturalHeight || img.height || 720;
-        canvas.width = imgW;
-        canvas.height = imgH;
-        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-        ctx.strokeStyle = 'red';
-        ctx.lineWidth = Math.max(2, Math.round(Math.max(canvas.width, canvas.height) / 400));
-
-        const scaleX = maskW > 0 ? canvas.width / maskW : 1;
-        const scaleY = maskH > 0 ? canvas.height / maskH : 1;
-
-        boxes.forEach(box => {
-          const x = Math.round(box.x * scaleX);
-          const y = Math.round(box.y * scaleY);
-          const w = Math.round(box.w * scaleX);
-          const h = Math.round(box.h * scaleY);
-          ctx.strokeRect(x, y, w, h);
-        });
-
-        // Increment total bounding box counter and log
-        this.totalBoundingBoxesCreated += boxes.length;
-        console.log(`📦 Bounding boxes drawn: ${boxes.length} | 📊 Total cumulative boxes: ${this.totalBoundingBoxesCreated}`);
-
-        resolve(canvas.toDataURL('image/jpeg'));
-      };
-      // in case image is already cached
-      if (img.complete && img.naturalWidth) img.onload!(null as any);
-    });
-  }
-
-  /**
-   * Convert a base64-encoded string to a Blob; utility for uploads/exports.
-   */
-  base64ToBlob(base64Data: string, contentType = ''): Blob {
-    const byteCharacters = atob(base64Data);
-    const byteArrays = [];
-
-    for (let offset = 0; offset < byteCharacters.length; offset += 512) {
-      const slice = byteCharacters.slice(offset, offset + 512);
-      const byteNumbers = Array.from(slice).map(c => c.charCodeAt(0));
-      byteArrays.push(new Uint8Array(byteNumbers));
-    }
-
-    return new Blob(byteArrays, { type: contentType });
-  }
-
-  /**
-   * Developer test helper: run inference on a chosen local image file.
-   */
-  async testWithLocalImage(file: File) {
-    const reader = new FileReader();
-    const dataUrl: string = await new Promise((resolve, reject) => {
-      reader.onload = () => resolve(reader.result as string);
-      reader.onerror = reject;
-      reader.readAsDataURL(file);
-    });
-
-    const imageTensor = await this.preprocessImage(dataUrl);
-    const prediction = await this.crackDetectionService.runInference(imageTensor);
-
-    console.log("🧪 Test Prediction:", prediction);
-    this.lastPrediction = prediction;
-  }
-
-  /**
-   * Handle multi-file selection from hidden input; processes each via processFile().
-   * Optimistically updates photosTaken for immediate spinner feedback.
-   */
-  async onFileSelected(event: Event) {
-    const input = event.target as HTMLInputElement;
-    if (!input || !input.files || input.files.length === 0) return;
-
-    const fileArray = Array.from(input.files);
-
-    // Immediately update counters so UI shows the spinner/count right away
-    try {
-      const all = await this.imageStorage.getAllImages();
-      const storedCount = Array.isArray(all) ? all.length : 0;
-      this.photosTaken = storedCount + fileArray.length;
-    } catch (e) {
-      // fallback to local increment if storage read fails
-      this.photosTaken += fileArray.length;
-    }
-    this.isProcessing = true;
-
-    // yield to the event loop so the spinner can render before heavy work
-    await new Promise(resolve => setTimeout(resolve, 20));
-
-    for (const f of fileArray) {
-      try {
-        // reuse existing processFile flow which reads, preprocesses, runs inference and stores
-        await this.processFile(f);
-      } catch (e) {
-        console.warn('Error processing selected file', e);
-        // ensure spinner can clear if something went wrong
-        this.photosProcessed++;
-      }
-    }
-
-    // Clear the input value so selecting the same file(s) again will trigger change event
-    try { input.value = ''; } catch (e) { /* ignore */ }
-
-    // turn off processing if everything finished
-    if (this.photosProcessed >= this.photosTaken) this.isProcessing = false;
-  }
-
+   
   /**
    * Compute which thumbnail is centered in the overlay scroller and select it.
    */
@@ -1688,6 +1249,216 @@ export class CameraPage2Page implements AfterViewInit {
       alert('Failed to delete image. See console for details.');
     }
   }
+
+  /** Refresh the `storedImages` array to match the active session (or show all if none) */
+  /**
+   * Sync this.storedImages with either the active session or all stored images.
+   * Uses ImageStorageService helpers to resolve image entries by key.
+   */
+  async refreshDisplayedImages() {
+    try {
+      if (this.selectedSessionId) {
+        const session = this.sessions.find(s => s.id === this.selectedSessionId);
+        if (session && Array.isArray(session.imageKeys) && session.imageKeys.length > 0) {
+          const imgs: StoredImage[] = [];
+          for (const k of session.imageKeys) {
+            const e = (this.imageStorage as any).getEntryForImage ? (this.imageStorage as any).getEntryForImage(k) : undefined;
+            if (e) imgs.push(e);
+          }
+          this.storedImages = imgs;
+        } else {
+          this.storedImages = [];
+        }
+      } else {
+        const all = await this.imageStorage.getAllImages();
+        this.storedImages = Array.isArray(all) ? all.slice() : [];
+      }
+    } catch (e) {
+      console.warn('[CameraPage2] refreshDisplayedImages failed', e);
+      try { this.storedImages = (await this.imageStorage.getAllImages()) || []; } catch { this.storedImages = []; }
+    }
+  }
+
+  /**
+   * Load available sessions from ImageStorageService into this.sessions.
+   */
+  async loadSessions() {
+    try {
+      if (typeof (this.imageStorage as any).pruneEmptySessions === 'function') {
+        (this.imageStorage as any).pruneEmptySessions();
+      }
+      const s = (this.imageStorage && typeof (this.imageStorage.getSessions) === 'function') ? this.imageStorage.getSessions() : [];
+      this.sessions = Array.isArray(s) ? s.slice() : [];
+    } catch (e) {
+      console.warn('[CameraPage] loadSessions failed', e);
+      this.sessions = [];
+    }
+  }
+
+
+    
+  /** Drop active session if it contains zero images */
+  private pruneEmptySession() {
+    if (this.selectedSessionId && typeof this.imageStorage.removeSessionIfEmpty === 'function') {
+      this.imageStorage.removeSessionIfEmpty(this.selectedSessionId);
+    }
+  }
+ 
+
+  /** Called when user taps a stored-image thumbnail — select it as current in the service and update UI */
+  /**
+   * Select a stored image in ImageStorageService and reflect it in the UI.
+   */
+  onStoredThumbClick(img: StoredImage) {
+    try {
+      this.imageStorage.selectImageByOriginal(img.original);
+    } catch (e) {
+      // ignore
+    }
+    this.selectedThumbSrc = img.withBoxes || img.original;
+    this.selectedImageTitle = img.filename ?? '';
+  }
+
+  /** Load all StoredImage entries from the ImageStorageService and update local list */
+  /**
+   * Load all stored images from ImageStorageService; keep UI selection in sync.
+   */
+  async loadStoredImages(): Promise<void> {
+    try {
+      // prefer async getter if available
+      if (typeof (this.imageStorage as any).getAllImages === 'function') {
+        const imgs = await (this.imageStorage as any).getAllImages();
+        if (Array.isArray(imgs)) {
+          this.storedImages = imgs;
+        }
+      } else if (typeof (this.imageStorage as any).getImages === 'function') {
+        const imgs = (this.imageStorage as any).getImages();
+        if (Array.isArray(imgs)) this.storedImages = imgs;
+      }
+      // ensure counts stay in sync
+      this.updatePhotoCounts();
+      // if a current image is set in the service, reflect it in the UI
+      try {
+        const cur = (this.imageStorage as any).getCurrentImage ? (this.imageStorage as any).getCurrentImage() : null;
+        if (cur) {
+          this.selectedThumbSrc = cur.withBoxes || cur.original;
+          this.selectedImageTitle = cur.filename ?? '';
+        }
+      } catch (e) {
+        // ignore
+      }
+    } catch (err) {
+      console.warn('loadStoredImages failed', err);
+    }
+  }
+
+
+  /**
+   * Log current bounding box statistics
+   */
+  private logBoundingBoxStats() {
+    console.log(`
+╔════════════════════════════════════════╗
+║   📊 BOUNDING BOX STATISTICS           ║
+╠════════════════════════════════════════╣
+║ Total Images Captured/Processed: ${String(this.photosTaken).padEnd(13)}║
+║ Total Bounding Boxes Created: ${String(this.totalBoundingBoxesCreated).padEnd(18)}║
+║ Avg Boxes Per Image: ${(this.photosTaken > 0 ? (this.totalBoundingBoxesCreated / this.photosTaken).toFixed(2) : '0').padEnd(23)}║
+╚════════════════════════════════════════╝
+    `);
+  }
+
+
+  /**
+   * Reserved for closing an image preview if one is shown (no-op here).
+   */
+  closePreview() {
+    // this.imagePreview = null;
+  }
+
+  /**
+   * Toggle front/back camera and reinitialize the stream.
+   */
+  toggleCamera() {
+    this.usingFrontCamera = !this.usingFrontCamera;
+    this.initCamera();
+  }
+
+  /**
+   * Optional filter hook for thumbnail list (not implemented).
+   */
+  filterThumbnails(type: string) {
+    //Optional: filtering logic by image origin
+  }
+
+  /**
+   * Navigate to Feedback page, passing active sessionId when available.
+   */
+  goToFeedBackPage() {
+    const params: any = {};
+    if (this.selectedSessionId) params.sessionId = this.selectedSessionId;
+    this.router.navigate(['/feedback-page'], { queryParams: params });
+    console.log('Navigating to Feedback page', params);
+  }
+
+  /**
+   * Navigate back to Home; if session is empty, offer to delete it first.
+   */
+  goToHomePage() {
+    this.handleGoHome();
+  }
+
+  /**
+   * Lifecycle: stop media tracks to release camera on component destroy.
+   */
+  ngOnDestroy() {
+    this.mediaStream?.getTracks().forEach(track => track.stop());
+    this.pruneEmptySession();
+    try { if (this.backButtonSub && typeof this.backButtonSub.unsubscribe === 'function') this.backButtonSub.unsubscribe(); } catch {}
+  }
+
+  /**
+   * Navigate back to Home Page; falls back to history.back on failure.
+   */
+  async goBack() {
+    await this.handleGoHome();
+  }
+
+  // shim so templates can call onBack()
+  onBack() {
+    this.goBack();
+  }
+
+    /**
+   * Implements the Home navigation with an empty-session confirmation flow.
+   */
+  private async handleGoHome() {
+    try {
+      const activeId = this.selectedSessionId;
+      const count = (activeId && typeof this.imageStorage.getSessionImageCount === 'function') ? this.imageStorage.getSessionImageCount(activeId) : 0;
+      const isEmptySession = !!activeId && count === 0;
+
+      if (isEmptySession) {
+        const choice = await this.showExitOverlay();
+        if (choice === 'discard') {
+          if (typeof this.imageStorage.removeSessionIfEmpty === 'function') {
+            this.imageStorage.removeSessionIfEmpty(activeId);
+          } else if (typeof this.imageStorage.removeSession === 'function') {
+            this.imageStorage.removeSession(activeId);
+          }
+          this.router.navigate(['/home-page']);
+          return;
+        }
+        if (choice === 'stay' || choice === null) return;
+      }
+
+      this.router.navigate(['/home-page']);
+    } catch (e) {
+      console.warn('handleGoHome failed', e);
+      this.router.navigate(['/home-page']);
+    }
+  }
+
 
     /**
    * Show a lightweight overlay letting user discard empty session or stay.
