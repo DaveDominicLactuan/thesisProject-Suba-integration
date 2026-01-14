@@ -30,7 +30,8 @@ fullName: string = '';
 
 signupForm: FormGroup;
 
-  /** Inject auth/router; build a minimal form for demonstration. */
+  /** Inject auth/router; build a minimal form for demonstration, 
+   * for login with authentication from auth 3 and fetches and stores basic profile data. using field for username and password */
   constructor(private formBuilder: FormBuilder, private router: Router, private auth: AuthService, private navCtrl: NavController, private auth3: Auth3Service) {
     this.signupForm = this.formBuilder.group({
       username: ['', Validators.required],
@@ -44,10 +45,12 @@ signupForm: FormGroup;
   async login() {
     this.error = '';
     try {
+      //tries login with email and password
       await this.auth3.login(this.email, this.password);
       console.log('[LoginPage] Auth login succeeded for', this.email);
       // After successful login, persist login state and basic user data
       try {
+        // Fetch user profile from Firestore using the login credentials of Auth3Service
         const profile = await this.auth3.getUserProfile();
         console.log('[LoginPage] Retrieved user profile from Firestore:', profile);
         const firstName = profile['firstName'] || '';
@@ -56,6 +59,7 @@ signupForm: FormGroup;
         const email = profile['email'] || this.email;
         const username = (firstName && lastName) ? `${firstName} ${lastName}` : (email || '');
         const userRole = engineeringID ? 'engineer' : 'user';
+        //compiles user data as object for storing locally on device for offline access
         const userData = { username, userRole, firstName, lastName, engineeringID, email };
         // Keep component fields updated for template/console visibility
         this.firstName = firstName;
@@ -64,13 +68,15 @@ signupForm: FormGroup;
         this.engineeringID = engineeringID;
         // Print user details for quick verification on login page
         console.log('[LoginPage] Login succeeded', userData);
+        // Store user data locally for offline access
         try { localStorage.setItem('userData', JSON.stringify(userData)); } catch {}
       } catch (e) {
         // Even if profile fetch fails, mark as logged in so navigation proceeds
         console.warn('[LoginPage] getUserProfile failed; proceeding with fallback email only', e);
       }
 
-      // Mark logged in and navigate to home replacing history so back exits
+      // Mark logged in and navigate to home, allow for when openign app navigate to home-page than landing page
+      //  replacing history so back exits
       try { localStorage.setItem('isLoggedIn', 'true'); } catch {}
       console.log('[LoginPage] navigating to /home-page');
       this.router.navigateByUrl('/home-page', { replaceUrl: true });
@@ -98,7 +104,7 @@ signupForm: FormGroup;
 
  
 
-/** Track selected role (UX only, no auth effect here). */
+/** Track selected role (UX only, no auth effect). */
 selectRole(role: string) {
   this.selectedRole = role;
   console.log('Selected Role:', role);

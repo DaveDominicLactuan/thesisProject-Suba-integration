@@ -124,8 +124,9 @@ export class CameraPage2Page implements AfterViewInit {
     // initialize page: load images, sessions and create a new session for this visit
     // read optional sessionId passed via navigation (when opening camera from Sessions list)
     try { this.routeSessionId = this.route.snapshot.queryParamMap.get('sessionId'); } catch (e) { this.routeSessionId = null; }
-
+    //load local images from image storage service
     this.loadStoredImages()
+    //loads the sessions from image storage service
       .then(() => this.loadSessions())
       .then(async () => {
         if (this.routeSessionId) {
@@ -403,9 +404,14 @@ export class CameraPage2Page implements AfterViewInit {
    */
   async createSessionOnEnter() {
     try {
+      //creates session and Generate a human-friendly session name with current date/time. 
+      // , and calls service to create a session (empty image list) and Fallback to null if API missing.
       const name = `Session ${new Date().toLocaleString()}`;
       const s = (this.imageStorage && typeof (this.imageStorage.createSession) === 'function') ? this.imageStorage.createSession(name, []) : null;
       if (s) {
+        //select session as current session, mark as pristine(new session), 
+        //reset counter for uploaded images, abd refresh displayed images and records the newly 
+        // created session with its id/name in the the serve as last created session
         this.selectedSessionId = (s as any).id;
         this.sessionIsPristine = true; // Mark as new/pristine (no images added yet)
         this.imagesUploadedThisSession = 0; // Reset counter when creating new session
@@ -434,7 +440,7 @@ export class CameraPage2Page implements AfterViewInit {
    * Attempts to initialize the camera after permission resolution.
    */
   async requestCameraPermission() {
-    // Only request Capacitor Camera permissions on native platforms.
+    // Only request Capacitor Camera permissions on android and IOS platforms.
     try {
       const platform = Capacitor.getPlatform();
       if (platform === 'android' || platform === 'ios') {
@@ -447,7 +453,7 @@ export class CameraPage2Page implements AfterViewInit {
           alert('❌ Camera permission denied. Please allow it in system settings.');
         }
       } else {
-        // Web: permissions handled by the browser when calling getUserMedia
+        // Web -> permissions handled by the browser when calling getUserMedia
         console.log('Skipping Capacitor Camera.requestPermissions on web platform:', platform);
         // still attempt to init the camera for browser
         this.initCamera();
@@ -455,21 +461,16 @@ export class CameraPage2Page implements AfterViewInit {
     } catch (error) {
       // Some Capacitor methods throw on web (Not implemented) — ignore but log.
       console.warn('Permission request failed (continuing):', error);
-      // Attempt to initialize camera using browser APIs as a fallback
+      // Attempt to initialize camera using browser APIs as a fallback for ionic serve testing
       try { await this.initCamera(); } catch (e) { /* ignore */ }
     }
   }
 
 
 
-
-  /**
-   * Mobile image picker — attempts to use Capacitor Photos API and forwards result to processDataUrl
-   * Mirrors the behaviour in upload-image-page.pickImagesMobile
-   */
   /**
    * Pick a photo from device gallery (Capacitor) and process it.
-   * On success, calls processDataUrl() which runs inference and stores results.
+   * if successful, calls processDataUrl() which runs inference and stores results.
    */
   async pickImagesMobile() {
     try {
@@ -481,6 +482,7 @@ export class CameraPage2Page implements AfterViewInit {
       });
 
       if (photo && photo.base64String) {
+        //create dataURL and filename
         const dataUrl = `data:image/jpeg;base64,${photo.base64String}`;
         const filename = this.generateFilename();
         // reuse existing processing pipeline with a 10s overall timeout
@@ -491,9 +493,11 @@ export class CameraPage2Page implements AfterViewInit {
           console.warn('[CameraPage2] pickImagesMobile: processing failed or timed out', e);
         }
       } else {
+        //no photo selected or errror
         console.warn('pickImagesMobile: no photo returned');
       }
     } catch (e) {
+      //error picking image
       console.warn('pickImagesMobile failed', e);
     }
   }
@@ -509,15 +513,16 @@ export class CameraPage2Page implements AfterViewInit {
     if (bumpCounters) this.photosTaken += 1;
     this.isProcessing = true;
 
-    // Track whether inference was started so if we timeout we can choose the proper status message
+    // Track whether inference was started so if timeout, we can choose the proper status message to store/show
     let inferenceAttempted = false;
-
+    //preprocess
     const doWork = async () => {
       let prediction: any = null;
       try {
+        //converts the img dataURL into exact Float32 tensor the model expects
         const tensor = await this.preprocessImage(dataUrl);
         // guard inference with timeout to avoid device hangs
-        const inferenceTimeoutMs = 20_000; // 20s (internal inference guard)
+        const inferenceTimeoutMs = 20_000; // (set timeout, to 20sinternal inference guard)
         try {
           inferenceAttempted = true;
           prediction = await Promise.race([
@@ -531,7 +536,7 @@ export class CameraPage2Page implements AfterViewInit {
       } catch (e) {
         console.warn('Inference failed during upload processing', e);
       }
-
+      // Prepare storage entry or build StoredImage entry
       const entry: StoredImage = {
         original: dataUrl,
         timestamp: new Date().toISOString(),
@@ -568,7 +573,7 @@ export class CameraPage2Page implements AfterViewInit {
 
           const maskW = prediction.maskWidth || prediction.maskW || 128;
           const maskH = prediction.maskHeight || prediction.maskH || 128;
-
+         // try to create withBoxes image with drawn boxes based on the bouding box data
           try {
             const withBoxesDataUrl = await this.drawBoxesOnImage(dataUrl, boxesToDraw, maskW, maskH);
             (entry as any).withBoxes = withBoxesDataUrl;
@@ -592,10 +597,11 @@ export class CameraPage2Page implements AfterViewInit {
         (entry as any).boxes = [];
         (entry as any).detectionMessage = 'Box rendering failed';
       }
-
+       //store image entry via image storage service
       await this.imageStorage.addImage(entry);
       // also add to active session if one exists
       try {
+        //add to current session in use and set sessioIsPristine to false, then refresh displayed images
         if (this.selectedSessionId && typeof (this.imageStorage.addImageToSession) === 'function') {
           this.imageStorage.addImageToSession(this.selectedSessionId, entry.original);
           this.sessionIsPristine = false; // Mark session as no longer pristine
@@ -612,7 +618,7 @@ export class CameraPage2Page implements AfterViewInit {
       return entry;
     };
 
-    // Overall processing timeout: 10s
+    // Overall processing timeout: 10s, if the process did not finish in under 10s
     const overallTimeoutMs = 10_000;
     try {
       await Promise.race([doWork(), new Promise((_, rej) => setTimeout(() => rej(new Error('processing-timeout')), overallTimeoutMs))]);
@@ -703,6 +709,8 @@ export class CameraPage2Page implements AfterViewInit {
    * so boxes can be scaled to the image natural size.
    */
   async drawBoxesOnImage(Base64: string, boxes: BoundingBox[], maskW = 128, maskH = 128): Promise<string> {
+    //creates an img and canva/context to draw the image on the canvas
+    
     const img = new Image();
     img.src = Base64;
 
@@ -711,18 +719,20 @@ export class CameraPage2Page implements AfterViewInit {
 
     return new Promise((resolve) => {
       img.onload = () => {
+        //determine the size of the img and draw the img to the canvas
         // Use actual image size so boxes are drawn in correct place
         const imgW = img.naturalWidth || img.width || 1280;
         const imgH = img.naturalHeight || img.height || 720;
         canvas.width = imgW;
         canvas.height = imgH;
         ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+                //configure styoke style and line width for boxes to draw
         ctx.strokeStyle = 'red';
         ctx.lineWidth = Math.max(2, Math.round(Math.max(canvas.width, canvas.height) / 400));
-
+        //computes the scaling model mask coordinates to image pixel coordinates
         const scaleX = maskW > 0 ? canvas.width / maskW : 1;
         const scaleY = maskH > 0 ? canvas.height / maskH : 1;
-
+        //draw each box on the canvas
         boxes.forEach(box => {
           const x = Math.round(box.x * scaleX);
           const y = Math.round(box.y * scaleY);
@@ -740,22 +750,6 @@ export class CameraPage2Page implements AfterViewInit {
       // in case image is already cached
       if (img.complete && img.naturalWidth) img.onload!(null as any);
     });
-  }
-
-  /**
-   * Convert a base64-encoded string to a Blob; utility for uploads/exports.
-   */
-  base64ToBlob(base64Data: string, contentType = ''): Blob {
-    const byteCharacters = atob(base64Data);
-    const byteArrays = [];
-
-    for (let offset = 0; offset < byteCharacters.length; offset += 512) {
-      const slice = byteCharacters.slice(offset, offset + 512);
-      const byteNumbers = Array.from(slice).map(c => c.charCodeAt(0));
-      byteArrays.push(new Uint8Array(byteNumbers));
-    }
-
-    return new Blob(byteArrays, { type: contentType });
   }
 
 
@@ -1190,6 +1184,7 @@ export class CameraPage2Page implements AfterViewInit {
    * otherwise removes from in-memory capturedImages. Refreshes lists and counts.
    */
   async deleteSelectedImage() {
+    //ensure an image is selected
     const src = this.selectedThumbSrc || '';
     if (!src) {
       console.warn('[CameraPage2] deleteSelectedImage: no image selected');
@@ -1197,7 +1192,9 @@ export class CameraPage2Page implements AfterViewInit {
       return;
     }
 
-    // If the selected thumbnail maps to a stored/persisted image, remove it via the ImageStorageService
+    // find in imagePaths (stored images) first, delete logic
+    // If the selected thumbnail maps to a stored/persisted 
+    // image, remove it via the ImageStorageService
     const storedIdx = this.storedImages.findIndex(p => p.original === src || p.withBoxes === src);
     if (storedIdx !== -1) {
       const imgEntry = this.storedImages[storedIdx];
@@ -1256,6 +1253,11 @@ export class CameraPage2Page implements AfterViewInit {
    * Uses ImageStorageService helpers to resolve image entries by key.
    */
   async refreshDisplayedImages() {
+    //find session and load its image entries, 
+    // session.imagekeys to storedimages using image storage and populate the storedImages
+    // entry for image also allow for refresh the displayed 
+    // images after new images are added or deleted
+
     try {
       if (this.selectedSessionId) {
         const session = this.sessions.find(s => s.id === this.selectedSessionId);
@@ -1269,6 +1271,7 @@ export class CameraPage2Page implements AfterViewInit {
         } else {
           this.storedImages = [];
         }
+        //if no session, then load global image list
       } else {
         const all = await this.imageStorage.getAllImages();
         this.storedImages = Array.isArray(all) ? all.slice() : [];
@@ -1284,11 +1287,14 @@ export class CameraPage2Page implements AfterViewInit {
    */
   async loadSessions() {
     try {
+      //prune session if empty
       if (typeof (this.imageStorage as any).pruneEmptySessions === 'function') {
         (this.imageStorage as any).pruneEmptySessions();
       }
+      // retrive the session and normalize to array
       const s = (this.imageStorage && typeof (this.imageStorage.getSessions) === 'function') ? this.imageStorage.getSessions() : [];
       this.sessions = Array.isArray(s) ? s.slice() : [];
+      //on any failure, log and ensure the sessions array is empty
     } catch (e) {
       console.warn('[CameraPage] loadSessions failed', e);
       this.sessions = [];
@@ -1305,9 +1311,10 @@ export class CameraPage2Page implements AfterViewInit {
   }
  
 
-  /** Called when user taps a stored-image thumbnail — select it as current in the service and update UI */
+  /** Called when user taps a stored-image thumbnail,
+   * select it as current in the service and update UI */
   /**
-   * Select a stored image in ImageStorageService and reflect it in the UI.
+   * Select a stored image in session or ImageStorageService and reflect it in the UI.
    */
   onStoredThumbClick(img: StoredImage) {
     try {
@@ -1411,6 +1418,7 @@ export class CameraPage2Page implements AfterViewInit {
   /**
    * Lifecycle: stop media tracks to release camera on component destroy.
    */
+  //prune empty session, if session is empty
   ngOnDestroy() {
     this.mediaStream?.getTracks().forEach(track => track.stop());
     this.pruneEmptySession();
@@ -1430,7 +1438,7 @@ export class CameraPage2Page implements AfterViewInit {
   }
 
     /**
-   * Implements the Home navigation with an empty-session confirmation flow.
+   * Implements the Home navigation with an empty-session confirmation flow and close overlay if appended.
    */
   private async handleGoHome() {
     try {
@@ -1461,7 +1469,7 @@ export class CameraPage2Page implements AfterViewInit {
 
 
     /**
-   * Show a lightweight overlay letting user discard empty session or stay.
+   * Show a lightweight overlay asking user either discard empty session or stay.
    * Returns 'discard', 'stay', or null (dismiss).
    */
   private showExitOverlay(): Promise<'discard' | 'stay' | null> {

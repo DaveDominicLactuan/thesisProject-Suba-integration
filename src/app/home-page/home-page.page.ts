@@ -32,14 +32,9 @@ export class HomePagePage implements OnInit, OnDestroy {
 
   }
 
-/**
- * Lifecycle: kick off async initialization (user profile + sessions) without
- * marking ngOnInit async (Angular OnInit expects void).
- */
 ngOnInit(): void {
   
-  // avoid making ngOnInit async (implements OnInit expects void)
-  // perform async initialization in a separate method
+  //initializes the data needed for the page such as user data, profile and session
   this.initialize();
 }
 
@@ -47,11 +42,12 @@ ngOnInit(): void {
 private async initialize(): Promise<void> {
   try {
     // Ensure Firebase auth state is ready before fetching profile
+    // wait for up to 8 seconds for auth from firebase and current user profile from firestore
     if (!this.auth3.getCurrentUser()) {
       console.log('[HomePage] waiting for auth state…');
       await this.waitForUserAuth(8000);
     }
-
+   // stores current user profile data in profile variables 
     const profile = await this.auth3.getUserProfile();
     this.firstName = profile['firstName'];
     this.lastName = profile['lastName'];
@@ -59,7 +55,9 @@ private async initialize(): Promise<void> {
     this.email = profile['email'] || '';
     // Read role from Firestore profile (authoritative source)
     this.userRole = profile['role'] || (this.engineeringID ? 'engineer' : 'user');
+    //gets username from firatName and lastName
     this.userName = (this.firstName && this.lastName) ? `${this.firstName} ${this.lastName}` : (this.email || null);
+    //prints the current user profile to console
     console.log('[HomePage] user profile loaded', {
       firstName: this.firstName,
       lastName: this.lastName,
@@ -68,7 +66,7 @@ private async initialize(): Promise<void> {
       userRole: this.userRole,
       userName: this.userName
     });
-    // Persist/refresh local user data for downstream use
+    // Persist/refresh local user data for downstream use, and for long term offline use
     try {
       localStorage.setItem('userData', JSON.stringify({
         username: this.userName || '',
@@ -80,7 +78,7 @@ private async initialize(): Promise<void> {
       }));
       localStorage.setItem('isLoggedIn', 'true');
     } catch {}
-     // Also persist user profile in sessionStorage for current session
+     // Also persist user profile in sessionStorage for current session, short lived and cleared when closed
      try {
        sessionStorage.setItem('userProfile', JSON.stringify({
          username: this.userName || '',
@@ -109,7 +107,7 @@ private async initialize(): Promise<void> {
       }
     } catch {}
   }
-  // Mark logged-in flag locally
+  // Mark logged-in flag locally. allow for system to navigate to home-page instead of landing-page if logged in
   try { this.isLoggedIn = (localStorage.getItem('isLoggedIn') === 'true'); } catch { this.isLoggedIn = true; }
   // load sessions from image storage service
   try { await this.loadSessions(); } catch (e) { console.warn('loadSessions failed during init', e); }
@@ -138,35 +136,20 @@ private async initialize(): Promise<void> {
     });
   }
 
-  
-  /**
-   * Return the currently-authenticated Firebase user and Firestore profile (if available).
-   * Uses `Auth3Service` which exposes `getCurrentUser()` and `getUserProfile()`.
-   */
-  async getCurrentUserInfo(): Promise<{ user: any | null; profile: any | null } | null> {
-    try {
-      const user = this.auth3.getCurrentUser ? this.auth3.getCurrentUser() : null;
-      const profile = user && this.auth3.getUserProfile ? await this.auth3.getUserProfile() : null;
-      console.log('[HomePage] getCurrentUserInfo', { user, profile });
-      return { user, profile };
-    } catch (err) {
-      console.warn('[HomePage] getCurrentUserInfo failed', err);
-      return null;
-    }
-  }
-
-  // Called by Ionic when page becomes active — refresh sessions/counts
+  // Called by Ionic when page becomes active — refresh and loads sessions/counts/
   /** Ionic hook: refresh sessions each time page becomes active. */
   ionViewWillEnter() {
     this.loadSessions();
   }
 
-  /** Register hardware back handler only while this view is active. */
+  /** Register hardware back handler only while this view is active, 
+   * allowing for hardware back button navigation */
   ionViewDidEnter() {
     this.registerBackButtonHandler();
   }
 
-  /** Remove hardware back handler when navigating away so other pages work normally. */
+  /** Remove hardware back handler when navigating away so other pages work normally, 
+   * so as to keep logic for exiting the app inside home-page and not affect other pages*/
   ionViewWillLeave() {
     this.removeBackButtonHandler();
   }
@@ -174,9 +157,12 @@ private async initialize(): Promise<void> {
   /** Load sessions from ImageStorageService and compute image counts. */
   async loadSessions() {
     try {
+      //Safely read sessions from ImageStorageService, create a copy and stores it.
       const s = (this.imageStorage.getSessions && typeof this.imageStorage.getSessions === 'function') ? this.imageStorage.getSessions() : [];
       const sessionsRaw = Array.isArray(s) ? s.slice() : [];
-      // compute image counts by comparing session imageKeys with stored images
+
+      // compute image counts by comparing session imageKeys with stored images with 
+      // geAllImages or getImages if fails into a arrayt allImages from the imageStorage not in sessions
       let allImages: any[] = [];
       try {
         // Prefer async or sync `getAllImages` when available
@@ -189,18 +175,22 @@ private async initialize(): Promise<void> {
         } else {
           allImages = [];
         }
+        // if it failed and returned a non array, or null or something else replace it with an empty array
         if (!Array.isArray(allImages)) allImages = [];
       } catch (e) {
         // fallback to synchronous call if async attempt failed
         try { allImages = (this.imageStorage as any).getImages ? (this.imageStorage as any).getImages() : []; } catch (ee) { allImages = []; }
         if (!Array.isArray(allImages)) allImages = [];
       }
+
+      // counts how many imageKeys or images in the sessions are present in allImages
       this.sessions = sessionsRaw.map((sess: any) => {
         const keys = Array.isArray(sess.imageKeys) ? sess.imageKeys : [];
         const imageCount = keys.reduce((acc: number, k: string) => acc + (allImages.findIndex(ai => ai.original === k) !== -1 ? 1 : 0), 0);
         return { ...sess, imageCount };
       });
-      // if ImageStorageService recorded a last created session, show its name at top
+      // if Image Storage Service recorded a last created session or last used/created session,
+      //  show its name at top of the summary list
       try {
         const lastName = (this.imageStorage as any).getLastCreatedSessionName ? (this.imageStorage as any).getLastCreatedSessionName() : null;
         if (lastName && lastName.length > 0) {
@@ -221,20 +211,6 @@ private async initialize(): Promise<void> {
   }
 
   // Additional methods can be added here
-
-
-  /**
-   * Synchronous accessor for the underlying Firebase User object (may be null).
-   */
-  getCurrentUserSync(): any | null {
-    try {
-      return this.auth3.getCurrentUser ? this.auth3.getCurrentUser() : null;
-    } catch (err) {
-      console.warn('[HomePage] getCurrentUserSync failed', err);
-      return null;
-    }
-  }
-
 
   /** Navigate to legacy camera page route. */
   goToHomePage() {
@@ -277,8 +253,9 @@ private async initialize(): Promise<void> {
    * ImageStorageService so detail UIs can initialize accordingly.
    */
   async goToSession(session: any) {
-    // pick the first image in session and select it in the service, then open camera page
-    try {
+    // pick the first image in session and prepare the destination(feedback-page) to load it and 
+    // display that first image when the session is selected
+     try {
       if (session && session.imageKeys && session.imageKeys.length > 0) {
         const key = session.imageKeys[0];
         if (this.imageStorage && typeof this.imageStorage.selectImageByOriginal === 'function') {
@@ -287,9 +264,12 @@ private async initialize(): Promise<void> {
       }
     } catch (e) { console.warn('goToSession warning', e); }
     try {
-      // Ensure HomePage back handler is removed so destination page can control back behavior
+      // Ensure HomePage back handler is removed before naviagting 
+      // to feedback-page to keep the logic and behavior of back button is kept inside the home-page
       try { this.removeBackButtonHandler(); } catch (e) { /* ignore */ }
 
+      //build the parameters for the current session to be selected and displayed 
+      // in feedback-page with the session.id
       const params: any = {};
       if (session && session.id) params.sessionId = session.id;
       // Navigate to feedback page and include sessionId so feedback page can load the session
@@ -359,6 +339,8 @@ private async initialize(): Promise<void> {
   /**
    * Simple in-app overlay to test notifications and storage/session helpers.
    */
+
+  //show a overlay to show user profile and logout buttons
   showTestOverlay() {
     // Prevent multiple overlays
     if (document.getElementById('test-overlay')) return;
@@ -721,7 +703,8 @@ private async initialize(): Promise<void> {
     // No local back subscription: page-level handler will close the overlay when present
   }
 
-  /** Register a one-page-only back button listener that exits the app from home. */
+  /** Register a one-page-only back button that exits the app from home. 
+   * and if test-overlay is currently append close the overlay before exit app logic from home */
   private registerBackButtonHandler() {
     try {
       this.removeBackButtonHandler();
@@ -741,7 +724,8 @@ private async initialize(): Promise<void> {
     }
   }
 
-  /** Remove the home-page back handler so other pages can handle back navigation normally. */
+  /** Remove the home-page back handler so other pages can handle back navigation normally, 
+   * without exit app logic and behavior */
   private removeBackButtonHandler() {
     try {
       if (this.backButtonSub && typeof this.backButtonSub.remove === 'function') {

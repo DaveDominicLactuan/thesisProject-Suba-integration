@@ -88,6 +88,7 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
   ) {
   
     try {
+      //whenever it detects an image selection change, update selected thumbnail src and other variables
       this.imageStorage.getCurrentImage$().subscribe(img => {
         if (img) {
           this.selectedThumbSrc = img.withBoxes ?? img.original;
@@ -132,9 +133,11 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
   /** Load sessions from ImageStorageService (sync API) */
   async loadSessions() {
     try {
+      // retrive the session and normalize to array
       const s = (this.imageStorage && typeof (this.imageStorage.getSessions) === 'function') ? this.imageStorage.getSessions() : [];
       this.sessions = Array.isArray(s) ? s.slice() : [];
     } catch (e) {
+      //on any failure, log and ensure the sessions array is empty
       console.warn('[UploadImagePage] loadSessions failed', e);
       this.sessions = [];
     }
@@ -143,12 +146,23 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
   /** Create a new session for this visit and set it active */
   async createSessionOnEnter() {
     try {
+      //Generate a human-friendly session name with current date/time.
+      //Call the ImageStorageService to create a new session (empty image list). Fallback to null if API missing.
       const name = `Session ${new Date().toLocaleString()}`;
       const s = (this.imageStorage && typeof (this.imageStorage.createSession) === 'function') ? this.imageStorage.createSession(name, []) : null;
+
+     //select session as current session, mark as pristine(new session or no images inside session), 
+        //reset counter for uploaded images, abd refresh displayed images and records the newly 
+        // created session with its id/name in the the serve as last created session
       if (s) {
         this.selectedSessionId = (s as any).id;
         this.sessionIsPristine = true; // Mark session as pristine (nothing added yet)
+
+        //Try to call an optional setLastCreatedSession on the service to remember last 
+        //session id/name; swallow errors if method missing or fails. 
         try { (this.imageStorage as any).setLastCreatedSession((s as any).id, (s as any).name); } catch {}
+        
+        //Refresh the local sessions array from storage so UI (session selector) includes the newly created session.
         await this.loadSessions();
         await this.refreshDisplayedImages();
         try { await this.updatePhotoCounts(); } catch (e) { /* ignore */ }
@@ -158,8 +172,11 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
     }
   }
 
-  /** Refresh the `imagePaths` array to match the active session (or show all if none) */
   async refreshDisplayedImages() {
+    //find session and load its image entries, and match imagePaths to the active session
+    // session.imagekeys to storedimages using image storage and populate the storedImages
+    // entry for image also allow for refresh the displayed 
+    // images after new images are added or deleted
     try {
       if (this.selectedSessionId) {
         const session = this.sessions.find(s => s.id === this.selectedSessionId);
@@ -174,7 +191,7 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
           this.imagePaths = [];
         }
       } else {
-        // show all stored images
+        //if no session, then load global image list
         const stored = await this.imageStorage.getAllImages();
         this.imagePaths = (Array.isArray(stored) ? stored.map((s: StoredImage) => ({ original: s.original, withBoxes: (s as any).withBoxes || s.original, fileName: s.filename, rawPrediction: s.prediction })) : []).concat([]);
       }
@@ -184,65 +201,10 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
     }
   }
 
-  /** Create a new session from the current selection or all stored images */
-  async createSessionFromSelection() {
-    try {
-      const name = prompt('Session name', 'New Session') || `Session ${Date.now()}`;
-      // determine keys: prefer selected image, else all imagePaths
-      let keys: string[] = [];
-      if (this.selectedThumbSrc) {
-        // find matching entry in imagePaths
-        const found = this.imagePaths.find((p: any) => p.original === this.selectedThumbSrc || p.withBoxes === this.selectedThumbSrc);
-        if (found) keys = [found.original];
-      }
-      if (keys.length === 0) {
-        keys = this.imagePaths.map((p: any) => p.original).filter(Boolean);
-      }
-      const s = (this.imageStorage && typeof (this.imageStorage.createSession) === 'function') ? this.imageStorage.createSession(name, keys) : null;
-      await this.loadSessions();
-      alert(s ? `Session created: ${(s as any).id}` : 'Session created (fallback)');
-    } catch (e) {
-      console.warn('[UploadImagePage] createSessionFromSelection failed', e);
-      alert('Failed to create session. See console.');
-    }
-  }
-
-  /** Select an existing session and navigate to camera page with first image selected */
-  async selectSessionAndGo(s: any) {
-    try {
-      if (!s) return;
-      if (Array.isArray(s.imageKeys) && s.imageKeys.length > 0) {
-        const key = s.imageKeys[0];
-        if (this.imageStorage && typeof this.imageStorage.selectImageByOriginal === 'function') {
-          this.imageStorage.selectImageByOriginal(key);
-        }
-      }
-      this.router.navigate(['/camera-page2']);
-    } catch (e) {
-      console.warn('[UploadImagePage] selectSessionAndGo failed', e);
-    }
-  }
-
-  async onSessionSelect(event: Event) {
-    try {
-      const val = (event.target as HTMLSelectElement).value;
-      this.selectedSessionId = val || null;
-      const s = this.sessions.find(x => x.id === val);
-      if (s) {
-        this.selectSessionAndGo(s);
-        try { await this.refreshDisplayedImages(); } catch (e) { /* ignore */ }
-      } else {
-        try { await this.refreshDisplayedImages(); } catch (e) { /* ignore */ }
-      }
-      // recompute counters for selected session (or global when none)
-      try { await this.updatePhotoCounts(); } catch (e) { /* ignore */ }
-    } catch (e) {
-      console.warn('[UploadImagePage] onSessionSelect failed', e);
-    }
-  }
-
   /** Called when a stored-image thumbnail is clicked */
   onStoredThumbClick(img: any) {
+    //attempt to notify the servuce of the selectionm, calls the service to mark 
+    // the image as selected, if API exist and error handling
     try {
       if (this.imageStorage && typeof this.imageStorage.selectImageByOriginal === 'function') {
         this.imageStorage.selectImageByOriginal(img.original);
@@ -251,18 +213,21 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
       console.warn('onStoredThumbClick: selectImage failed', e);
     }
     // Respect the current toggle: show boxed version when toggled on, otherwise show original
+    // update the selected thumbnail src and title with respect to the toggle, and auto-scroll to center
     this.selectedThumbSrc = this.showWithBoxes ? (img.withBoxes ?? img.original) : (img.original ?? img.withBoxes ?? '');
     this.selectedImageTitle = img.fileName ?? '';
     
-    // Auto-scroll to center the selected item (Android Recent Apps style)
+    // Auto-scroll to center the selected thumbnail or item (Android Recent Apps style).  
+    // after a short delay let the DOM update then center the clicked thumbnail in the scroller.
     setTimeout(() => this.scrollThumbnailIntoView(), 100);
   }
 
   /** Scroll the thumbnail carousel to center the selected item */
   private scrollThumbnailIntoView() {
+    //get the container element for the thumbnail scroller(horizontal scroll area, bail if missing)
     const container = this.thumbScrollRef?.nativeElement as HTMLElement | undefined;
     if (!container) return;
-
+    //Query thumbnail images (bail if none)
     const images = container.querySelectorAll('img');
     if (!images || images.length === 0) return;
 
@@ -274,7 +239,7 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
         selectedImg = img as HTMLImageElement;
       }
     });
-
+    //bail if selected imgage not found
     if (!selectedImg) return;
 
     // Calculate scroll position to center the selected item
@@ -287,7 +252,7 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
     const imgOffsetFromStart = imgRect.left - containerRect.left;
     const scrollNeeded = container.scrollLeft + imgOffsetFromStart + imgCenter - containerCenter;
 
-    // Smooth scroll animation
+    // Perform smooth scrolling animation to center the thumbnail
     container.scrollTo({
       left: scrollNeeded,
       behavior: 'smooth'
@@ -349,6 +314,10 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
     `);
   }
 
+  /**
+   * Produce Float32 tensor [1,3,128,128] normalized to [-1,1] from a dataUrl.
+   * Used by upload flows prior to inference.
+   */
   /** Resize + normalize image to [1,3,128,128] Float32Array */
   async preprocessImage(dataUrl: string): Promise<Float32Array> {
     const img = new Image();
@@ -698,7 +667,7 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
     });
   }
 
-
+   //load test assets for testing
   loadTestAssets() {
     try {
       const base = 'assets/icon/';
@@ -712,7 +681,11 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
     }
   }
 
-  /** Pull images from ImageStorageService and map into the gallery format */
+  
+  /** Load all StoredImage entries from the ImageStorageService and update local list */
+  /**
+   * Load all stored images from ImageStorageService; keep UI selection in sync.
+   */
   async loadStoredImages() {
     try {
       const stored = await this.imageStorage.getAllImages();
@@ -739,19 +712,30 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
 
   onThumbnailScroll(event: any) {
     // debounce so the UI isn't overloaded while scrolling
+    //Cancel previous debounce and stop any pending 
+    // timeout so rapid scroll events don't queue multiple handlers.
     try { clearTimeout(this._thumbScrollTimeout); } catch (e) {}
+    //Schedule center-detection after scrolling (debounce)
+    //set a short delay and call detectCenterThumbnail once scrolling settles.
     this._thumbScrollTimeout = setTimeout(() => this.detectCenterThumbnail(), 100);
   }
 
+  
   detectCenterThumbnail() {
+    //Get container element and image nodes
+    //Purpose: locate the thumbnail container and the img elements; bail out if missing.
     const container = this.thumbScrollRef?.nativeElement as HTMLElement | undefined;
     if (!container) return;
     const images = container.querySelectorAll('img');
     if (!images || images.length === 0) return;
 
+   //Compute center X of the container
+   //Purpose: get the horizontal center coordinate to compare image centers against.
     const containerRect = container.getBoundingClientRect();
     const centerX = containerRect.left + containerRect.width / 2;
 
+   //Find the image whose center is closest to container center
+   //Purpose: iterate thumbnails, compute each center and distance, and track the closest.
     let closestImg: HTMLImageElement | null = null;
     let closestDistance = Infinity;
 
@@ -765,11 +749,15 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
       }
     });
 
+    //Bail if no closest image found, otherwise read its src and set selection
+    //Purpose: obtain the image source and update selectedThumbSrc.
     if (!closestImg) return;
     const imgEl: any = closestImg;
     const src = (imgEl && (imgEl.src || (imgEl.getAttribute && imgEl.getAttribute('src')))) || '';
     this.selectedThumbSrc = src;
-
+    
+    //Resolve a title from stored images or captured images
+    //Purpose: map the src to a friendly filename/title, fallback to captured index or src.
     // Try to find a title from imagePaths (stored images) else fallback to a captured index
     const matched = this.imagePaths.find((p: any) => p.original === src || p.withBoxes === src);
     let title = '';
@@ -785,9 +773,9 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
   }
 
   /**
-   * Helper to apply centering classes to the thumbnail scroller based on item count.
-   * - single-thumb: center a lone item
-   * - double-thumb: add symmetric padding so two items sit in center viewport
+    Helper to apply centering classes to the thumbnail scroller based on item count.
+    - single-thumb: center a lone item
+    - double-thumb: add symmetric padding so two items sit in center viewport
    */
   getThumbClasses(count: number) {
     return {
@@ -854,6 +842,7 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
    * Delete the currently-selected thumbnail/image from storage and UI.
    */
   async deleteSelectedImage() {
+    //ensure an image is selected
     const src = this.selectedThumbSrc || this.selectedImage || '';
     if (!src) {
       console.warn('[UploadImagePage] deleteSelectedImage: no image selected');
@@ -861,16 +850,20 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
       return;
     }
 
-    // find in imagePaths (stored images) first
+    // find in imagePaths (stored images) first, delete logic
+    // If the selected thumbnail maps to a stored/persisted 
+    // image, remove it via the ImageStorageService
     const idx = this.imagePaths.findIndex((p: any) => p.original === src || p.withBoxes === src);
     const capturedIdx = this.capturedImages.indexOf(src);
-
+    //compute human filename for prompt and ask user to confirm.
+    //Resolve display filename and confirm deletion
     const filename = idx !== -1 ? (this.imagePaths[idx].fileName ?? '(unnamed)') : (capturedIdx !== -1 ? `Captured ${capturedIdx + 1}` : src);
     const confirmMsg = `Delete image "${filename}"? This action cannot be undone.`;
     if (!confirm(confirmMsg)) return;
 
     try {
       // determine a canonical original key to pass to storage (handle withBoxes URLs)
+      //Determine canonical original key for storage operations
       let canonical = src;
       if (idx !== -1 && this.imagePaths[idx] && this.imagePaths[idx].original) {
         canonical = this.imagePaths[idx].original;
@@ -880,6 +873,7 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
       }
 
       // attempt to remove from persistent storage (if present) via canonical API
+      //call storage API to delete image (if available), in case of failures.
       let removed = false;
       try {
         removed = await (this.imageStorage as any).deleteImage(canonical);
@@ -888,7 +882,8 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
         removed = false;
       }
 
-      // Always remove any matching local references (guard against stale in-memory state)
+      // Always remove any matching local in memory references (guard against stale in-memory state)
+      //Purpose: remove any matching entries from imagePaths and capturedImages and refresh arrays.
       try {
         this.imagePaths = this.imagePaths.filter((p: any) => !(p.original === canonical || p.withBoxes === canonical || p.original === src || p.withBoxes === src));
         this.capturedImages = this.capturedImages.filter(c => !(c === canonical || c === src));
@@ -900,11 +895,14 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
       }
 
       // update counters after deletion and refresh authoritative storedImages/imagePaths
+      //refresh photo counts and reload sessions/images after deletion.
       await this.updatePhotoCounts();
       // sessions may have changed; reload sessions and refresh session-scoped display
       try { await this.loadSessions(); await this.refreshDisplayedImages(); } catch (e) { /* ignore */ }
 
       // reset selection to first available thumbnail
+      //pick a new selected thumbnail or clear selection if nothing left.
+      //Reset selection to a remaining thumbnail (or clear)
       if (this.capturedImages.length > 0) {
         // pick center or first
         setTimeout(() => this.detectCenterThumbnail(), 60);
@@ -917,7 +915,7 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
         this.selectedThumbSrc = null;
         this.selectedImageTitle = '';
       }
-
+      //emit success log; catch block notifies user and logs failure.
       console.log(`[UploadImagePage] deleteSelectedImage: removed ${filename}. Remaining capturedImages: ${this.capturedImages.length}, stored images: ${this.imagePaths.length}`);
     } catch (err) {
       console.error('[UploadImagePage] deleteSelectedImage failed', err);
@@ -925,25 +923,6 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
     }
   }
 
-  onImageClick(img: any) {
-    this.selectedImage = this.showWithBoxes ? img.withBoxes : img.original;
-    this.selectedImageTitle = img.fileName || '';
-    // If there's a prediction attached, show it in lastPrediction
-    if (img.rawPrediction) this.lastPrediction = img.rawPrediction;
-    console.log('[UploadImagePage] Image clicked:', img.fileName || img.original, img);
-  }
-
-  detectCenterImage() {
-    // basic stub: ensure selectedImage is consistent with showWithBoxes
-    if (!this.selectedImage && this.imagePaths.length > 0) {
-      this.selectedImage = this.showWithBoxes ? this.imagePaths[0].withBoxes : this.imagePaths[0].original;
-    }
-  }
-
-  onScroll(event: any) {
-    // optional: highlight center image later; keep lightweight for now
-    // console.log('gallery scrolled', event);
-  }
 
   /**
    * Draw bounding boxes on the supplied Base64 image and return a new Base64 image.
@@ -951,6 +930,7 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
    * can be scaled to the image natural size.
    */
   async drawBoxesOnImage(Base64: string, boxes: BoundingBox[], maskW = 128, maskH = 128): Promise<string> {
+     //creates an img and canva/context to draw the image on the canvas
     const img = new Image();
     img.src = Base64;
 
@@ -959,17 +939,20 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
 
     return new Promise((resolve) => {
       img.onload = () => {
+        //determine the size of the img and draw the img to the canvas
+        // Use actual image size so boxes are drawn in correct place
         const imgW = img.naturalWidth || img.width || 1280;
         const imgH = img.naturalHeight || img.height || 720;
         canvas.width = imgW;
         canvas.height = imgH;
         ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        //configure styoke style and line width for boxes to draw
         ctx.lineWidth = Math.max(2, Math.round(Math.max(canvas.width, canvas.height) / 400));
         ctx.strokeStyle = 'red';
-
+         //computes the scaling model mask coordinates to image pixel coordinates
         const scaleX = maskW > 0 ? canvas.width / maskW : 1;
         const scaleY = maskH > 0 ? canvas.height / maskH : 1;
-
+        //draw each box on the canvas
         boxes.forEach(b => {
           const x = Math.round(b.x * scaleX);
           const y = Math.round(b.y * scaleY);

@@ -56,6 +56,7 @@ regForm!: FormGroup; // our single form
  * Lifecycle: build the reactive registration form with validators.
  */
 ngOnInit() {
+  // Build the registration form with form controls, values and validators
 this.regForm = this.fb.group({
       firstName: ['', Validators.required],
       lastName: ['', Validators.required],
@@ -69,10 +70,6 @@ this.regForm = this.fb.group({
 }
 
 //Function to check if the password and confirmPassword are the same
-/*  firstName, lastName, engineeringID, email
- /**
-  * Cross-field validator to ensure password and confirmPassword match.
-  */
  passwordMatchValidator(formGroup: FormGroup) {
     const password = formGroup.get('password')?.value;
     const confirmPassword = formGroup.get('confirmPassword')?.value;
@@ -82,7 +79,7 @@ this.regForm = this.fb.group({
 
 // Function to handle registration
 /**
- * Handle registration: validate form & role, call Auth3Service.register,
+ * Handle registration: validate form & role, call Auth3Service.register for registration using credentials,
  * then navigate to landing on success or show error on failure.
  */
 async onRegister() {
@@ -114,13 +111,13 @@ async onRegister() {
   // Validate the entire form to ensure all required fields meet validation rules
   // If form is invalid, mark all controls as touched so error messages display
   if (this.regForm.invalid) {
-    // Mark all form controls as touched to trigger error display in the template
+    // Mark all form controls as touched, to allow for trigger error display in the template
     this.regForm.markAllAsTouched();
-    // Check if the specific error is password mismatch
+    // Check if the specific error is password mismatch,
     if (this.regForm.errors?.['mismatch']) {
       this.registrationError = 'Passwords do not match.';
     } else {
-      // Otherwise show a generic error asking user to fix highlighted fields
+      // Otherwise show error asking user to fix highlighted fields
       this.registrationError = 'Please fix the highlighted fields.';
     }
     // Exit early without attempting registration
@@ -128,7 +125,7 @@ async onRegister() {
   }
 
   // Check if the selected role is 'engineer' and if engineeringID is provided
-  // If it's Engineer role but no ID provided, show error and exit
+  // If it's Engineer role but no ID provided, show error and exit early
   if (this.selectedRole === 'engineer' && !engineeringID) {
     this.registrationError = 'Engineering ID is required for Engineer role.';
     return;

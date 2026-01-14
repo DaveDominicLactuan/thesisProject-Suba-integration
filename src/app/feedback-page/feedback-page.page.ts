@@ -86,6 +86,7 @@ private backButtonSub: any; // hardware back handler
   }
 
   /** Load user role/name from localStorage to control dropdown editability. */
+  //Attempts to parse localStorage 'userData', reads role/name fields and logs the loaded context.
   private loadUserRole() {
     try {
       const cached = localStorage.getItem('userData');
@@ -121,6 +122,8 @@ private backButtonSub: any; // hardware back handler
     this.selectedStatusMessage = img.statusMessage ?? '';
 
     // apply to detection fields and dropdowns
+    //Updates the visible detection text and the current dropdown 
+    //selections from the image's status/prediction so the UI immediately reflects the clicked image
     if (this.selectedStatusMessage && this.selectedStatusMessage.length > 0) {
       this.detectionMessage = this.selectedStatusMessage;
       this.detectionResult = this.selectedStatusMessage;
@@ -135,6 +138,8 @@ private backButtonSub: any; // hardware back handler
     this.dropdown3 = this.selectedPrediction.severity ?? this.selectedImageTitle ?? 'Severity';
 
     // update form map for this image
+    //Creates or ensures a persistent per-image entry in formDataMap 
+    //(defaults populated from the current UI/prediction). This is used to store selections for later retrieval, saving, or export:
     const key = img.original;
     this.formDataMap[key] = this.formDataMap[key] ?? {
       title: img.fileName ?? this.selectedImageTitle,
