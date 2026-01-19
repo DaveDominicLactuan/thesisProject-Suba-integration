@@ -57,15 +57,28 @@ export class ImageStorageService {
     console.log('📂 Loaded images from storage:', this.images.length);
   }
 
-  /** Add a new image and persist it */
+  /** Add a new image and persist it, handling duplicates */
   async addImage(image: StoredImage) {
+    // Check for duplicates based on the original image data
+    const duplicate = this.images.find(
+      img => img.original === image.original && img.timestamp === image.timestamp
+    );
+
+    if (duplicate) {
+      console.warn('Duplicate image detected. Skipping addition:', image.filename);
+      return; // Skip adding duplicate image
+    }
+
+    // Add the image if it's unique
     this.images.unshift(image);
     await this._storage?.set(this.STORAGE_KEY, this.images);
-    // update map selection if this was selected externally
+
+    // Update map selection if this was selected externally
     if (this._currentImage && this._currentImage.original === image.original) {
       this._currentImage = image;
       this._currentImage$.next(this._currentImage);
     }
+
     console.log(`📤 Image saved. Total stored images: ${this.images.length}`);
   }
 

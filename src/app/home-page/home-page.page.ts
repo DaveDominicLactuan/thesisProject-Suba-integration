@@ -245,7 +245,7 @@ private async initialize(): Promise<void> {
 
   /** Navigate to sessions list page. */
   goSessionPage() {
-    this.router.navigate(['/session-page']);
+    // this.router.navigate(['/session-page']);
     console.log('pdf 2 page');
   }
 

@@ -336,7 +336,14 @@ export class PdfPageTest03Page {
            // the rendered pages vertically in a single tall canvas so the
            // document appears centered and vertically ordered.
            const sessionCount = Array.isArray(this.sessionImages) ? this.sessionImages.length : 0;
-           const extraMultiplier = sessionCount >= 2 ? Math.max(1, sessionCount - 1) : 1;
+           let extraMultiplier;
+           if (sessionCount === 2) {
+             extraMultiplier = Math.max(1, sessionCount);
+           } else if (sessionCount >= 2) {
+             extraMultiplier = Math.max(1, sessionCount - 1);
+           } else {
+             extraMultiplier = 1;
+           }
            const outputScale = window.devicePixelRatio || 1;
    
            if (extraMultiplier > 1) {
