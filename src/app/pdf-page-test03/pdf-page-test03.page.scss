@@ -1,8 +1,11 @@
-
 .bottom-actions {
 	background: white;
-	border: 1px solid black;
+	/* Replace solid black border with gradient border */
+	border: 2px solid transparent;
 	border-radius: 10px;
+	background:
+		linear-gradient(#f7f7f7, #f7f7f7) padding-box,
+		linear-gradient(to right, #ff512f, #f09819) border-box;
 	display: flex;
 	justify-content: space-around;
 	align-items: center;

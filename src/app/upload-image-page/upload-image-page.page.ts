@@ -297,6 +297,256 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
     }
   }
 
+  
+  /** Mobile image picker — attempts Capacitor Photos API, 
+   * falls back to camera pick single file */
+  async pickImagesMobile() {
+    try {
+      //open the device photo picker and return a Base64 image.
+      const photo = await Camera.getPhoto({ quality: 80, allowEditing: false, resultType: CameraResultType.Base64, source: CameraSource.Photos });
+      //build a standard data:image/jpeg;base64,... URL the rest of the code can consume.
+      if (photo && photo.base64String) {
+        const dataUrl = `data:image/jpeg;base64,${photo.base64String}`;
+        //call processDataUrl to run inference/store 
+        //the image but race it against a 10s timeout to avoid hanging.
+        try {
+          await Promise.race([this.processDataUrl(dataUrl, `mobile-${Date.now()}.jpg`), new Promise((_, rej) => setTimeout(() => rej(new Error('processing-timeout')), 10_000))]);
+        } catch (e) {
+          //catch and log failures from the Camera API or any unexpected errors.
+          console.warn('[UploadImagePage] pickImagesMobile: processing failed or timed out', e);
+        }
+      }
+    } catch (e) {
+      console.warn('pickImagesMobile failed', e);
+    }
+  }
+
+  /** Process a File object: convert to dataURL, preprocess, run inference, store, and update gallery */
+  async processFile(file: File) {
+    const reader = new FileReader();
+    const dataUrl: string = await new Promise((resolve, reject) => {
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+    await this.processDataUrl(dataUrl, file.name);
+  }
+
+  /** Helper to process a data URL (image) — runs inference and stores the image */
+  async processDataUrl(dataUrl: string, filename: string) {
+    // Update UI
+    this.imagePreview = dataUrl;
+    //prepend to captured images for thumbnail scroller
+    this.capturedImages.unshift(dataUrl);
+    // detect center thumbnail after UI update
+    setTimeout(() => this.detectCenterThumbnail(), 60);
+    //set processing as true to show indicator
+    this.isProcessing = true;
+    // yield to the event loop so the spinner can render/animate before heavy work
+    await this.sleep(50);
+    try { this.cdr.detectChanges(); } catch (e) { /* ignore */ }
+
+    //set for tracking inference success/failure
+    let inferenceCalled = false;
+    let inferenceSucceeded = false;
+    //actual process and run interfrence
+    const doWork = async () => {
+      let prediction: any = null;
+      try {
+        inferenceCalled = true;
+        //converts the img dataURL into exact Float32 tensor the model expects
+        const tensor = await this.preprocessImage(dataUrl);
+        // run the service to call the model to get back end data
+        try {
+          prediction = await this.crackDetectionService.runInference(tensor);
+          inferenceSucceeded = !!prediction;
+        } catch (infErr) {
+          console.warn('Inference error in processDataUrl', infErr);
+        }
+      } catch (err) {
+        console.warn('Preprocess failed in processDataUrl', err);
+      }
+      // Prepare storage entry or build StoredImage entry
+      const entry: StoredImage = {
+        original: dataUrl,
+        timestamp: new Date().toISOString(),
+        filename,
+        prediction: prediction || undefined,
+        hasPrediction: !!prediction,
+        statusMessage: prediction ? 'Prediction succeeded' : (inferenceCalled ? 'Prediction failed' : 'No prediction')
+      };
+
+      // If the model returned bounding boxes, create a "withBoxes" image and attach boxes
+      try {
+        // helper to compute a single box covering all predicted boxes
+        const computeAggregatedBox = (boxes: any[]) => {
+          if (!Array.isArray(boxes) || boxes.length === 0) return null;
+          let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+          boxes.forEach((b: any) => {
+            const bx = Number(b.x) || 0;
+            const by = Number(b.y) || 0;
+            const bw = Number(b.w) || 0;
+            const bh = Number(b.h) || 0;
+            minX = Math.min(minX, bx);
+            minY = Math.min(minY, by);
+            maxX = Math.max(maxX, bx + bw);
+            maxY = Math.max(maxY, by + bh);
+          });
+          return { x: minX, y: minY, w: Math.max(0, maxX - minX), h: Math.max(0, maxY - minY) };
+        };
+
+        if (prediction && Array.isArray(prediction.boxes) && prediction.boxes.length > 0) {
+          const rawBoxes = prediction.boxes;
+          // compute aggregated (max-extents) box and fallback to original boxes if aggregation fails
+          const agg = computeAggregatedBox(rawBoxes);
+          const boxesToDraw = agg ? [agg] : rawBoxes.map((b: any) => ({ x: b.x, y: b.y, w: b.w, h: b.h }));
+
+          const maskW = prediction.maskWidth || prediction.maskW || 128;
+          const maskH = prediction.maskHeight || prediction.maskH || 128;
+         // try to create withBoxes image with drawn boxes based on the bouding box data
+          try {
+            const withBoxesDataUrl = await this.drawBoxesOnImage(dataUrl, boxesToDraw, maskW, maskH);
+            (entry as any).withBoxes = withBoxesDataUrl;
+            (entry as any).boxes = boxesToDraw;
+            (entry as any).detectionMessage = `Rendered ${boxesToDraw.length} aggregated/simplified box(es) from ${rawBoxes.length} prediction box(es)`;
+            this.totalBoundingBoxesCreated += boxesToDraw.length;
+          } catch (renderErr) {
+            console.warn('[UploadImagePage] drawBoxesOnImage failed', renderErr);
+            (entry as any).withBoxes = dataUrl;
+            (entry as any).boxes = [];
+            (entry as any).detectionMessage = 'Box rendering failed';
+          }
+        } else {
+          (entry as any).withBoxes = dataUrl;
+          (entry as any).boxes = [];
+          (entry as any).detectionMessage = 'No boxes detected';
+        }
+      } catch (e) {
+        console.warn('[UploadImagePage] Failed to render boxes', e);
+        (entry as any).withBoxes = dataUrl;
+        (entry as any).boxes = [];
+        (entry as any).detectionMessage = 'Box rendering failed';
+      }
+      //store image entry via image storage service
+      await this.imageStorage.addImage(entry);
+      // also add to active session if one exists
+      try {
+        if (this.selectedSessionId && typeof (this.imageStorage.addImageToSession) === 'function') {
+          this.imageStorage.addImageToSession(this.selectedSessionId, entry.original);
+          this.sessionIsPristine = false; // Mark session as no longer pristine
+        }
+        await this.refreshDisplayedImages();
+      } catch (e) {
+        console.warn('[UploadImagePage] Failed to add upload to session or refresh display', e);
+      }
+      this.imagePaths.unshift({ original: entry.original, withBoxes: (entry as any).withBoxes || entry.original, fileName: entry.filename, rawPrediction: entry.prediction });
+      // Increment upload counter for this session
+      this.imagesUploadedThisSession += 1;
+      // keep counters in sync with persistent storage
+      await this.updatePhotoCounts();
+      // Force UI update and center detection with longer delay to ensure DOM is ready
+      setTimeout(() => {
+        // Trigger change detection
+        this.detectCenterThumbnail();
+      }, 250);
+      return entry;
+    };
+
+    try {
+      // overall timeout: 10s
+      await Promise.race([doWork(), new Promise((_, rej) => setTimeout(() => rej(new Error('processing-timeout')), 10_000))]);
+    } catch (err: any) {
+      if (err && err.message === 'processing-timeout') {
+        console.warn('[UploadImagePage] processDataUrl overall timeout');
+        // Persist fallback entry indicating failure/no-prediction
+        try {
+          let storedCount = 0;
+          try { const all = await this.imageStorage.getAllImages(); storedCount = Array.isArray(all) ? all.length : 0; } catch (e) { storedCount = this.photosTaken || 0; }
+          const fallbackFilename = this.generateFilename(storedCount + 1);
+          const entry: StoredImage = {
+            original: dataUrl,
+            timestamp: new Date().toISOString(),
+            filename: fallbackFilename,
+            prediction: undefined,
+            hasPrediction: false,
+            statusMessage: inferenceCalled ? 'Prediction failed' : 'No prediction'
+          };
+          await this.imageStorage.addImage(entry);
+          try {
+            if (this.selectedSessionId && typeof (this.imageStorage.addImageToSession) === 'function') {
+              this.imageStorage.addImageToSession(this.selectedSessionId, entry.original);
+              this.sessionIsPristine = false; // Mark session as no longer pristine
+            }
+            await this.refreshDisplayedImages();
+          } catch (e) {
+            console.warn('[UploadImagePage] Failed to add fallback upload to session', e);
+          }
+          this.imagePaths.unshift({ original: entry.original, withBoxes: entry.original, fileName: entry.filename, rawPrediction: entry.prediction });
+          // Increment upload counter for this session
+          this.imagesUploadedThisSession += 1;
+          await this.updatePhotoCounts();
+        } catch (e) {
+          console.warn('[UploadImagePage] Failed to persist fallback entry after timeout', e);
+        }
+      } else {
+        console.warn('processDataUrl failed', err);
+      }
+    } finally {
+      // Do NOT increment photosProcessed here - let updatePhotoCounts handle it from storage
+      this.isProcessing = false;
+      // Log cumulative bounding box stats after upload processing
+      this.logBoundingBoxStats();
+    }
+  }
+
+  
+  /**
+   * Draw bounding boxes on the supplied Base64 image and return a new Base64 image.
+   * Boxes are expected in mask coordinates; maskW/maskH indicate mask resolution so boxes
+   * can be scaled to the image natural size.
+   */
+  async drawBoxesOnImage(Base64: string, boxes: BoundingBox[], maskW = 128, maskH = 128): Promise<string> {
+     //creates an img and canva/context to draw the image on the canvas
+    const img = new Image();
+    img.src = Base64;
+
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d')!;
+
+    return new Promise((resolve) => {
+      img.onload = () => {
+        //determine the size of the img and draw the img to the canvas
+        // Use actual image size so boxes are drawn in correct place
+        const imgW = img.naturalWidth || img.width || 1280;
+        const imgH = img.naturalHeight || img.height || 720;
+        canvas.width = imgW;
+        canvas.height = imgH;
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        //configure styoke style and line width for boxes to draw
+        ctx.lineWidth = Math.max(2, Math.round(Math.max(canvas.width, canvas.height) / 400));
+        ctx.strokeStyle = 'red';
+         //computes the scaling model mask coordinates to image pixel coordinates
+        const scaleX = maskW > 0 ? canvas.width / maskW : 1;
+        const scaleY = maskH > 0 ? canvas.height / maskH : 1;
+        //draw each box on the canvas
+        boxes.forEach(b => {
+          const x = Math.round(b.x * scaleX);
+          const y = Math.round(b.y * scaleY);
+          const w = Math.round(b.w * scaleX);
+          const h = Math.round(b.h * scaleY);
+          ctx.strokeRect(x, y, w, h);
+        });
+
+        // Increment total bounding box counter and log
+        this.totalBoundingBoxesCreated += boxes.length;
+        console.log(`📦 Bounding boxes drawn: ${boxes.length} | 📊 Total cumulative boxes: ${this.totalBoundingBoxesCreated}`);
+
+        resolve(canvas.toDataURL('image/png'));
+      };
+      if (img.complete && img.naturalWidth) img.onload!(null as any);
+    });
+  }
+ 
 
 
   /**
@@ -585,6 +835,7 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
   /** Simple overlay appended to DOM offering discard-or-stay when session is empty */
   private showExitOverlay(): Promise<'discard' | 'stay' | null> {
     return new Promise(resolve => {
+      //builds the full-screen semi-opaque backdrop element.
       const backdrop = document.createElement('div');
       backdrop.style.position = 'fixed';
       backdrop.style.top = '0';
@@ -597,6 +848,7 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
       backdrop.style.justifyContent = 'center';
       backdrop.style.zIndex = '9999';
 
+      //Create modal container — centered white card that holds content and actions.
       const modal = document.createElement('div');
       modal.style.background = '#fff';
       modal.style.borderRadius = '12px';
@@ -604,21 +856,25 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
       modal.style.maxWidth = '90%';
       modal.style.width = '320px';
       modal.style.boxShadow = '0 8px 24px rgba(0,0,0,0.2)';
-
+      
+      //Create title and description — add heading and explanatory text inside the modal.
       const title = document.createElement('div');
       title.textContent = 'Leave without saving?';
       title.style.fontSize = '18px';
       title.style.fontWeight = '600';
       title.style.marginBottom = '10px';
       title.style.textAlign = 'center';
-
+      
+      
       const desc = document.createElement('div');
       desc.textContent = 'This session has no images. Delete it and return home or stay here to continue.';
       desc.style.fontSize = '14px';
       desc.style.color = '#444';
       desc.style.marginBottom = '16px';
       desc.style.textAlign = 'center';
-
+      
+      //Create actions container and buttons
+      //build "Stay" and "Delete & Home" buttons and wire clicks to cleanup.
       const actions = document.createElement('div');
       actions.style.display = 'flex';
       actions.style.gap = '10px';
@@ -649,11 +905,15 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
       discardBtn.style.background = 'linear-gradient(90deg,#ff512f,#f09819)';
       discardBtn.style.color = '#fff';
       discardBtn.style.cursor = 'pointer';
+
+      //Cleanup helper — removes the backdrop and resolves the Promise with the user's choice.
       discardBtn.onclick = () => { cleanup('discard'); };
 
       actions.appendChild(stayBtn);
       actions.appendChild(discardBtn);
 
+      //Append to DOM and handle outside-click cancel
+      //  add modal to backdrop, attach to document, and close if user clicks backdrop.
       modal.appendChild(title);
       modal.appendChild(desc);
       modal.appendChild(actions);
@@ -923,86 +1183,6 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
     }
   }
 
-
-  /**
-   * Draw bounding boxes on the supplied Base64 image and return a new Base64 image.
-   * Boxes are expected in mask coordinates; maskW/maskH indicate mask resolution so boxes
-   * can be scaled to the image natural size.
-   */
-  async drawBoxesOnImage(Base64: string, boxes: BoundingBox[], maskW = 128, maskH = 128): Promise<string> {
-     //creates an img and canva/context to draw the image on the canvas
-    const img = new Image();
-    img.src = Base64;
-
-    const canvas = document.createElement('canvas');
-    const ctx = canvas.getContext('2d')!;
-
-    return new Promise((resolve) => {
-      img.onload = () => {
-        //determine the size of the img and draw the img to the canvas
-        // Use actual image size so boxes are drawn in correct place
-        const imgW = img.naturalWidth || img.width || 1280;
-        const imgH = img.naturalHeight || img.height || 720;
-        canvas.width = imgW;
-        canvas.height = imgH;
-        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-        //configure styoke style and line width for boxes to draw
-        ctx.lineWidth = Math.max(2, Math.round(Math.max(canvas.width, canvas.height) / 400));
-        ctx.strokeStyle = 'red';
-         //computes the scaling model mask coordinates to image pixel coordinates
-        const scaleX = maskW > 0 ? canvas.width / maskW : 1;
-        const scaleY = maskH > 0 ? canvas.height / maskH : 1;
-        //draw each box on the canvas
-        boxes.forEach(b => {
-          const x = Math.round(b.x * scaleX);
-          const y = Math.round(b.y * scaleY);
-          const w = Math.round(b.w * scaleX);
-          const h = Math.round(b.h * scaleY);
-          ctx.strokeRect(x, y, w, h);
-        });
-
-        // Increment total bounding box counter and log
-        this.totalBoundingBoxesCreated += boxes.length;
-        console.log(`📦 Bounding boxes drawn: ${boxes.length} | 📊 Total cumulative boxes: ${this.totalBoundingBoxesCreated}`);
-
-        resolve(canvas.toDataURL('image/png'));
-      };
-      if (img.complete && img.naturalWidth) img.onload!(null as any);
-    });
-  }
-
-  base64ToBlob(base64Data: string, contentType = ''): Blob {
-    const byteCharacters = atob(base64Data);
-    const byteArrays = [];
-
-    for (let offset = 0; offset < byteCharacters.length; offset += 512) {
-      const slice = byteCharacters.slice(offset, offset + 512);
-      const byteNumbers = new Array(slice.length);
-      for (let i = 0; i < slice.length; i++) {
-        byteNumbers[i] = slice.charCodeAt(i);
-      }
-      const byteArray = new Uint8Array(byteNumbers);
-      byteArrays.push(byteArray);
-    }
-
-    return new Blob(byteArrays, { type: contentType });
-  }
-
-  async testWithLocalImage(file: File) {
-    const reader = new FileReader();
-    const dataUrl: string = await new Promise((resolve, reject) => {
-      reader.onload = () => resolve(reader.result as string);
-      reader.onerror = reject;
-      reader.readAsDataURL(file);
-    });
-
-    const imageTensor = await this.preprocessImage(dataUrl);
-    const prediction = await this.crackDetectionService.runInference(imageTensor);
-
-    console.log("🧪 Test Prediction:", prediction);
-    this.lastPrediction = prediction;
-  }
-
   onFileSelected(event: Event) {
     const input = event.target as HTMLInputElement;
     if (!input) return;
@@ -1018,211 +1198,6 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
     })();
   }
 
-  triggerFileInput() {
-    try {
-      this.fileInputRef.nativeElement.click();
-    } catch (e) {
-      console.warn('triggerFileInput failed', e);
-    }
-  }
-
-  /** Mobile image picker — attempts Capacitor Photos API, falls back to camera pick single file */
-  async pickImagesMobile() {
-    try {
-      const photo = await Camera.getPhoto({ quality: 80, allowEditing: false, resultType: CameraResultType.Base64, source: CameraSource.Photos });
-      if (photo && photo.base64String) {
-        const dataUrl = `data:image/jpeg;base64,${photo.base64String}`;
-        try {
-          await Promise.race([this.processDataUrl(dataUrl, `mobile-${Date.now()}.jpg`), new Promise((_, rej) => setTimeout(() => rej(new Error('processing-timeout')), 10_000))]);
-        } catch (e) {
-          console.warn('[UploadImagePage] pickImagesMobile: processing failed or timed out', e);
-        }
-      }
-    } catch (e) {
-      console.warn('pickImagesMobile failed', e);
-    }
-  }
-
-  /** Process a File object: convert to dataURL, preprocess, run inference, store, and update gallery */
-  async processFile(file: File) {
-    const reader = new FileReader();
-    const dataUrl: string = await new Promise((resolve, reject) => {
-      reader.onload = () => resolve(reader.result as string);
-      reader.onerror = reject;
-      reader.readAsDataURL(file);
-    });
-    await this.processDataUrl(dataUrl, file.name);
-  }
-
-  /** Helper to process a data URL (image) — runs inference and stores the image */
-  async processDataUrl(dataUrl: string, filename: string) {
-    // Update UI
-    this.imagePreview = dataUrl;
-    this.capturedImages.unshift(dataUrl);
-    // detect center thumbnail after UI update
-    setTimeout(() => this.detectCenterThumbnail(), 60);
-    this.isProcessing = true;
-    // yield to the event loop so the spinner can render/animate before heavy work
-    await this.sleep(50);
-    try { this.cdr.detectChanges(); } catch (e) { /* ignore */ }
-    // Do NOT increment photosTaken here - let updatePhotoCounts handle it from storage
-
-    let inferenceCalled = false;
-    let inferenceSucceeded = false;
-
-    const doWork = async () => {
-      let prediction: any = null;
-      try {
-        inferenceCalled = true;
-        const tensor = await this.preprocessImage(dataUrl);
-        // internal guard for inference (optional longer guard)
-        try {
-          prediction = await this.crackDetectionService.runInference(tensor);
-          inferenceSucceeded = !!prediction;
-        } catch (infErr) {
-          console.warn('Inference error in processDataUrl', infErr);
-        }
-      } catch (err) {
-        console.warn('Preprocess failed in processDataUrl', err);
-      }
-
-      const entry: StoredImage = {
-        original: dataUrl,
-        timestamp: new Date().toISOString(),
-        filename,
-        prediction: prediction || undefined,
-        hasPrediction: !!prediction,
-        statusMessage: prediction ? 'Prediction succeeded' : (inferenceCalled ? 'Prediction failed' : 'No prediction')
-      };
-
-      // Create a withBoxes image if boxes are present
-      try {
-        // helper to compute a single box covering all predicted boxes
-        const computeAggregatedBox = (boxes: any[]) => {
-          if (!Array.isArray(boxes) || boxes.length === 0) return null;
-          let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-          boxes.forEach((b: any) => {
-            const bx = Number(b.x) || 0;
-            const by = Number(b.y) || 0;
-            const bw = Number(b.w) || 0;
-            const bh = Number(b.h) || 0;
-            minX = Math.min(minX, bx);
-            minY = Math.min(minY, by);
-            maxX = Math.max(maxX, bx + bw);
-            maxY = Math.max(maxY, by + bh);
-          });
-          return { x: minX, y: minY, w: Math.max(0, maxX - minX), h: Math.max(0, maxY - minY) };
-        };
-
-        if (prediction && Array.isArray(prediction.boxes) && prediction.boxes.length > 0) {
-          const rawBoxes = prediction.boxes;
-          const agg = computeAggregatedBox(rawBoxes);
-          const boxesToDraw = agg ? [agg] : rawBoxes.map((b: any) => ({ x: b.x, y: b.y, w: b.w, h: b.h }));
-
-          const maskW = prediction.maskWidth || prediction.maskW || 128;
-          const maskH = prediction.maskHeight || prediction.maskH || 128;
-
-          try {
-            const withBoxesDataUrl = await this.drawBoxesOnImage(dataUrl, boxesToDraw, maskW, maskH);
-            (entry as any).withBoxes = withBoxesDataUrl;
-            (entry as any).boxes = boxesToDraw;
-            (entry as any).detectionMessage = `Rendered ${boxesToDraw.length} aggregated/simplified box(es) from ${rawBoxes.length} prediction box(es)`;
-            this.totalBoundingBoxesCreated += boxesToDraw.length;
-          } catch (renderErr) {
-            console.warn('[UploadImagePage] drawBoxesOnImage failed', renderErr);
-            (entry as any).withBoxes = dataUrl;
-            (entry as any).boxes = [];
-            (entry as any).detectionMessage = 'Box rendering failed';
-          }
-        } else {
-          (entry as any).withBoxes = dataUrl;
-          (entry as any).boxes = [];
-          (entry as any).detectionMessage = 'No boxes detected';
-        }
-      } catch (e) {
-        console.warn('[UploadImagePage] Failed to render boxes', e);
-        (entry as any).withBoxes = dataUrl;
-        (entry as any).boxes = [];
-        (entry as any).detectionMessage = 'Box rendering failed';
-      }
-
-      await this.imageStorage.addImage(entry);
-      // also add to active session if one exists
-      try {
-        if (this.selectedSessionId && typeof (this.imageStorage.addImageToSession) === 'function') {
-          this.imageStorage.addImageToSession(this.selectedSessionId, entry.original);
-          this.sessionIsPristine = false; // Mark session as no longer pristine
-        }
-        await this.refreshDisplayedImages();
-      } catch (e) {
-        console.warn('[UploadImagePage] Failed to add upload to session or refresh display', e);
-      }
-      this.imagePaths.unshift({ original: entry.original, withBoxes: (entry as any).withBoxes || entry.original, fileName: entry.filename, rawPrediction: entry.prediction });
-      // Increment upload counter for this session
-      this.imagesUploadedThisSession += 1;
-      // keep counters in sync with persistent storage
-      await this.updatePhotoCounts();
-      // Force UI update and center detection with longer delay to ensure DOM is ready
-      setTimeout(() => {
-        // Trigger change detection
-        this.detectCenterThumbnail();
-      }, 250);
-      return entry;
-    };
-
-    try {
-      // overall timeout: 10s
-      await Promise.race([doWork(), new Promise((_, rej) => setTimeout(() => rej(new Error('processing-timeout')), 10_000))]);
-    } catch (err: any) {
-      if (err && err.message === 'processing-timeout') {
-        console.warn('[UploadImagePage] processDataUrl overall timeout');
-        // Persist fallback entry indicating failure/no-prediction
-        try {
-          let storedCount = 0;
-          try { const all = await this.imageStorage.getAllImages(); storedCount = Array.isArray(all) ? all.length : 0; } catch (e) { storedCount = this.photosTaken || 0; }
-          const fallbackFilename = this.generateFilename(storedCount + 1);
-          const entry: StoredImage = {
-            original: dataUrl,
-            timestamp: new Date().toISOString(),
-            filename: fallbackFilename,
-            prediction: undefined,
-            hasPrediction: false,
-            statusMessage: inferenceCalled ? 'Prediction failed' : 'No prediction'
-          };
-          await this.imageStorage.addImage(entry);
-          try {
-            if (this.selectedSessionId && typeof (this.imageStorage.addImageToSession) === 'function') {
-              this.imageStorage.addImageToSession(this.selectedSessionId, entry.original);
-              this.sessionIsPristine = false; // Mark session as no longer pristine
-            }
-            await this.refreshDisplayedImages();
-          } catch (e) {
-            console.warn('[UploadImagePage] Failed to add fallback upload to session', e);
-          }
-          this.imagePaths.unshift({ original: entry.original, withBoxes: entry.original, fileName: entry.filename, rawPrediction: entry.prediction });
-          // Increment upload counter for this session
-          this.imagesUploadedThisSession += 1;
-          await this.updatePhotoCounts();
-        } catch (e) {
-          console.warn('[UploadImagePage] Failed to persist fallback entry after timeout', e);
-        }
-      } else {
-        console.warn('processDataUrl failed', err);
-      }
-    } finally {
-      // Do NOT increment photosProcessed here - let updatePhotoCounts handle it from storage
-      this.isProcessing = false;
-      // Log cumulative bounding box stats after upload processing
-      this.logBoundingBoxStats();
-    }
-  }
-
-  onFileSelected2(event: Event) {
-      const input = event.target as HTMLInputElement;
-      if (input.files && input.files[0]) {
-        this.testWithLocalImage(input.files[0]);
-      }
-    }
 
       /** Capture a frame, preprocess, run inference, and save result */
   async takePicture() {

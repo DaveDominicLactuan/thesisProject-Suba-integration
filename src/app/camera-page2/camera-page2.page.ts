@@ -190,22 +190,16 @@ export class CameraPage2Page implements AfterViewInit {
       console.log('[CameraPage2] takePicture blocked: cooldown active');
       return;
     }
+
     // Ensure UI shows processing state immediately
     this.isProcessing = true;
-    // bump taken so spinner shows while inference runs
-    this.photosTaken += 1;
+    // this.photosTaken += 1;
 
-    // start cooldown immediately and show a short visual flash
+    // Start cooldown immediately and show a short visual flash
     this.isCooldown = true;
     this.showFlash = true;
-    // hide flash shortly after
     setTimeout(() => { this.showFlash = false; }, this.flashDurationMs);
-    // release cooldown after configured ms
     setTimeout(() => { this.isCooldown = false; }, this.cooldownMs);
-    // photosTaken will be derived from storage after save so don't increment here
-    // track whether inference was invoked and whether it succeeded
-    let inferenceCalled = false;
-    let inferenceSucceeded = false;
 
     try {
       const video = this.videoRef.nativeElement;
@@ -216,183 +210,16 @@ export class CameraPage2Page implements AfterViewInit {
       canvas.height = video.videoHeight;
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-      const now = new Date().toISOString();
       const dataUrl = canvas.toDataURL('image/png');
-      this.capturedImages.unshift(dataUrl);
+      const filename = this.generateFilename();
 
-      // Wrap inference + save into a cancellable-timeout-aware sequence
-      const work = async () => {
-        // Preprocess → inference → save
-        const imageTensor = await this.preprocessImage(dataUrl);
-        // call the backend/model
-        let prediction = null;
-        try {
-          inferenceCalled = true;
-          prediction = await this.crackDetectionService.runInference(imageTensor);
-          inferenceSucceeded = true;
-        } catch (e) {
-          console.warn('Inference failed:', e);
-          inferenceSucceeded = false;
-        }
-
-        const nowInner = new Date().toISOString();
-        // derive filename based on current stored images count so photosTaken reflects storage
-        let storedCount = 0;
-        try {
-          const all = await this.imageStorage.getAllImages();
-          storedCount = Array.isArray(all) ? all.length : 0;
-        } catch (e) {
-          storedCount = this.photosTaken || 0;
-        }
-
-        const filename = this.generateFilename(storedCount + 1);
-
-        const entry: StoredImage = {
-          original: dataUrl,
-          timestamp: nowInner,
-          filename,
-          prediction: prediction || undefined,
-          hasPrediction: !!prediction,
-          statusMessage: (inferenceCalled && inferenceSucceeded && prediction) ? 'Prediction succeeded' : (inferenceCalled ? 'Prediction failed' : 'No prediction')
-        };
-
-        // Render boxes (if any) and attach withBoxes data
-        try {
-          if (prediction && Array.isArray(prediction.boxes) && prediction.boxes.length > 0) {
-            const maskW = prediction.maskWidth || 128;
-            const maskH = prediction.maskHeight || 128;
-            const withBoxesDataUrl = await this.drawBoxesOnImage(dataUrl, prediction.boxes, maskW, maskH);
-            (entry as any).withBoxes = withBoxesDataUrl;
-            (entry as any).boxes = prediction.boxes;
-            (entry as any).detectionMessage = `Detected ${prediction.boxes.length} region(s)`;
-          } else {
-            (entry as any).withBoxes = dataUrl;
-            (entry as any).boxes = [];
-            (entry as any).detectionMessage = 'No boxes detected';
-          }
-        } catch (e) {
-          console.warn('[CameraPage2] Failed to render boxes for taken picture', e);
-          (entry as any).withBoxes = dataUrl;
-          (entry as any).boxes = [];
-          (entry as any).detectionMessage = 'Box rendering failed';
-        }
-
-        await this.imageStorage.addImage(entry);
-        // add to current session if present
-        try {
-          if (this.selectedSessionId && typeof (this.imageStorage.addImageToSession) === 'function') {
-            this.imageStorage.addImageToSession(this.selectedSessionId, entry.original);
-            this.sessionIsPristine = false; // Mark as no longer pristine since we added an image
-          }
-          await this.refreshDisplayedImages();
-        } catch (e) {
-          console.warn('[CameraPage2] Failed to add taken picture to session', e);
-        }
-        this.savedImage = entry;
-        this.lastPrediction = prediction;
-        // Increment upload counter for this session
-        this.imagesUploadedThisSession += 1;
-
-        if (inferenceCalled && inferenceSucceeded && prediction) this.photosProcessed += 1;
-        // update UI counters from authoritative storage
-        await this.updatePhotoCounts();
-        return entry;
-      };
-
-      // Overall timeout for the inference+save sequence: 10s
-      try {
-        await Promise.race([work(), new Promise((_, rej) => setTimeout(() => rej(new Error('processing-timeout')), 10_000))]);
-      } catch (err: any) {
-        if (err && err.message === 'processing-timeout') {
-          console.warn('[CameraPage2] takePicture processing timed out');
-          // Persist a fallback entry indicating timeout (prediction failed or no prediction)
-          try {
-            let storedCount = 0;
-            try {
-              const all = await this.imageStorage.getAllImages();
-              storedCount = Array.isArray(all) ? all.length : 0;
-            } catch (e) { storedCount = this.photosTaken || 0; }
-            const filename = this.generateFilename(storedCount + 1);
-            const entry: StoredImage = {
-              original: dataUrl,
-              timestamp: now,
-              filename,
-              prediction: undefined,
-              hasPrediction: false,
-              statusMessage: inferenceCalled ? 'Prediction failed' : 'No prediction'
-            };
-            await this.imageStorage.addImage(entry);
-            try {
-              if (this.selectedSessionId && typeof (this.imageStorage.addImageToSession) === 'function') {
-                this.imageStorage.addImageToSession(this.selectedSessionId, entry.original);
-                this.sessionIsPristine = false; // Mark as no longer pristine since we added an image
-              }
-              await this.refreshDisplayedImages();
-            } catch (err) {
-              console.warn('[CameraPage2] Failed to add fallback taken picture to session', err);
-            }
-            // Increment upload counter for this session
-            this.imagesUploadedThisSession += 1;
-            // update UI counters from authoritative storage
-            await this.updatePhotoCounts();
-          } catch (e) {
-            console.warn('[CameraPage2] Failed to store fallback entry after timeout', e);
-          }
-        } else {
-          console.error('Failed during takePicture work:', err);
-        }
-      }
-
-      // Keep console.log before clearing isProcessing so callers/UI see processing until logging completes
-  console.log('✅ Prediction stored:', this.lastPrediction);
-      // Print all currently stored images to verify persistence
-      try {
-        // getAllImages might be synchronous (returns array) or asynchronous in other implementations.
-        const allOrPromise = this.imageStorage.getAllImages();
-        let all: any[];
-        if (allOrPromise && typeof (allOrPromise as any).then === 'function') {
-          // await the promise-like value
-          all = await (allOrPromise as any);
-        } else {
-          all = allOrPromise as any;
-        }
-        // Stringify for more reliable remote/device console output, and also print a table if possible
-        try {
-          console.log('📂 Currently stored images (latest first):', JSON.stringify(all));
-          if (Array.isArray(all) && (console as any).table) (console as any).table(all);
-        } catch (e) {
-          console.log('📂 Currently stored images (latest first):', all);
-        }
-      } catch (logErr) {
-        console.warn('Failed to read stored images for verification:', logErr);
-      }
-
-      // Set a user-facing message depending on whether inference ran/succeeded
-      if (inferenceCalled && inferenceSucceeded && this.lastPrediction) {
-        // TypeScript can't infer that `lastPrediction` is non-null from the booleans above,
-        // so check explicitly before accessing properties.
-        const { type, shape, severity } = (this.lastPrediction as any);
-        this.extraText = `✅ Inference: ${type}, ${shape}, ${severity}`;
-      } else if (inferenceCalled && !inferenceSucceeded) {
-        this.extraText = '⚠️ Inference was called but failed.';
-      } else {
-        this.extraText = '⚠️ Inference was not called.';
-      }
+      // Delegate processing to processDataUrl
+      await this.processDataUrl(dataUrl, filename);
     } catch (err) {
-      console.error('Failed to take picture / run inference:', err);
-      // If inference was called but threw, mark as such
-      if (inferenceCalled && !inferenceSucceeded) {
-        this.extraText = '❌ Inference call failed. See console for details.';
-      } else if (!inferenceCalled) {
-        this.extraText = '❌ Capture or preprocessing failed before inference.';
-      } else {
-        this.extraText = '❌ Unknown error during capture/inference.';
-      }
+      console.error('Failed to take picture:', err);
       alert('Failed to capture/process image. See console for details.');
     } finally {
-      // Always clear processing flag so UI is responsive again
       this.isProcessing = false;
-      // Log cumulative bounding box count
       this.logBoundingBoxStats();
     }
   }
@@ -763,27 +590,39 @@ export class CameraPage2Page implements AfterViewInit {
   async updatePhotoCounts() {
     try {
       const svc: any = this.imageStorage as any;
+
       // If a session is active, compute counts from the session image keys
       if (this.selectedSessionId) {
-        // ensure sessions are loaded
+        // Ensure sessions are loaded
         if (!this.sessions || this.sessions.length === 0) {
-          try { await this.loadSessions(); } catch (e) { /* ignore */ }
+          try {
+            await this.loadSessions();
+          } catch (e) {
+            /* ignore */
+          }
         }
+
+        // Find the active session by its ID
         const session = this.sessions.find(s => s.id === this.selectedSessionId) || null;
+
         if (!session || !Array.isArray(session.imageKeys)) {
+          // If no session or invalid image keys, reset counts and stored images
           this.photosTaken = 0;
           this.photosProcessed = 0;
           this.storedImages = [];
         } else {
+          // Extract image keys from the session
           const keys: string[] = session.imageKeys.slice();
           const imgs: StoredImage[] = [];
           let processed = 0;
-          // count only keys that currently have an entry (skip deleted/missing)
           let foundCount = 0;
+
+          // Iterate over each image key to fetch its entry
           for (const k of keys) {
             let entry: any = undefined;
+
+            // Fetch the image entry using available methods in the service
             if (typeof svc.getEntryForImage === 'function') {
-              // async or sync-friendly helper
               const maybe = svc.getEntryForImage(k);
               entry = (maybe && typeof (maybe as any).then === 'function') ? await maybe : maybe;
             } else if (typeof svc.getEntry === 'function') {
@@ -793,26 +632,41 @@ export class CameraPage2Page implements AfterViewInit {
               const all = await svc.getAllEntries();
               entry = all ? all[k] : undefined;
             }
+
             if (entry) {
+              // Add the entry to the stored images list
               imgs.push(entry as StoredImage);
               foundCount++;
-              if (entry.statusMessage === 'Prediction succeeded') processed++;
+
+              // Count images with successful predictions
+              if (entry.statusMessage === 'Prediction succeeded') {
+                processed++;
+              }
             }
           }
+
+          // Update counts and stored images
           this.photosProcessed = processed;
-          this.photosTaken = foundCount; // only count existing entries
+          this.photosTaken = foundCount;
           this.storedImages = imgs;
         }
       } else {
         // No active session: fall back to global image list
         const all: StoredImage[] = await this.imageStorage.getAllImages();
+
+        // Update counts based on all stored images
         this.photosTaken = Array.isArray(all) ? all.length : 0;
-        // Count images that explicitly have a successful prediction status
         this.photosProcessed = Array.isArray(all) ? all.filter(i => (i.statusMessage === 'Prediction succeeded')).length : 0;
         this.storedImages = Array.isArray(all) ? all.slice() : [];
       }
-      console.log('[CameraPage2] updatePhotoCounts:', { photosTaken: this.photosTaken, photosProcessed: this.photosProcessed });
+
+      // Log the updated counts
+      console.log('[CameraPage2] updatePhotoCounts:', {
+        photosTaken: this.photosTaken,
+        photosProcessed: this.photosProcessed
+      });
     } catch (e) {
+      // Log any errors encountered during the update process
       console.warn('[CameraPage2] updatePhotoCounts failed', e);
     }
   }
@@ -835,11 +689,9 @@ export class CameraPage2Page implements AfterViewInit {
 
   /**
    * Show a simple overlay/modal used for quick tests.
-   * Mirrors the behaviour implemented on home-page.showTestOverlay()
    */
   /**
-   * Append a simple overlay showing thumbnails and quick actions.
-   * Mirrors similar helper on Home page; updates selected thumbnail on click.
+   append a overlay to show interface to view images and ability to delete img from selection
    */
   showTestOverlay() {
     try {
@@ -964,6 +816,8 @@ export class CameraPage2Page implements AfterViewInit {
       this._overlayUpdateThumbs = updateThumbnails;
 
       // Prefer storedImages (persisted) when available so we can toggle between original/withBoxes
+      //checks if there is stored images and if so create thumbnails for each stored image
+      // with onclick to select image. iterates over storedImages to create thumbnails
       if (this.storedImages && this.storedImages.length > 0) {
         this.storedImages.forEach((entry, idx) => {
           const img = document.createElement('img');
@@ -993,6 +847,7 @@ export class CameraPage2Page implements AfterViewInit {
         placeholder.style.color = '#666';
         thumbScroll.appendChild(placeholder);
       } else {
+        //if no storedImages, fall back to capturedImages (in-memory only)
         this.capturedImages.forEach((src, idx) => {
           const img = document.createElement('img');
           img.src = src;
@@ -1136,14 +991,20 @@ export class CameraPage2Page implements AfterViewInit {
    * Compute which thumbnail is centered in the overlay scroller and select it.
    */
   detectCenterThumbnail() {
+    //Get container element and image nodes
+    //Purpose: locate the thumbnail container and the img elements; bail out if missing.
     const container = document.querySelector('.thumbnail-scroll2') as HTMLElement | null;
     if (!container) return;
     const images = container.querySelectorAll('img') as NodeListOf<HTMLImageElement>;
     if (images.length === 0) return;
-
+    
+    //Compute center X of the container
+   //Purpose: get the horizontal center coordinate to compare image centers against.
     const containerRect = container.getBoundingClientRect();
     const centerX = containerRect.left + containerRect.width / 2;
 
+    //Find the image whose center is closest to container center
+   //Purpose: iterate thumbnails, compute each center and distance, and track the closest.
     let closestImg: HTMLImageElement | null = null;
     let closestDistance = Infinity;
 
@@ -1156,7 +1017,9 @@ export class CameraPage2Page implements AfterViewInit {
         closestImg = img;
       }
     });
-
+    
+    //Bail if no closest image found, otherwise read its src and set selection
+    //Purpose: obtain the image source and update selectedThumbSrc.
     if (!closestImg) return;
     const src = (closestImg as HTMLImageElement).src;
     // Prefer storedImages (which may have withBoxes) when resolving title
@@ -1474,6 +1337,7 @@ export class CameraPage2Page implements AfterViewInit {
    */
   private showExitOverlay(): Promise<'discard' | 'stay' | null> {
     return new Promise(resolve => {
+      //builds the full-screen semi-opaque backdrop element.
       const backdrop = document.createElement('div');
       backdrop.style.position = 'fixed';
       backdrop.style.top = '0';
@@ -1485,7 +1349,8 @@ export class CameraPage2Page implements AfterViewInit {
       backdrop.style.alignItems = 'center';
       backdrop.style.justifyContent = 'center';
       backdrop.style.zIndex = '9999';
-
+      
+      //Create modal container — centered white card that holds content and actions.
       const modal = document.createElement('div');
       modal.style.background = '#fff';
       modal.style.borderRadius = '12px';
@@ -1493,7 +1358,8 @@ export class CameraPage2Page implements AfterViewInit {
       modal.style.maxWidth = '90%';
       modal.style.width = '320px';
       modal.style.boxShadow = '0 8px 24px rgba(0,0,0,0.2)';
-
+     
+      //Create title and description — add heading and explanatory text inside the modal.
       const title = document.createElement('div');
       title.textContent = 'Leave without saving?';
       title.style.fontSize = '18px';
@@ -1507,7 +1373,9 @@ export class CameraPage2Page implements AfterViewInit {
       desc.style.color = '#444';
       desc.style.marginBottom = '16px';
       desc.style.textAlign = 'center';
-
+      
+      //Create actions container and buttons
+      //build "Stay" and "Delete & Home" buttons and wire clicks to cleanup.
       const actions = document.createElement('div');
       actions.style.display = 'flex';
       actions.style.gap = '10px';
@@ -1537,11 +1405,15 @@ export class CameraPage2Page implements AfterViewInit {
       discardBtn.style.background = 'linear-gradient(90deg,#ff512f,#f09819)';
       discardBtn.style.color = '#fff';
       discardBtn.style.cursor = 'pointer';
+
+      //Cleanup helper — removes the backdrop and resolves the Promise with the user's choice.
       discardBtn.onclick = () => { cleanup('discard'); };
 
       actions.appendChild(stayBtn);
       actions.appendChild(discardBtn);
-
+      
+      //Append to DOM and handle outside-click cancel
+      //  add modal to backdrop, attach to document, and close if user clicks backdrop.
       modal.appendChild(title);
       modal.appendChild(desc);
       modal.appendChild(actions);

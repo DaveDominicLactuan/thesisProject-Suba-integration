@@ -137,9 +137,9 @@
         <div class="overlay-section" *ngIf="sessionId && availableSessionImages.length > 0">
           <h3>Select Images (Session)</h3>
           <div class="image-list" style="max-height:200px; overflow:auto; padding:8px 0;">
-            <label *ngFor="let img of availableSessionImages" style="display:flex; align-items:center; gap:8px; margin:6px 0;">
+            <label *ngFor="let img of availableSessionImages" style="display:flex; align-items:center; gap:8px; margin:6px 0; cursor:pointer;">
               <input type="checkbox" [checked]="isSelectedImage(img)" (change)="toggleImageSelection(img)" />
-              <span>{{ getImageKey(img) }}</span>
+              <span style="color: #000000; font-size: 14px; font-weight: 500;">{{ getImageKey(img) }}</span>
             </label>
           </div>
           <div style="font-size:12px; color:var(--ion-color-medium);">Toggling images updates the graph immediately.</div>

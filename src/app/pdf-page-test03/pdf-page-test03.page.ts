@@ -1,4 +1,3 @@
-
 // src/app/pages/pdf-preview/pdf-preview.page.ts
 import { Component, ViewChild, ElementRef,OnInit } from '@angular/core';
 import { ActivatedRoute, Router } from '@angular/router';
@@ -75,15 +74,24 @@ export class PdfPageTest03Page {
 
         // Try to obtain passed images from navigation extras or history.state
         try {
+          //Attempts to read images passed via Angular Router navigation extras 
+          //(this.router.getCurrentNavigation()?.extras?.state). If present, stores them in sessionImages.
           const navImages = this.router.getCurrentNavigation()?.extras?.state as any;
           if (navImages && navImages.images) {
             this.sessionImages = navImages.images;
             console.log('Loaded session images from navigation state:', this.sessionImages.length);
           } else {
+
+            //If navigation extras didn't provide images, check the 
+            // browser/history state (window.history.state) for an images property and use it if found.
             const hist = (window as any).history?.state || {};
             if (hist && hist.images) {
               this.sessionImages = hist.images;
               console.log('Loaded session images from history.state:', this.sessionImages.length);
+
+              //load from service by sessionId if navigation or history didn't provide images, attempt 
+              //to load a stored sesion, then reads session data and maps image keys to entries with 
+              //getEntryForImage, and assigns them to sessionImages
             } else if (this.sessionId) {
               // Try loading the session images from persistent storage by sessionId
               try {
@@ -166,156 +174,122 @@ export class PdfPageTest03Page {
     sessionId: string | null = null;
   
     /**
-     * Consolidated PDF document definition using pdfMake
-     * This is the single source of truth for all PDF content
+     * Consolidated PDF document definition using pdfMake.
+     * This function is called internally by other methods (e.g., `previewPdf`, `generatePdfBlob`) to define the structure and content of the PDF.
+     * It dynamically builds the PDF content based on the session images and other data.
      */
-    private getDocumentDefinition(): TDocumentDefinitions {
-      // Fallback placeholder base64 images
-      const imgPlainFallback = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
-      const imgBoxFallback = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
-
-      const content: Content[] = [
-        { text: 'Crack', style: 'header', alignment: 'center', margin: [0, 0, 0, 0] },
-        { text: 'Damage', style: 'header', alignment: 'center', margin: [0, 0, 0, 0] },
-        { text: 'Report', style: 'header', alignment: 'center', margin: [0, 0, 0, 30] }
-      ];
-
-      // If sessionImages exist, create one section per image
-      // Helper to safely extract prediction values from multiple possible shapes
-      const extractPred = (imgObj: any, field: string): string | null => {
-        if (!imgObj) return null;
-        const tryValues: any[] = [];
-
-        // Direct top-level fields
-        tryValues.push(imgObj[field]);
-
-        // Common alternate locations
-        if (imgObj.rawPrediction) {
-          tryValues.push(imgObj.rawPrediction[field]);
-          tryValues.push(imgObj.rawPrediction.prediction && imgObj.rawPrediction.prediction[field]);
-          tryValues.push(imgObj.rawPrediction.predictions && imgObj.rawPrediction.predictions[0] && imgObj.rawPrediction.predictions[0][field]);
-          tryValues.push(imgObj.rawPrediction[0] && imgObj.rawPrediction[0][field]);
+     private getDocumentDefinition(): TDocumentDefinitions {
+          // Fallback placeholder base64 images
+          const imgPlainFallback = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+          const imgBoxFallback = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+    
+          const content: Content[] = [
+            { text: 'Crack', style: 'header', alignment: 'center', margin: [0, 0, 0, 0] },
+            { text: 'Damage', style: 'header', alignment: 'center', margin: [0, 0, 0, 0] },
+            { text: 'Report', style: 'header', alignment: 'center', margin: [0, 0, 0, 30] }
+          ];
+    
+          // If sessionImages exist, create one section per image
+          if (this.sessionImages && this.sessionImages.length > 0) {
+            this.sessionImages.forEach((img: any, idx: number) => {
+              const i = idx + 1;
+              const type = img?.rawPrediction?.type ?? img?.dropdown1 ?? img?.type ?? img?.fileName ?? 'Type';
+              const shape = img?.rawPrediction?.shape ?? img?.dropdown2 ?? img?.shape ?? 'Shape';
+              const severity = img?.rawPrediction?.severity ?? img?.dropdown3 ?? img?.severity ?? 'Severity';
+    
+              // Insert descriptive paragraph with values inserted and bolded
+              content.push({
+                text: [
+                  `The crack shown in image ${i} is a `,
+                  { text: type, bold: true },
+                  ', the shape of the crack is ',
+                  { text: shape, bold: true },
+                  ' and it is a ',
+                  { text: severity, bold: true },
+                  ' in severity'
+                ],
+                alignment: 'justify',
+                margin: [0, 0, 0, 20]
+              });
+    
+              // caption text
+              content.push({
+                text: `Img ${i} without boxes and img ${i} with boxes`,
+                alignment: 'center',
+                margin: [0, 0, 0, 12],
+                fontSize: 12,
+                italics: true
+              });
+    
+              const originalImg = img?.original ?? img?.plain ?? imgPlainFallback;
+              const withBoxesImg = img?.withBoxes ?? img?.boxed ?? imgBoxFallback;
+    
+              // Log the result of extracting images for debugging/verification
+              this.logImageProcessingResult(i, !!originalImg, !!withBoxesImg, type, shape, severity);
+    
+              // images as two columns
+              content.push({
+                columns: [
+                  { image: originalImg, width: 250, alignment: 'center' },
+                  { image: withBoxesImg, width: 250, alignment: 'center' }
+                ],
+                columnGap: 10,
+                margin: [0, 0, 0, 20]
+              });
+            });
+          } else {
+            // no session images — keep a single placeholder block
+            content.push({
+              text: [
+                'The crack shown in image 1 (increment based of img) is a ',
+                { text: '(insert crack type here for image)', bold: true },
+                ', the shape of the crack is ',
+                { text: '(insert crack shape here)', bold: true },
+                ' and it is a ',
+                { text: '(insert crack severity here)', bold: true },
+                ' in severity'
+              ],
+              alignment: 'justify',
+              margin: [0, 0, 0, 30]
+            });
+    
+            // Log the fallback placeholder usage
+            this.logImageProcessingResult(1, true, true, '(placeholder)', '(placeholder)', '(placeholder)');
+    
+            content.push({ text: 'Img 1 without boxes and img 2 with boxes', alignment: 'center', margin: [0, 0, 0, 20], fontSize: 12, italics: true });
+    
+            content.push({
+              columns: [
+                { image: imgPlainFallback, width: 250, alignment: 'center' },
+                { image: imgBoxFallback, width: 250, alignment: 'center' }
+              ],
+              columnGap: 10
+            });
+          }
+    
+          return {
+            pageSize: 'A4',
+            pageMargins: [40, 60, 40, 60],
+            content,
+            styles: { header: { fontSize: 24, bold: true, color: '#000000' } }
+          };
         }
-        if (imgObj.prediction) {
-          tryValues.push(imgObj.prediction[field]);
-          tryValues.push(imgObj.prediction[0] && imgObj.prediction[0][field]);
-        }
-        if (imgObj.predictions) {
-          tryValues.push(imgObj.predictions[0] && imgObj.predictions[0][field]);
-        }
-
-        // Some backends use generic labels
-        tryValues.push(imgObj.label);
-        tryValues.push(imgObj.class);
-        tryValues.push(imgObj.type);
-        tryValues.push(imgObj.shape);
-        tryValues.push(imgObj.severity);
-
-        for (const v of tryValues) {
-          if (v === undefined || v === null) continue;
-          const s = String(v).trim();
-          if (!s) continue;
-          // ignore literal placeholder tokens that some codepaths may produce
-          const lower = s.toLowerCase();
-          if (['type', 'shape', 'severity', '(insert crack type here for image)', '(insert crack shape here)', '(insert crack severity here)'].includes(lower)) continue;
-          return s;
-        }
-        return null;
-      };
-
-      if (this.sessionImages && this.sessionImages.length > 0) {
-        this.sessionImages.forEach((img: any, idx: number) => {
-          const i = idx + 1;
-          const type = extractPred(img, 'type') ?? img?.dropdown1 ?? img?.fileName ?? '(unknown)';
-          const shape = extractPred(img, 'shape') ?? img?.dropdown2 ?? '(unknown)';
-          const severity = extractPred(img, 'severity') ?? img?.dropdown3 ?? '(unknown)';
-
-          // Insert descriptive paragraph with values inserted and bolded
-          content.push({
-            text: [
-              `The crack shown in image ${i} is a `,
-              { text: type, bold: true },
-              ', the shape of the crack is ',
-              { text: shape, bold: true },
-              ' and it is a ',
-              { text: severity, bold: true },
-              ' in severity'
-            ],
-            alignment: 'justify',
-            margin: [0, 0, 0, 20]
-          });
-
-          // caption text
-          content.push({
-            text: `Img ${i} without boxes and img ${i} with boxes`,
-            alignment: 'center',
-            margin: [0, 0, 0, 12],
-            fontSize: 12,
-            italics: true
-          });
-
-          const originalImg = img?.original ?? img?.plain ?? imgPlainFallback;
-          const withBoxesImg = img?.withBoxes ?? img?.boxed ?? imgBoxFallback;
-
-          // Log the result of extracting images for debugging/verification
-          this.logImageProcessingResult(i, !!originalImg, !!withBoxesImg, type, shape, severity);
-
-          // images as two columns
-          content.push({
-            columns: [
-              { image: originalImg, width: 250, alignment: 'center' },
-              { image: withBoxesImg, width: 250, alignment: 'center' }
-            ],
-            columnGap: 10,
-            margin: [0, 0, 0, 20]
-          });
-        });
-      } else {
-        // no session images — keep a single placeholder block
-        content.push({
-          text: [
-            'The crack shown in image 1 (increment based of img) is a ',
-            { text: '(insert crack type here for image)', bold: true },
-            ', the shape of the crack is ',
-            { text: '(insert crack shape here)', bold: true },
-            ' and it is a ',
-            { text: '(insert crack severity here)', bold: true },
-            ' in severity'
-          ],
-          alignment: 'justify',
-          margin: [0, 0, 0, 30]
-        });
-
-        // Log the fallback placeholder usage
-        this.logImageProcessingResult(1, true, true, '(placeholder)', '(placeholder)', '(placeholder)');
-
-        content.push({ text: 'Img 1 without boxes and img 2 with boxes', alignment: 'center', margin: [0, 0, 0, 20], fontSize: 12, italics: true });
-
-        content.push({
-          columns: [
-            { image: imgPlainFallback, width: 250, alignment: 'center' },
-            { image: imgBoxFallback, width: 250, alignment: 'center' }
-          ],
-          columnGap: 10
-        });
-      }
-
-      return {
-        pageSize: 'A4',
-        pageMargins: [40, 60, 40, 60],
-        content,
-        styles: { header: { fontSize: 24, bold: true, color: '#000000' } }
-      };
-    }
-  
-    /**
-     * Generate PDF blob for preview purposes
-     * Returns a promise that resolves to a Blob
-     */
+    
+     // Generate PDF blob for preview purposes
+     // Returns a promise that resolves to a Blob
+     // allow for generation of pdf and store in blob
+     
     private generatePdfBlob(): Promise<Blob> {
+
+      //Wraps the pdfMake callback-style API in a Promise so callers can await a Blob.
       return new Promise((resolve, reject) => {
+
+        //Builds the PDF object from the consolidated document definition (getDocumentDefinition()).
         try {
           const pdfDoc = pdfMake.createPdf(this.getDocumentDefinition());
+
+          //Calls pdfDoc.getBlob (async callback) and resolves 
+          // the outer Promise with the resulting Blob.
           pdfDoc.getBlob((blob: Blob) => resolve(blob));
         } catch (error) {
           reject(error);
@@ -323,158 +297,148 @@ export class PdfPageTest03Page {
       });
     }
   
-    /**
-     * Generate PDF as base64 for web preview
-     * Returns a promise that resolves to base64 string
-     */
-    private generatePdfBase64(): Promise<string> {
-      return new Promise((resolve, reject) => {
-        try {
-          const pdfDoc = pdfMake.createPdf(this.getDocumentDefinition());
-          pdfDoc.getBase64((base64: string) => resolve(base64));
-        } catch (error) {
-          reject(error);
-        }
-      });
-    }
-    
   
     /**
-     * Preview PDF in canvas (for web) or render from blob
+     * Preview PDF in a canvas element.
+     * This function is triggered when the page is initialized and session data is loaded.
+     * It generates a PDF using the document definition, renders it, and displays it in the DOM.
      */
-    async previewPdf() {
-      try {
-        // Generate the PDF using the current document definition so it matches download behaviour
-        const pdfDoc = pdfMake.createPdf(this.getDocumentDefinition());
-        const blob: Blob = await new Promise((resolve, reject) => {
-          try {
-            pdfDoc.getBlob((b: Blob) => resolve(b));
-          } catch (err) {
-            reject(err);
-          }
-        });
-        const arrayBuffer = await blob.arrayBuffer();
-        const pdfBytes = new Uint8Array(arrayBuffer);
-        
-        const loadingTask = getDocument({ data: pdfBytes });
-        const pdf = await loadingTask.promise;
-  
-        const numPages = pdf.numPages || 1;
-        const containerEl = this.pdfContainer.nativeElement as HTMLDivElement;
-        containerEl.style.paddingTop = '0px';
-        containerEl.innerHTML = '';
-
-        // Determine device width once
-        const screenWidth = window.innerWidth;
-        const canvasWidth = screenWidth * 0.95;
-
-        // Render every page. If there are multiple session images, stack
-        // the rendered pages vertically in a single tall canvas so the
-        // document appears centered and vertically ordered.
-        const sessionCount = Array.isArray(this.sessionImages) ? this.sessionImages.length : 0;
-        const extraMultiplier = sessionCount >= 2 ? Math.max(1, sessionCount - 1) : 1;
-        const outputScale = window.devicePixelRatio || 1;
-
-        if (extraMultiplier > 1) {
-          // Create one tall canvas that will contain all pages stacked vertically
-          // Use the first page to determine per-page pixel dimensions
-          const firstPage = await pdf.getPage(1);
-          const firstViewport = firstPage.getViewport({ scale: canvasWidth / firstPage.getViewport({ scale: 1.0 }).width });
-          const pagePixelWidth = Math.floor(firstViewport.width * outputScale);
-          const pagePixelHeight = Math.floor(firstViewport.height * outputScale);
-
-          const mainCanvas = document.createElement('canvas');
-          const mainCtx = mainCanvas.getContext('2d')!;
-          mainCanvas.width = pagePixelWidth;
-          mainCanvas.height = pagePixelHeight * extraMultiplier;
-
-          // CSS for centered, responsive display
-          mainCanvas.style.display = 'block';
-          mainCanvas.style.margin = '2px auto 0';
-          mainCanvas.style.maxWidth = '95%';
-          mainCanvas.style.width = '95%';
-          mainCanvas.style.height = 'auto';
-
-          // For each page, render into an offscreen canvas and blit into the main canvas
-          for (let p = 1; p <= numPages; p++) {
-            const page = await pdf.getPage(p);
-            const originalViewport = page.getViewport({ scale: 1.0 });
-            const scale = canvasWidth / originalViewport.width;
-            const viewport = page.getViewport({ scale });
-
-            // Offscreen canvas for per-page rendering (pixel-sized)
-            const offCanvas = document.createElement('canvas');
-            const offCtx = offCanvas.getContext('2d')!;
-            offCanvas.width = Math.floor(viewport.width * outputScale);
-            offCanvas.height = Math.floor(viewport.height * outputScale);
-
-            if (outputScale !== 1) {
-              offCtx.setTransform(outputScale, 0, 0, outputScale, 0, 0);
-            }
-
-            await page.render({ canvasContext: offCtx, viewport }).promise;
-
-            // Compute vertical offset (in pixels) inside main canvas
-            const yOffset = (p - 1) * offCanvas.height;
-            mainCtx.drawImage(offCanvas, 0, yOffset);
-          }
-
-          containerEl.appendChild(mainCanvas);
-        } else {
-          // Single or default behavior: render one canvas per page (existing behavior)
-          for (let p = 1; p <= numPages; p++) {
-            const page = await pdf.getPage(p);
-            const originalViewport = page.getViewport({ scale: 1.0 });
-            const scale = canvasWidth / originalViewport.width;
-            const viewport = page.getViewport({ scale });
-
-            const canvas = document.createElement('canvas');
-            const context = canvas.getContext('2d')!;
-
-            canvas.width = Math.floor(viewport.width * outputScale);
-            canvas.height = Math.floor(viewport.height * outputScale);
-
-            // Keep canvas responsive and maintain aspect ratio
-            canvas.style.display = 'block';
-            canvas.style.margin = '2px auto 0';
-            canvas.style.maxWidth = '95%';
-            canvas.style.width = '95%';
-            canvas.style.height = 'auto';
-
-            if (outputScale !== 1) {
-              context.setTransform(outputScale, 0, 0, outputScale, 0, 0);
-            }
-
-            await page.render({ canvasContext: context, viewport }).promise;
-
-            containerEl.appendChild(canvas);
-          }
-        }
-
-        // Safety guard: try to bring the container to the top of the viewport
-        // Use a slight delay to allow layout to settle
-        setTimeout(() => {
-          try {
-            // Preferred: bring container into view aligned to the top
-            containerEl.scrollIntoView({ behavior: 'auto', block: 'start' });
-
-            // If the canvas top is still offscreen, use a window scroll fallback
-            const lastEl = containerEl.lastElementChild as HTMLElement | null;
-            if (lastEl) {
-              const rect = lastEl.getBoundingClientRect();
-              if (rect.top < 0 || rect.top > window.innerHeight) {
-                const target = Math.max(0, window.scrollY + rect.top);
-                window.scrollTo({ top: target, behavior: 'smooth' });
-              }
-            }
-          } catch (e) {
-            console.warn('Could not automatically align canvas to top:', e);
-          }
-        }, 50);
-      } catch (error) {
-        console.error('Error previewing PDF:', error);
-      }
-    }
+    /**
+        * Preview PDF in canvas (for web) or render from blob
+        */
+       async previewPdf() {
+         try {
+           // Generate the PDF using the current document definition so it matches download behaviour
+           const pdfDoc = pdfMake.createPdf(this.getDocumentDefinition());
+           const blob: Blob = await new Promise((resolve, reject) => {
+             try {
+               pdfDoc.getBlob((b: Blob) => resolve(b));
+             } catch (err) {
+               reject(err);
+             }
+           });
+           const arrayBuffer = await blob.arrayBuffer();
+           const pdfBytes = new Uint8Array(arrayBuffer);
+           
+           const loadingTask = getDocument({ data: pdfBytes });
+           const pdf = await loadingTask.promise;
+     
+           const numPages = pdf.numPages || 1;
+           const containerEl = this.pdfContainer.nativeElement as HTMLDivElement;
+           containerEl.style.paddingTop = '0px';
+           containerEl.innerHTML = '';
+   
+           // Determine device width once
+           const screenWidth = window.innerWidth;
+           const canvasWidth = screenWidth * 0.95;
+   
+           // Render every page. If there are multiple session images, stack
+           // the rendered pages vertically in a single tall canvas so the
+           // document appears centered and vertically ordered.
+           const sessionCount = Array.isArray(this.sessionImages) ? this.sessionImages.length : 0;
+           const extraMultiplier = sessionCount >= 2 ? Math.max(1, sessionCount - 1) : 1;
+           const outputScale = window.devicePixelRatio || 1;
+   
+           if (extraMultiplier > 1) {
+             // Create one tall canvas that will contain all pages stacked vertically
+             // Use the first page to determine per-page pixel dimensions
+             const firstPage = await pdf.getPage(1);
+             const firstViewport = firstPage.getViewport({ scale: canvasWidth / firstPage.getViewport({ scale: 1.0 }).width });
+             const pagePixelWidth = Math.floor(firstViewport.width * outputScale);
+             const pagePixelHeight = Math.floor(firstViewport.height * outputScale);
+   
+             const mainCanvas = document.createElement('canvas');
+             const mainCtx = mainCanvas.getContext('2d')!;
+             mainCanvas.width = pagePixelWidth;
+             mainCanvas.height = pagePixelHeight * extraMultiplier;
+   
+             // CSS for centered, responsive display
+             mainCanvas.style.display = 'block';
+             mainCanvas.style.margin = '2px auto 0';
+             mainCanvas.style.maxWidth = '95%';
+             mainCanvas.style.width = '95%';
+             mainCanvas.style.height = 'auto';
+   
+             // For each page, render into an offscreen canvas and blit into the main canvas
+             for (let p = 1; p <= numPages; p++) {
+               const page = await pdf.getPage(p);
+               const originalViewport = page.getViewport({ scale: 1.0 });
+               const scale = canvasWidth / originalViewport.width;
+               const viewport = page.getViewport({ scale });
+   
+               // Offscreen canvas for per-page rendering (pixel-sized)
+               const offCanvas = document.createElement('canvas');
+               const offCtx = offCanvas.getContext('2d')!;
+               offCanvas.width = Math.floor(viewport.width * outputScale);
+               offCanvas.height = Math.floor(viewport.height * outputScale);
+   
+               if (outputScale !== 1) {
+                 offCtx.setTransform(outputScale, 0, 0, outputScale, 0, 0);
+               }
+   
+               await page.render({ canvasContext: offCtx, viewport }).promise;
+   
+               // Compute vertical offset (in pixels) inside main canvas
+               const yOffset = (p - 1) * offCanvas.height;
+               mainCtx.drawImage(offCanvas, 0, yOffset);
+             }
+   
+             containerEl.appendChild(mainCanvas);
+           } else {
+             // Single or default behavior: render one canvas per page (existing behavior)
+             for (let p = 1; p <= numPages; p++) {
+               const page = await pdf.getPage(p);
+               const originalViewport = page.getViewport({ scale: 1.0 });
+               const scale = canvasWidth / originalViewport.width;
+               const viewport = page.getViewport({ scale });
+   
+               const canvas = document.createElement('canvas');
+               const context = canvas.getContext('2d')!;
+   
+               canvas.width = Math.floor(viewport.width * outputScale);
+               canvas.height = Math.floor(viewport.height * outputScale);
+   
+               // Keep canvas responsive and maintain aspect ratio
+               canvas.style.display = 'block';
+               canvas.style.margin = '2px auto 0';
+               canvas.style.maxWidth = '95%';
+               canvas.style.width = '95%';
+               canvas.style.height = 'auto';
+   
+               if (outputScale !== 1) {
+                 context.setTransform(outputScale, 0, 0, outputScale, 0, 0);
+               }
+   
+               await page.render({ canvasContext: context, viewport }).promise;
+   
+               containerEl.appendChild(canvas);
+             }
+           }
+   
+           // Safety guard: try to bring the container to the top of the viewport
+           // Use a slight delay to allow layout to settle
+           setTimeout(() => {
+             try {
+               // Preferred: bring container into view aligned to the top
+               containerEl.scrollIntoView({ behavior: 'auto', block: 'start' });
+   
+               // If the canvas top is still offscreen, use a window scroll fallback
+               const lastEl = containerEl.lastElementChild as HTMLElement | null;
+               if (lastEl) {
+                 const rect = lastEl.getBoundingClientRect();
+                 if (rect.top < 0 || rect.top > window.innerHeight) {
+                   const target = Math.max(0, window.scrollY + rect.top);
+                   window.scrollTo({ top: target, behavior: 'smooth' });
+                 }
+               }
+             } catch (e) {
+               console.warn('Could not automatically align canvas to top:', e);
+             }
+           }, 50);
+         } catch (error) {
+           console.error('Error previewing PDF:', error);
+         }
+       }
   
     /**
      * Open PDF in native viewer (Android) or browser
@@ -482,9 +446,12 @@ export class PdfPageTest03Page {
     async openPDF() {
       if (this.platform.is('hybrid') && this.platform.is('android')) {
         try {
+          //Builds a filename using sessionId when available, otherwise uses a default.
           const fileName = this.sessionId ? `sample-${this.sessionId}.pdf` : 'sample.pdf';
           // Save into public Downloads so file managers can see it
           const filePath = await this.savePDF(fileName, true);
+
+          //call FileOpener to open the saved PDF
           await this.fileOpener.open(filePath, 'application/pdf');
           console.log('PDF opened');
         } catch (err) {
@@ -504,6 +471,7 @@ export class PdfPageTest03Page {
      */
     private async savePDF(fileName: string, usePublicDownloads = false): Promise<string> {
       try {
+        //Generate PDF blob
         const blob = await this.generatePdfBlob();
 
         // Ensure permission for writing to external storage on older Android versions
@@ -521,7 +489,8 @@ export class PdfPageTest03Page {
         const publicDownloadDir = this.getPublicDownloadDirectory();
         const targetDir = usePublicDownloads && publicDownloadDir ? publicDownloadDir : this.file.externalDataDirectory;
 
-        // Attempt to write to the chosen directory. If it fails, fallback to app external data dir.
+        // Attempt to write to the chosen directory. If it fails, fallback to app 
+        // external data dir.
         try {
           const fileEntry = await this.file.writeFile(targetDir, fileName, blob, { replace: true });
           // Prefer nativeURL if available
@@ -536,10 +505,9 @@ export class PdfPageTest03Page {
       }
     }
 
-    /**
-     * Returns a best-effort path for the public Downloads directory.
-     * Uses the Cordova File plugin's `externalRootDirectory` if present.
-     */
+
+     // Returns a best-effort path for the public Downloads directory.
+     // Uses the Cordova File plugin's `externalRootDirectory` if present. or null if not available.
     private getPublicDownloadDirectory(): string | null {
       try {
         // some devices expose externalRootDirectory
@@ -552,42 +520,6 @@ export class PdfPageTest03Page {
       }
     }
   
-      
-  
-  
-    /**
-     * Preview PDF - Native viewer for Android, inline viewer for web
-     */
-    async previewPDF2() {
-      if (this.platform.is('hybrid') && this.platform.is('android')) {
-        // Android: Save to cache and open in native PDF viewer
-        try {
-          const blob = await this.generatePdfBlob();
-          const fileName = 'preview.pdf';
-          const fileEntry = await this.file.writeFile(
-            this.file.cacheDirectory, 
-            fileName, 
-            blob, 
-            { replace: true }
-          );
-          console.log('PDF saved for native preview at:', fileEntry.nativeURL);
-          await this.fileOpener.open(fileEntry.nativeURL, 'application/pdf');
-          console.log('Native PDF preview opened');
-        } catch (err) {
-          console.error('Error with native PDF preview:', err);
-        }
-      } else {
-        // Browser: Show inline Base64 preview
-        try {
-          const base64 = await this.generatePdfBase64();
-          const pdfBase64 = `data:application/pdf;base64,${base64}`;
-          this.pdfSrc = this.sanitizer.bypassSecurityTrustResourceUrl(pdfBase64);
-          console.log('Browser PDF preview loaded');
-        } catch (err) {
-          console.error('Error loading browser PDF preview:', err);
-        }
-      }
-    }
   
     /**
      * Download PDF - Native save for Android, browser download for web
@@ -597,7 +529,7 @@ export class PdfPageTest03Page {
         // Android: Save to external storage
         try {
           const fileName = this.sessionId ? `sample-${this.sessionId}.pdf` : 'sample.pdf';
-          // Save to public Downloads (with fallback inside savePDF)
+          // Save to public Downloads with fallbacks inside savePDF
           const savedPath = await this.savePDF(fileName, true);
           this.savedPdfPath = savedPath;
           console.log('PDF saved at', this.savedPdfPath);
@@ -629,6 +561,8 @@ export class PdfPageTest03Page {
           
           if (result.display === 'granted') {
             // Schedule notification with action to open PDF
+            //with title, body, id and actionTypeId so the user 
+            // sees the download success.
             await LocalNotifications.schedule({
               notifications: [
                 {
@@ -643,7 +577,7 @@ export class PdfPageTest03Page {
               ]
             });
 
-            // Listen for notification tap to open PDF
+            // Listen for notification tap to open PDF, allow or PDF to be opened from notification
             LocalNotifications.addListener('localNotificationActionPerformed', (notification) => {
               if (notification.notification.id === 1 && this.savedPdfPath) {
                 this.openDownloadedPDF();
@@ -714,9 +648,8 @@ export class PdfPageTest03Page {
       }
     }
 
-    /**
-     * Open the downloaded PDF
-     */
+     // Open the downloaded PDF
+
     private async openDownloadedPDF() {
       try {
         if (this.savedPdfPath) {

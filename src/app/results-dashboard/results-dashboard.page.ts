@@ -82,19 +82,23 @@ export class ResultsDashboardPage implements OnInit {
   }
 
   private loadData(): void {
+    //Read every stored image and set a working imgs list (defaults to all).
     const all = this.storage.getAllImages();
     let imgs: StoredImage[] = all;
+    //If a sessionId was passed, load the stored session object to the session images.
     if (this.sessionId) {
       const s = this.storage.getSession(this.sessionId);
       if (s) {
-        // filter images by session keys - match by original or filename for compatibility
+        //Select only images that match any of the session's imageKeys  match by original or filename for compatibility
         // Match session image keys against multiple possible stored-image identifiers
         imgs = all.filter((i) =>
           s.imageKeys.includes(i.original) ||
           (i.withBoxes && s.imageKeys.includes(i.withBoxes)) ||
           (i.filename && s.imageKeys.includes(i.filename))
         );
-        // Deduplicate by original key in case of accidental duplicates
+
+        //Remove duplicate stored images in case of duplicates by a stable key
+        //  (original / filename / withBoxes) to avoid double-counting.
         const seen = new Set<string>();
         imgs = imgs.filter(i => {
           const key = i.original || i.filename || (i.withBoxes as string) || '';
@@ -103,70 +107,123 @@ export class ResultsDashboardPage implements OnInit {
           seen.add(key);
           return true;
         });
-        // populate available session images and default selection to all
+        //Save the sessions available images and select all of them by default 
+        // (selected keys used for later aggregation).
         this.availableSessionImages = imgs;
         this.selectedImageKeys = imgs.map((i) => this.getImageKey(i));
-        // aggregate based on selected images (initially all)
+
+       
+        // aggregate based on selected images initially all
         this.aggregateSelectedImages();
-        // Use stored session totalBoundingBoxes if available for totalCracks (keeps previous behaviour)
+
+        //Purpose: If the session object contains a totalBoundingBoxes number, 
+        // use it for stats.totalCracks (keeps backward compatibility)
         if (typeof (s as any).totalBoundingBoxes === 'number') {
           // prefer stored session totalBoundingBoxes if available for totalCracks
           this.stats.totalCracks = (s as any).totalBoundingBoxes || 0;
         }
-        // set totalImages to the actual number of images present in storage for this session
+
+        // Record how many images were actually found for the session and sets the totalImages 
+        // to the number of iamges present in the session 
+        // return early (session branch complete).
         this.stats.totalImages = imgs.length;
         return;
       }
     }
 
     // No session specified or session not found -> aggregate across all images
+    //If there is no session context, compute aggregate stats across every stored image.
     this.aggregate(imgs, all.length);
   }
 
-  // Return a stable key for an image (filename preferred, fallback to original)
-  getImageKey(img: StoredImage): string {
-    return (img as any).filename || (img as any).original || '';
+  /**
+   * Print the current session objects to the console for debugging.
+   */
+  private printSessionObjects(): void {
+    try {
+      console.log('--- Session Objects (ResultsDashboard) ---');
+      //display sessionId, stored session object, available images, selected keys, stats
+      console.log('sessionId:', this.sessionId);
+      const storedSession = this.sessionId ? this.storage.getSession(this.sessionId) : null;
+      console.log('storedSession:', storedSession);
+      if (this.availableSessionImages && this.availableSessionImages.length > 0) {
+        console.log(`availableSessionImages (${this.availableSessionImages.length}):`, this.availableSessionImages);
+      } else {
+        console.log('availableSessionImages: none');
+      }
+      console.log('selectedImageKeys:', this.selectedImageKeys);
+      console.log('stats:', this.stats);
+      console.log('------------------------------------------');
+    } catch (err) {
+      console.warn('Error while printing session objects:', err);
+    }
   }
 
-  /**
-   * Return a stable key for an image used in selection and lookup.
-   * Prefers `filename`, falls back to `original`.
-   * Interaction: used by selection helpers and to deduplicate images.
-   */
+  // Return a stable key for an image (filename preferred fallback to original)
+  getImageKey(img: StoredImage): string {
+    // Ensure the filename is properly retrieved or fallback to a default value
+    return img.filename ? img.filename : (img.original || 'No Filename');
+  }
+
+
+   // Return a stable key for an image used in selection and lookup.
+   // Prefers `filename`, falls back to `original`.
+   // Interaction: used by selection helpers and to deduplicate images.
 
   isSelectedImage(img: StoredImage): boolean {
     return this.selectedImageKeys.includes(this.getImageKey(img));
   }
-
+  
+  //allows user to toggle which images to use
+  //all boxes are checked, if unchecked get the stable key / 
+  //filename, finds its index in the array then aggregate the data from the remaining img's
   toggleImageSelection(img: StoredImage): void {
+    //Compute stable key for the image
     const key = this.getImageKey(img);
+
+    //Find current selection index
     const idx = this.selectedImageKeys.indexOf(key);
+
+    //Toggle selection (remove if present, add if absent)
     if (idx > -1) this.selectedImageKeys.splice(idx, 1);
     else this.selectedImageKeys.push(key);
     // re-aggregate using the updated selection
     this.aggregateSelectedImages();
   }
 
-  /**
-   * Toggle selection state for an image and re-aggregate stats.
-   * Interaction: updates `selectedImageKeys` then calls `aggregateSelectedImages()`
-   * to refresh `stats` displayed in the UI.
-   */
+
+  //Toggle selection state for an image and re-aggregate stats.
+  // Interaction: updates `selectedImageKeys` then calls `aggregateSelectedImages()`
+  // to refresh `stats` displayed in the UI.
+
 
   // Aggregate only images currently selected for the session
   private aggregateSelectedImages(): void {
+    //return early if no session images available
     if (!this.availableSessionImages || this.availableSessionImages.length === 0) return;
+
+    //// Keep only images whose key is in selectedImageKeys
     const selected = this.availableSessionImages.filter((i) => this.selectedImageKeys.includes(this.getImageKey(i)));
+    
+    //Compute number of selected images
     const totalImages = selected.length;
+
+    //Aggregate stats for the selected images
     this.aggregate(selected, totalImages);
   }
 
   private aggregate(images: StoredImage[], totalImages: number): void {
+
+    //Setup counters / records
     const type: Record<string, number> = {};
     const severity: Record<string, number> = {};
     const shape: Record<string, number> = {};
     let totalCracks = 0;
-
+     
+    //Iterate images loop start, use rawPrediction array if present: 
+    //each entry counts as one detection
+    //iterate through each img raw prediction and increment / update the type, 
+    //severity, shape counts
     images.forEach((img) => {
       // Prefer `rawPrediction` array if present: each entry counts as one detection
       const raw = (img as any).rawPrediction;
@@ -180,7 +237,8 @@ export class ResultsDashboardPage implements OnInit {
         return; // move to next image
       }
 
-      // Fallback: maintain previous behaviour using single prediction + optional boxes
+      //  maintain previous behaviour using single prediction + optional boxes
+      //single-prediction + boxes handling
       const p = img.prediction;
       if (!p) return;
       const boxCount = Array.isArray((img as any).boxes) && (img as any).boxes.length > 0 ? (img as any).boxes.length : 1;
@@ -190,6 +248,7 @@ export class ResultsDashboardPage implements OnInit {
       if (p.shape) shape[p.shape] = (shape[p.shape] || 0) + boxCount;
     });
 
+    //Finalize and save aggregated stats
     this.stats = { type, severity, shape, totalCracks, totalImages };
   }
 
@@ -203,8 +262,9 @@ export class ResultsDashboardPage implements OnInit {
    * Computed percent used for donut-style indicators.
    * Interaction: reads `stats.totalCracks` and `stats.totalImages`.
    */
-
+  
   getScopeText(): string {
+    //Declares a getter method that returns a short label describing current scope.
     return this.sessionId ? 'This Session' : 'All Sessions';
   }
 
@@ -212,8 +272,12 @@ export class ResultsDashboardPage implements OnInit {
     this.showBar = mode === 'bar';
   }
 
+  // 
   getMax(obj: { [k: string]: number }): number {
+    //Collect numeric values from the object
     const vs = Object.values(obj);
+    //Return the maximum or a safe fallback
+
     return vs.length ? Math.max(...vs) : 1;
   }
 
@@ -221,33 +285,26 @@ export class ResultsDashboardPage implements OnInit {
     this.navCtrl.back();
   }
 
-  previewPDF() {
-    const queryParams: any = {};
-    if (this.sessionId) queryParams.sessionId = this.sessionId;
-    this.router.navigate(['/pdf-preview-page'], { queryParams });
-  }
-
-  /**
-   * Navigate to the PDF preview page for the current scope.
-   * Interaction: builds `queryParams` including `sessionId` and navigates.
-   */
-
+  //Sets which data category the UI should display (type/shape/severity/all).
   selectGraphType(type: 'type' | 'shape' | 'severity' | 'all') {
     this.selectedGraphType = type;
     console.log(`[Graph Selection] Data Type selected: ${type}`);
   }
-
+  
+  //Sets which chart style (bar or pie) the UI should display.
   selectChartType(type: 'bar' | 'pie') {
     this.selectedChartType = type;
     console.log(`[Graph Selection] Chart Type selected: ${type}`);
   }
 
+  //opens the graph selection overlay
   openGraphOverlay() {
     this.showGraphOverlay = true;
     console.log('[Graph Overlay] Overlay opened');
     // no-op: page-level back handler will close overlay when active
   }
-
+  
+  //closes the graph selection overlay
   closeGraphOverlay() {
     this.showGraphOverlay = false;
     console.log('[Graph Overlay] Overlay closed');
@@ -288,7 +345,8 @@ export class ResultsDashboardPage implements OnInit {
     } catch (e) {}
     this.backButtonSub = null;
   }
-
+   
+  //Log selection — debug output
   applyGraphSelection() {
     console.log(`[Graph Selection] Applied - Chart: ${this.selectedChartType}, Data: ${this.selectedGraphType}`);
     this.closeGraphOverlay();
@@ -312,7 +370,7 @@ export class ResultsDashboardPage implements OnInit {
         Object.entries(this.stats.severity).forEach(([k, v]) => { out[`Severity - ${k}`] = v; });
       }
 
-      // If no real stats available, fall back to placeholder combined view
+      // If no stats available, fall back to placeholder combined view
       if (Object.keys(out).length === 0) {
         Object.entries(this.placeholderData.type).forEach(([k, v]) => { out[`Type - ${k}`] = v; });
         Object.entries(this.placeholderData.shape).forEach(([k, v]) => { out[`Shape - ${k}`] = v; });
@@ -320,7 +378,8 @@ export class ResultsDashboardPage implements OnInit {
       }
       return out;
     }
-
+    
+    //single-category selection — return stats or placeholders
     switch (this.selectedGraphType) {
       case 'type':
         return this.stats.type && Object.keys(this.stats.type).length > 0 ? this.stats.type : this.placeholderData.type;
@@ -333,6 +392,9 @@ export class ResultsDashboardPage implements OnInit {
     }
   }
 
+
+  //gets the graph title based on selected data type
+  //Returns a short title string for the currently selected graph data type.
   getGraphTitle(): string {
     switch (this.selectedGraphType) {
       case 'type':
@@ -348,47 +410,39 @@ export class ResultsDashboardPage implements OnInit {
     }
   }
 
-  // Short descriptive subtitle for pie graph explaining example categories
+  // Short descriptive subtitle for the graph explaining the chosen graph type and data type
   getGraphSubtitle(): string {
+    const graphTypeText = this.selectedChartType === 'bar' ? 'Bar Chart' : 'Pie Chart';
+    let dataTypeText = '';
+
     switch (this.selectedGraphType) {
       case 'type':
-        return 'Examples: diagonal, horizontal, bar-like';
+        dataTypeText = 'Type of Cracks (e.g., diagonal, horizontal, bar-like)';
+        break;
       case 'severity':
-        return 'Examples: minor';
+        dataTypeText = 'Severity Levels (e.g., minor, medium, high)';
+        break;
       case 'shape':
-        return 'Examples: branching, straight';
+        dataTypeText = 'Shapes of Cracks (e.g., branching, straight, curved)';
+        break;
       case 'all':
-        return 'Combined: type, severity and shape';
+        dataTypeText = 'Combined Data: Type, Severity, and Shape';
+        break;
       default:
-        return '';
+        dataTypeText = 'Type of Cracks';
     }
+
+    return `${graphTypeText} - ${dataTypeText}`;
   }
 
+
+  //used for export the current session to PDF
+  //uses the sessionId to pass to the PDF page
   ExportPDF() {
     const queryParams: any = {};
     if (this.sessionId) queryParams.sessionId = this.sessionId;
     this.router.navigate(['/pdf-page-test03'], { queryParams });
   }
 
-  /**
-   * Print the current session objects to the console for debugging.
-   */
-  private printSessionObjects(): void {
-    try {
-      console.log('--- Session Objects (ResultsDashboard) ---');
-      console.log('sessionId:', this.sessionId);
-      const storedSession = this.sessionId ? this.storage.getSession(this.sessionId) : null;
-      console.log('storedSession:', storedSession);
-      if (this.availableSessionImages && this.availableSessionImages.length > 0) {
-        console.log(`availableSessionImages (${this.availableSessionImages.length}):`, this.availableSessionImages);
-      } else {
-        console.log('availableSessionImages: none');
-      }
-      console.log('selectedImageKeys:', this.selectedImageKeys);
-      console.log('stats:', this.stats);
-      console.log('------------------------------------------');
-    } catch (err) {
-      console.warn('Error while printing session objects:', err);
-    }
-  }
+  
 }

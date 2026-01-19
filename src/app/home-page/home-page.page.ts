@@ -107,7 +107,8 @@ private async initialize(): Promise<void> {
       }
     } catch {}
   }
-  // Mark logged-in flag locally. allow for system to navigate to home-page instead of landing-page if logged in
+  // Mark logged-in flag locally. allow for system to 
+  // navigate to home-page instead of landing-page if logged in
   try { this.isLoggedIn = (localStorage.getItem('isLoggedIn') === 'true'); } catch { this.isLoggedIn = true; }
   // load sessions from image storage service
   try { await this.loadSessions(); } catch (e) { console.warn('loadSessions failed during init', e); }
@@ -283,16 +284,26 @@ private async initialize(): Promise<void> {
   /** Delete a session and refresh list */
   /** Delete a session via ImageStorageService and refresh list. */
   async deleteSession(session: any, ev?: Event) {
+    // Step 1: Stop event propagation if an event is provided
     try {
       if (ev) ev.stopPropagation();
+
+      // Step 2: Validate the session object and its ID
       if (!session || !session.id) return;
+
+      // Step 3: Confirm deletion with the user
       if (typeof (this.imageStorage as any).removeSession === 'function') {
         const ok = confirm('Delete session "' + (session.name || session.id) + '"? This cannot be undone.');
         if (!ok) return;
+
+        // Step 4: Remove the session using ImageStorageService
         (this.imageStorage as any).removeSession(session.id);
+
+        // Step 5: Refresh the session list
         await this.loadSessions();
       }
     } catch (e) {
+      // Step 6: Handle any errors that occur during the process
       console.warn('deleteSession failed', e);
     }
   }
@@ -743,7 +754,4 @@ private async initialize(): Promise<void> {
   }
   
   
-
-  
-
 }

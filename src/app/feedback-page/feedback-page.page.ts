@@ -49,6 +49,32 @@ private backButtonSub: any; // hardware back handler
   // routeSessionId holds session id passed via query param from Camera page
   routeSessionId?: string | null = null;
 
+  @ViewChild('scrollContainer', { static: false }) scrollContainer!: ElementRef;
+  // Session support
+  sessions: any[] = [];
+  selectedSessionId?: string | null = null;
+ 
+    name: string = '';
+    storedEntries: { image: string; title: string; dropdown1: string; dropdown2: string; dropdown3: string; extraText: string }[] = [];
+    email: string = '';
+    password: string = '';
+    rememberMe: boolean = false;
+    showPassword: boolean = false;
+    username: string = '';
+    firstName: string = '';
+    lastName: string = '';
+    dropdown1: string = '';
+  dropdown2: string = '';
+  dropdown3: string = '';
+  extraText: string = '';
+  dropdownOptions: string[] = [];
+  dropdownOptionsDirection: string[] = [];
+  dropdownOptionsShape: string[] = [];
+  dropdownOptionsSeverity: string[] = [];
+  detectionMessage: string = '';
+  detectionResult: string = '';
+  userRole: string | null = null; // User role for access control
+
   /**
    * Inject router, API, storage service, and CameraPreview (native).
    * CameraPreview is stopped on init to ensure camera UI is released.
@@ -69,10 +95,6 @@ private backButtonSub: any; // hardware back handler
    */
   ngOnInit() {
     this.loadUserRole();
-    this.api.getHelloTest().subscribe((res: any) => {
-  console.log('Response:', res);
-});
-
     try {
       // CameraPreview is a Cordova/native plugin — on web it will throw; ignore on web
       this.cameraPreview.stopCamera();
@@ -80,23 +102,69 @@ private backButtonSub: any; // hardware back handler
       console.warn('CameraPreview.stopCamera ignored (not available on web):', e);
     }
 
-  
-
     console.log(this.message)
   }
 
-  /** Load user role/name from localStorage to control dropdown editability. */
-  //Attempts to parse localStorage 'userData', reads role/name fields and logs the loaded context.
+    /**
+   * Lifecycle: stop camera preview (if available), then load sessions and
+   * associated images. Kicks off a debug log and center detection.
+   */
+  ngAfterViewInit() {
+  try {
+    this.cameraPreview.stopCamera();
+    try { if (this.backButtonSub && typeof this.backButtonSub.unsubscribe === 'function') this.backButtonSub.unsubscribe(); } catch {}
+  } catch (e) {
+    console.warn('CameraPreview.stopCamera ignored in ngAfterViewInit (not available on web):', e);
+  }
+
+   if (this.backButtonSub) {
+      try {
+        this.backButtonSub.unsubscribe();
+        this.backButtonSub = null;
+      } catch (e) {
+        console.warn('[UploadImagePage] failed to unsubscribe back button handler', e);
+      }
+    }
+  
+
+    // Initialize sessions then refresh the displayed images from the active session
+    setTimeout(() => {
+      // If a session id was passed using query param use it
+      try { this.routeSessionId = this.route.snapshot.queryParamMap.get('sessionId'); } catch (e) { this.routeSessionId = null; }
+      this.loadSessions()
+        .then(() => this.refreshDisplayedImages())
+        .then(() => {
+          // Print stored images + prediction-derived display strings for debugging
+          this.debugLogStoredImages();
+          // Try to detect the centered image (will update again when DOM ready)
+          this.detectCenterImage();
+        })
+        .catch(err => console.warn('[FeedbackPage] failed to initialize sessions/images', err));
+    }, 500);
+      }
+
+
+  // Load user role/name from localStorage to control dropdown editability. 
+  //Attempts to parse localStorage 'userData', reads role/name fields 
+  // and logs the loaded context.
   private loadUserRole() {
     try {
+      //etch previously-stored user context named 
+      //userData so the app can restore role/name without network calls.
       const cached = localStorage.getItem('userData');
       if (cached) {
+        //Convert the stored JSON string into an object 
+        //and read role/name fields, applying fallbacks if fields are missing.
         const data = JSON.parse(cached);
         this.userRole = (data.userRole || data.role || 'user') as string;
         this.firstName = data.firstName || '';
         this.lastName = data.lastName || '';
+        //show a debug log with the loaded role and names 
+        // to help trace app behavior during development.
         console.log('[FeedbackPage] loaded user context', { userRole: this.userRole, firstName: this.firstName, lastName: this.lastName });
       } else {
+        //If nothing is in localStorage, 
+        //default the userRole to 'user' so UI access control behaves predictably.
         this.userRole = 'user';
       }
     } catch (e) {
@@ -105,25 +173,22 @@ private backButtonSub: any; // hardware back handler
     }
   }
 
-  /**
-   * Handle explicit image click: select image, apply its prediction to UI,
-   * update formDataMap and log a detailed debug object to console.
-   */
-  /**
-   * Select image in the gallery, populate prediction/status and dropdowns,
-   * update the formDataMap, and auto-center the image in the scroller.
-   */
+  //handles a user clicking an image in the gallaery scroller, selects it and populates the UI
+  //fields from stored prediction/status, updates formDataMap, logs a detailed debug log to console for debugging
+  // and auto-centers the image.
   onImageClick(img: DisplayImage) {
-    // select image
+    // select image, chooses which image to show or display depending on 
+    //showWithBoxes toggle the original or with boxes
     this.selectedImage = this.showWithBoxes ? img.withBoxes : img.original;
 
-    // update structured prediction/status
+    //copys the image raw prediction and statusmessage into the field and updates the structured prediction/status
     this.selectedPrediction = img.rawPrediction ?? {};
     this.selectedStatusMessage = img.statusMessage ?? '';
 
-    // apply to detection fields and dropdowns
+    // apply the necessary data detection fields and dropdowns
     //Updates the visible detection text and the current dropdown 
-    //selections from the image's status/prediction so the UI immediately reflects the clicked image
+    //selections from the image's status/prediction so the UI immediately 
+    // reflects the clicked image
     if (this.selectedStatusMessage && this.selectedStatusMessage.length > 0) {
       this.detectionMessage = this.selectedStatusMessage;
       this.detectionResult = this.selectedStatusMessage;
@@ -133,13 +198,15 @@ private backButtonSub: any; // hardware back handler
       this.detectionResult = p.shape ? `${p.shape}${p.severity ? ' — ' + p.severity : ''}` : (p.severity ?? '⚠️ No info available');
     }
 
+
+    //update the 3 dropdown prediction values when available, otherwise fall back to image title
     this.dropdown1 = this.selectedPrediction.type ?? this.selectedImageTitle ?? 'Type';
     this.dropdown2 = this.selectedPrediction.shape ?? this.selectedImageTitle ?? 'Shape';
     this.dropdown3 = this.selectedPrediction.severity ?? this.selectedImageTitle ?? 'Severity';
 
     // update form map for this image
-    //Creates or ensures a persistent per-image entry in formDataMap 
-    //(defaults populated from the current UI/prediction). This is used to store selections for later retrieval, saving, or export:
+    //Ensure a persistant per-image entry in formDataMap (defaults from current UI/prediction)
+    //This is used to store selections for later retrieval, saving, or export:
     const key = img.original;
     this.formDataMap[key] = this.formDataMap[key] ?? {
       title: img.fileName ?? this.selectedImageTitle,
@@ -167,27 +234,36 @@ private backButtonSub: any; // hardware back handler
     });
   }
 
-  /** Smoothly center the selected image in the horizontal scroller */
-  /**
-   * Smooth-scroll the scroller so the selected image is horizontally centered.
-   */
+  //Smoothly center the selected image in the horizontal scroller
+  //Smooth-scroll the scroller so the selected image is horizontally centered.
+   
   private scrollSelectedImageIntoView(targetSrc?: string) {
+    //Read the scrollContainer native element and bail if missing.
     const container = this.scrollContainer?.nativeElement as HTMLElement | undefined;
     if (!container) return;
 
+   //Query all thumbnail img.image-item elements and bail if none found.
+   //collect the thumbnail image elements inside the scroller and stop 
+   //if none exist to avoid further work or runtime errors.
     const images = Array.from(container.querySelectorAll('img.image-item')) as HTMLImageElement[];
     if (!images || images.length === 0) return;
 
+  //locate the img whose src attribute equals to the srcToFind. Bail if not found.
+  //locate the img related to the selected img in the scroller based on the provided targetSrc or 
+  // currently selectedImage
     const srcToFind = targetSrc || this.selectedImage || '';
     if (!srcToFind) return;
 
+    //Locate the img whose src attribute equals the resolved srcToFind. Bail if not found.
     const selectedImg = images.find((img: HTMLImageElement) => {
       const src = img.getAttribute('src') || img.src;
       return src === srcToFind;
     }) || null;
 
     if (!selectedImg) return;
-
+    
+    //Measure container and image rectangles, compute center offsets, 
+    //and calculate scrollNeeded so the image center matches the container center.
     const containerRect = container.getBoundingClientRect();
     const imgRect = selectedImg.getBoundingClientRect();
 
@@ -196,6 +272,7 @@ private backButtonSub: any; // hardware back handler
     const imgOffsetFromStart = imgRect.left - containerRect.left;
     const scrollNeeded = container.scrollLeft + imgOffsetFromStart + imgCenter - containerCenter;
 
+    //Call container.scrollTo with computed left and behavior: 'smooth' to scroll to center the img
     container.scrollTo({
       left: scrollNeeded,
       behavior: 'smooth'
@@ -203,82 +280,16 @@ private backButtonSub: any; // hardware back handler
   }
   
 
-  @ViewChild('scrollContainer', { static: false }) scrollContainer!: ElementRef;
-  // Session support
-  sessions: any[] = [];
-  selectedSessionId?: string | null = null;
- 
-    name: string = '';
-    storedEntries: { image: string; title: string; dropdown1: string; dropdown2: string; dropdown3: string; extraText: string }[] = [];
-    email: string = '';
-    password: string = '';
-    rememberMe: boolean = false;
-    showPassword: boolean = false;
-    username: string = '';
-    firstName: string = '';
-    lastName: string = '';
-    dropdown1: string = '';
-  dropdown2: string = '';
-  dropdown3: string = '';
-  extraText: string = '';
-  dropdownOptions: string[] = [];
-  dropdownOptionsDirection: string[] = [];
-  dropdownOptionsShape: string[] = [];
-  dropdownOptionsSeverity: string[] = [];
-  detectionMessage: string = '';
-  detectionResult: string = '';
-  userRole: string | null = null; // User role for access control
-
-    
-   
-
-  /**
-   * Lifecycle: stop camera preview (if available), then load sessions and
-   * associated images. Kicks off a debug log and center detection.
-   */
-  ngAfterViewInit() {
-  try {
-    this.cameraPreview.stopCamera();
-    try { if (this.backButtonSub && typeof this.backButtonSub.unsubscribe === 'function') this.backButtonSub.unsubscribe(); } catch {}
-  } catch (e) {
-    console.warn('CameraPreview.stopCamera ignored in ngAfterViewInit (not available on web):', e);
-  }
-
-   if (this.backButtonSub) {
-      try {
-        this.backButtonSub.unsubscribe();
-        this.backButtonSub = null;
-      } catch (e) {
-        console.warn('[UploadImagePage] failed to unsubscribe back button handler', e);
-      }
-    }
-  
-
-    // Initialize sessions then refresh the displayed images from the active session
-    setTimeout(() => {
-      // If a session id was passed via query param from Camera, prefer it
-      try { this.routeSessionId = this.route.snapshot.queryParamMap.get('sessionId'); } catch (e) { this.routeSessionId = null; }
-      this.loadSessions()
-        .then(() => this.refreshDisplayedImages())
-        .then(() => {
-          // Print stored images + prediction-derived display strings for debugging
-          this.debugLogStoredImages();
-          // Try to detect the centered image (will update again when DOM ready)
-          this.detectCenterImage();
-        })
-        .catch(err => console.warn('[FeedbackPage] failed to initialize sessions/images', err));
-    }, 500);
-      }
-
-
   /** Load sessions from the storage service and pick an active session */
   /**
    * Load sessions from ImageStorageService using several compatible APIs.
    * Honors router-provided sessionId and picks a default session if needed.
    */
   async loadSessions(): Promise<void> {
+    //Get service reference
     const svc: any = this.imageStorageService as any;
     try {
+      //Initialize sessions variable and try multiple service APIs to load sessions
       let sessions: any[] = [];
       if (typeof svc.getSessions === 'function') {
         sessions = await svc.getSessions();
@@ -292,8 +303,9 @@ private backButtonSub: any; // hardware back handler
         sessions = all.sessions || all.SESSIONS || [];
       }
       this.sessions = sessions || [];
-      // Prefer an active session created by the Camera page if available.
-      // Try several common APIs/fields to remain compatible with different service implementations.
+
+      //Determine the last creation or current session id using the different service/API,
+      //to also remain compatible with different implementations.
       let lastSessionId: string | null = null;
       try {
         if (typeof svc.getLastCreatedSession === 'function') {
@@ -314,11 +326,13 @@ private backButtonSub: any; // hardware back handler
         console.warn('[FeedbackPage] loadSessions: error while checking last/current session', err);
       }
 
+      //Use lastSessionId if found
       if (lastSessionId) {
         this.selectedSessionId = lastSessionId;
       }
 
-      // If the router passed a session id explicitly, prefer that when present
+      // If the router passed a session id explicitly, prefer that when present within loaded sessions 
+      // from home page, camera page or upload page navigation to access specific session directly.
       if (this.routeSessionId) {
         const found = this.sessions.find(s => s.id === this.routeSessionId);
         if (found) this.selectedSessionId = this.routeSessionId;
@@ -341,16 +355,22 @@ private backButtonSub: any; // hardware back handler
    * Converts storage entries to DisplayImage for UI.
    */
   async refreshDisplayedImages(): Promise<void> {
+    //Setup service reference and clear imagePaths, so it can only reflect the newly 
+    // loaded images from the session. avoids duplicates on repeated calls if function is 
+    // called more than ounce. allows the placeholder when empty to run without issue or predictably
     const svc: any = this.imageStorageService as any;
     this.imagePaths = [];
     try {
+
+      //No session selected — load all images fallback
       if (!this.selectedSessionId) {
         // fallback: load all images if no session selected
         const allImgs: any[] = (typeof svc.getAllImages === 'function') ? svc.getAllImages() : (typeof svc.getAll === 'function' ? Object.values(await svc.getAll()) : []);
         this.imagePaths = (allImgs || []).map((img: any) => this.buildDisplayImage(img));
         return;
       }
-
+      
+      //Find session and handle empty session (placeholder) or session has no images
       const sess = this.sessions.find(s => s.id === this.selectedSessionId) || null;
       if (!sess || !Array.isArray(sess.imageKeys) || sess.imageKeys.length === 0) {
         // nothing in session; keep placeholder
@@ -360,6 +380,7 @@ private backButtonSub: any; // hardware back handler
         return;
       }
 
+     //Load each image entry for session.imageKeys using multiple service APIs
       for (const key of sess.imageKeys) {
         let entry: any = undefined;
         if (typeof svc.getEntryForImage === 'function') {
@@ -372,28 +393,40 @@ private backButtonSub: any; // hardware back handler
         }
         if (entry) this.imagePaths.push(this.buildDisplayImage(entry));
       }
+      //Top-level error handling
     } catch (err) {
       console.warn('[FeedbackPage] refreshDisplayedImages failed', err);
     }
   }
 
-  /** Normalize StoredImage-like object into DisplayImage */
-  /**
-   * Normalize a StoredImage-like object into DisplayImage used by the UI.
-   * Derives detectionMessage/Result from status or prediction fields.
-   */
+  // Normalize StoredImage-like object into DisplayImage 
+   //Normalize a StoredImage-like object into DisplayImage used by the UI.
+   //Derives detectionMessage/Result from status or prediction fields.
   buildDisplayImage(img: any): DisplayImage {
+    //Extract prediction object supports different field names for the UI
     const prediction = img.prediction ?? img.rawPrediction ?? undefined;
+
+    //Normalize individual prediction fields and build detectionMessage/detectionResult strings
+    //this extracts the fields safely avoid undefeinded by assigning each string with an empty string fallback, 
+    //they are then used to build human readable detection strings for later use and
+    //its to help in the flow to display the data or values for later
     const predType = prediction?.type ?? '';
     const predShape = prediction?.shape ?? '';
     const predSeverity = prediction?.severity ?? '';
+
+    //get the detectionMessage prefer human-readable statusMessage, else type+severity
     const detectionMessage = img.statusMessage && img.statusMessage.length > 0
       ? img.statusMessage
       : (predType || predSeverity) ? `${predType}${predSeverity ? ' — ' + predSeverity : ''}` : '';
+
+    //Compute detectionResult prefer to get statusMessage, else shape+severity
     const detectionResult = img.statusMessage && img.statusMessage.length > 0
       ? img.statusMessage
       : (predShape || predSeverity) ? `${predShape}${predSeverity ? ' — ' + predSeverity : ''}` : '';
-    return {
+
+    //Build return object: choose withBoxes fallback, derive filename, 
+    // include normalized prediction/status
+      return {
       original: img.original,
       withBoxes: img.withBoxes ?? img.original,
       fileName: img.filename ?? img.fileName ?? (img.original && img.original.split ? img.original.split('/').pop() : ''),
@@ -410,8 +443,15 @@ private backButtonSub: any; // hardware back handler
    * Debounced scroll handler; re-detect the centered image after scrolling.
    */
   onScroll(event: any) {
+    //clear previous timeout  , cancels any pending debounce timer to 
+    // avoid multiple trigger during scrolling continuously
   clearTimeout((event as any)._timeout);
+
+  // schedule a single callbar when scrolling stops to avoid excessive calls or triggers, 
+  //timer is stored on the event object so repeatede events can clear or restart it
   (event as any)._timeout = setTimeout(() => {
+    //call detectCenterImage function to update the selected image or thumbnail is centered 
+    // based on new scroll position and refresh UI state
     this.detectCenterImage();
   }, 100);
 }
@@ -439,11 +479,13 @@ private backButtonSub: any; // hardware back handler
  * (selected image, prediction/status, dropdown option lists, and formDataMap).
  */
 detectCenterImage() {
+  //Read container, images, and compute horizontal center
   const container = this.scrollContainer.nativeElement as HTMLElement;
   const images = container.querySelectorAll('img');
   const containerRect = container.getBoundingClientRect();
   const centerX = containerRect.left + containerRect.width / 2;
-
+  
+  //Find the image whose center is closest to the container center
   let closestImg: HTMLImageElement | null = null;
   let closestDistance = Infinity;
 
@@ -456,11 +498,15 @@ detectCenterImage() {
       closestImg = img;
     }
   });
-
+    
+  //Resolve the matched DisplayImage entry from the school for the closest DOM <img>
   if (closestImg) {
     const src = (closestImg as HTMLImageElement).getAttribute('src') ?? '';
     const matched = this.imagePaths.find(img => img.original === src || img.withBoxes === src);
     if (!matched) return;
+
+    //Update selectedImage from the scroll and get 
+    //detectionMessage prefer statusMessage, else prediction.type
   this.selectedImage = this.showWithBoxes ? matched.withBoxes : matched.original;
   // Prefer stored statusMessage; otherwise build readable strings from prediction
   if (matched.statusMessage && matched.statusMessage.length > 0) {
@@ -473,7 +519,7 @@ detectCenterImage() {
   }
 
   
-
+  //get detectionResult prefer prediction.shape+severity, else statusMessage
   if (matched.rawPrediction) {
     const p = matched.rawPrediction;
     this.detectionResult = p.shape ? `${p.shape}${p.severity ? ' — ' + p.severity : ''}` : (p.severity ?? '⚠️ No info available');
@@ -482,6 +528,8 @@ detectCenterImage() {
   } else {
     this.detectionResult = '⚠️ No info available';
   }
+
+  //Set selectedImageTitle, selectedPrediction, and selectedStatusMessage
 
   // Set the title from the stored filename if available
   this.selectedImageTitle = matched.fileName ?? '';
@@ -492,12 +540,15 @@ detectCenterImage() {
 
   // Immediately prefer prediction values for dropdowns so the UI reflects
   // the selected image's prediction right away (overrides filename fallback).
+  // and initialize dropdowns and extraText from prediction/title
   this.dropdown1 = this.selectedPrediction.type ?? this.selectedImageTitle;
   this.dropdown2 = this.selectedPrediction.shape ?? this.selectedImageTitle;
   this.dropdown3 = this.selectedPrediction.severity ?? this.selectedImageTitle;
   this.extraText = this.selectedStatusMessage ?? '';
 
-  // Ensure formDataMap entry exists and is updated with these values
+  // Ensure a per-image entry exists in formDataMap and update it with current UI values.
+  // Initialize defaults if missing; otherwise patch dropdowns/extraText to persist 
+  // from the selections.
   if (!this.formDataMap[src]) {
     this.formDataMap[src] = {
       title: this.selectedImageTitle,
@@ -514,25 +565,21 @@ detectCenterImage() {
   }
     
 
-
-//     const parts = matched.original.split('/');
-//     const filename = parts[parts.length - 1];
-//     const baseName = filename.split('.')[0];
-// this.selectedImageTitle = this.imagePaths.find(img => img.fileName);
-
-    const titleMap: { [key: string]: string } = {
-      'img1': 'Sunset View',
-      'img2': 'Mountain Range',
-      'img3': 'Ocean Breeze',
-      '108644884_p0': 'Crack Type A',
-      '112772382_p0': 'Crack Type B',
-      '113341201_p0': 'Crack Type C',
-      'test2': 'Test Image',
-      'tower': 'Tower Damage'
-    };
+  
+    //fore testing purposes
+    // const titleMap: { [key: string]: string } = {
+    //   'img1': 'Sunset View',
+    //   'img2': 'Mountain Range',
+    //   'img3': 'Ocean Breeze',
+    //   '108644884_p0': 'Crack Type A',
+    //   '112772382_p0': 'Crack Type B',
+    //   '113341201_p0': 'Crack Type C',
+    //   'test2': 'Test Image',
+    //   'tower': 'Tower Damage'
+    // };
 
     
-
+    //Ensure and update per-image formDataMap entry
     if (!this.formDataMap[src]) {
       // Initialize the form defaults using prediction values when available
       this.formDataMap[src] = {
@@ -544,6 +591,7 @@ detectCenterImage() {
       };
     }
 
+    //Apply stored form values to current dropdowns and build option lists
     const form = this.formDataMap[src];
     this.dropdown1 = form.dropdown1;
     this.dropdown2 = form.dropdown2;
@@ -597,8 +645,11 @@ detectCenterImage() {
    * Attempts several service APIs to stay compatible across implementations.
    */
   debugLogStoredImages() {
+    //Service reference and initialize image list
     const svc: any = this.imageStorageService as any;
     let imgs: any[] = [];
+
+    //Read images from storage using multiple compatible APIs (try in-order)
     try {
       if (typeof svc.getAllImages === 'function') {
         imgs = svc.getAllImages();
@@ -615,7 +666,10 @@ detectCenterImage() {
       return;
     }
 
+    //Log summary count
     console.log(`[FeedbackPage] debugLogStoredImages - found ${imgs.length} images`);
+
+    //Map stored images to readable rows (extract prediction/status and derive display strings) 
     const rows = imgs.map((img: any) => {
       const prediction = img.prediction ?? img.rawPrediction ?? undefined;
       const status = img.statusMessage ?? img.detectionMessage ?? '';
@@ -647,7 +701,8 @@ detectCenterImage() {
         statusMessage: status
       };
     });
-
+    
+    //Print table and detailed grouped logs for debugging
     console.table(rows);
     console.group('[FeedbackPage] storedImages detail');
     rows.forEach(r => console.log(r.filename || '(unnamed)', r));
@@ -659,13 +714,17 @@ detectCenterImage() {
    * Flatten the formDataMap into an array and navigate to PDF page prototype.
    */
   getAllEntries() {
+    //Flatten formDataMap into an array
   const allEntries = Object.entries(this.formDataMap).map(([image, data]) => ({
     image,
     ...data
   }));
+  //Log the flattened entries for debugging
   console.log('All Entries:', allEntries);
-  this.router.navigate(['/pdfpage01']);
+  //Navigate to the PDF page (side-effect: route change)
+  // this.router.navigate(['/pdfpage01']);
     console.log('Navigating to Sign Up page');
+    //Return the array of entries to the caller
   return allEntries;
 }
 
@@ -675,8 +734,10 @@ detectCenterImage() {
  * Persist current dropdown/text selections into formDataMap for selected image.
  */
 addEntry() {
+  //Guard: ensure an image is selected (early return)
   if (!this.selectedImage) return;
 
+  //Persist current UI values into formDataMap for the selected image
   this.formDataMap[this.selectedImage] = {
     title: this.selectedImageTitle,
     dropdown1: this.dropdown1,
@@ -684,7 +745,7 @@ addEntry() {
     dropdown3: this.dropdown3,
     extraText: this.extraText
   };
-
+  //Debug & log confirmation
   console.log(`Form saved for ${this.selectedImageTitle}`);
 }
 
@@ -699,6 +760,7 @@ addEntry() {
    * If list becomes empty, clears selection and associated fields.
    */
   async deleteSelectedImage() {
+    //Guard: ensure an image is selected
     if (!this.selectedImage) {
       console.warn('[FeedbackPage] deleteSelectedImage: no image selected');
       return;
@@ -710,7 +772,8 @@ addEntry() {
       console.warn('[FeedbackPage] deleteSelectedImage: selected image not found in imagePaths');
       return;
     }
-
+    
+    //Prepare metadata and ask for user confirmation
     const matched = this.imagePaths[idx];
     const original = matched.original;
     const filename = matched.fileName ?? '(unnamed)';
@@ -718,6 +781,7 @@ addEntry() {
     const confirmMsg = `Delete image "${filename}"? This action cannot be undone.`;
     if (!confirm(confirmMsg)) return;
 
+    //Delete from storage service and warn if nothing removed
     try {
       const removed = await (this.imageStorageService as any).deleteImage(original);
       if (!removed) {
@@ -749,6 +813,8 @@ addEntry() {
         this.dropdown3 = this.selectedPrediction.severity ?? this.selectedImageTitle;
       } else {
         // cleared all images — reset UI
+        //Reset UI when all images removed, if only all 
+        // images are removed or no images in the session currently
         this.selectedImage = '';
         this.selectedPrediction = {};
         this.selectedStatusMessage = '';
@@ -760,7 +826,7 @@ addEntry() {
         this.dropdown3 = '';
       }
 
-      // Helpful debug output
+      // Helpful debug output after deletion and refresh logs after deletion
       console.log(`[FeedbackPage] deleteSelectedImage: removed ${filename}. Remaining images: ${this.imagePaths.length}`);
       this.debugLogStoredImages();
     } catch (err) {
@@ -774,15 +840,16 @@ addEntry() {
   /** Navigate back to Home Page, fallback to history.back on failure. */
   goBack() {
     try {
-      // Try to navigate back in app history (preferred)
+      // Try to navigate back in app history (preferred) or app level back navigation if from camera , upload or home
       try { this.navCtrl.back(); return; } catch (e) { /* ignore and fallback */ }
 
-      // Fallback to browser history.back when navController isn't effective
+      // Fallback to browser history.back when navController isn't effective, 
+      // checks the browser history for fallback
       if (window.history.length > 1) {
         window.history.back();
         return;
       }
-
+    
       // Final fallback: navigate to home page
       this.router.navigateByUrl('/home-page');
     } catch (e) {
@@ -805,41 +872,54 @@ addEntry() {
 
   private registerBackButtonHandler() {
     try {
+
+      //Ensures any prior or past hardware back button subscription is removed 
+      // before adding a new one.
       this.removeBackButtonHandler();
-      // Use a modest priority so page-level handlers override default nav
+
+      //subscribe the platform or hardware back button with a priority handler 
+      // and saves it to override the default nav, so it can be removed later
       this.backButtonSub = this.platform.backButton.subscribeWithPriority(100, () => {
         try {
+          //prefer app level back, then browser than router, if all fails navigate to home
           this.navCtrl.back();
         } catch (e) {
           try { window.history.back(); } catch (err) { this.router.navigateByUrl('/home-page'); }
         }
       });
     } catch (e) {
+      //Catches and logs any errors thrown while wiring the handler.
       console.warn('[FeedbackPage] registerBackButtonHandler failed', e);
     }
   }
 
+
   private removeBackButtonHandler() {
     try {
+      //If subscription supports unsubscribe(), first try that to remove the handler
       if (this.backButtonSub && typeof this.backButtonSub.unsubscribe === 'function') {
         try { this.backButtonSub.unsubscribe(); } catch (e) {}
+        //if subscription exposes remove(), second for insurance or ensure removal
       } else if (this.backButtonSub && typeof this.backButtonSub.remove === 'function') {
         try { this.backButtonSub.remove(); } catch (e) {}
       }
     } catch (e) {}
+    //clear the reference so handler is considered removed
     this.backButtonSub = null;
   }
 
-  /**
-   * Navigate to results page showing crack analysis charts
-   */
-  /** Navigate to results page (charts), preserving sessionId when present. */
+
+  /** Navigate to results dashboard page, preserving sessionId when present. */
   viewResults() {
     // Navigate to results page with current sessionId if available
     const sessionId = this.routeSessionId || null;
+
+    //Navigate with session id
     if (sessionId) {
       this.router.navigate(['/results-dashboard'], { queryParams: { sessionId } });
     } else {
+
+      //Navigate without session id
       this.router.navigate(['/results-dashboard']);
     }
   }
@@ -855,6 +935,7 @@ addEntry() {
   async saveCurrentStoredImageAndGoHome() {
     try {
       // Try service current image first
+      //Try to get the service "current image"
       let entry: any = undefined;
       try {
         entry = (this.imageStorageService as any).getCurrentImage ? (this.imageStorageService as any).getCurrentImage() : undefined;
@@ -863,6 +944,7 @@ addEntry() {
       }
 
       // Fallback: try to locate via selectedImage path in the display list
+      //find the selected image in the current display list and build a storage en
       if (!entry && this.selectedImage) {
         const found = this.imagePaths.find(p => p.original === this.selectedImage || p.withBoxes === this.selectedImage);
         if (found) {
@@ -881,6 +963,7 @@ addEntry() {
         }
       }
 
+      //If no entry found, show alert and abort
       if (!entry) {
         alert('No image selected to save. Please select an image first.');
         return;
@@ -907,13 +990,13 @@ addEntry() {
   }
 
   /** Show an overlay to name and save the session or cancel */
-  /**
-   * Show an inline overlay to name the session and persist via storage service.
-   * Resolves after user clicks Save or Cancel; navigates Home on save.
-   */
+   // Show an inline overlay to name the session and persist via storage service.
+   //Resolves after user clicks Save or Cancel; navigates Home on save.
+  //create a Promise that resolves after user action (Save/Cancel)
   async showSaveSessionPrompt(entry: any): Promise<void> {
     return new Promise((resolve) => {
-      // create overlay
+
+      // Create full-screen overlay element and style it
       const overlay = document.createElement('div');
       overlay.style.position = 'fixed';
       overlay.style.left = '0';
@@ -925,7 +1008,8 @@ addEntry() {
       overlay.style.alignItems = 'center';
       overlay.style.justifyContent = 'center';
       overlay.style.zIndex = '9999';
-
+     
+      //Create dialog box (card) and style
       const box = document.createElement('div');
       // box.style.background = '#fff';
       box.style.border = '1px solid transparent';
@@ -935,6 +1019,7 @@ addEntry() {
       box.style.minWidth = '300px';
       box.style.boxShadow = '0 6px 30px rgba(0,0,0,0.3)';
 
+      //Title, optional label and input field for session name
       const title = document.createElement('div');
       title.innerText = 'Save Session';
       title.style.fontWeight = '700';
@@ -954,10 +1039,12 @@ addEntry() {
       input.style.border = '1px solid #ccc';
       input.style.borderRadius = '4px';
 
+     //Create the bottom row for the Cancel and Save buttons and style them
       const btnRow = document.createElement('div');
       btnRow.style.display = 'flex';
       btnRow.style.justifyContent = 'flex-end';
       btnRow.style.gap = '8px';
+
 
       const cancelBtn = document.createElement('button');
       cancelBtn.innerText = 'Cancel';
@@ -982,12 +1069,15 @@ addEntry() {
       saveBtn.style.color = '#fff';
       saveBtn.style.borderRadius = '6px';
       saveBtn.style.cursor = 'pointer';
-
+       
+      //Create Cancel and Save buttons and style them
       cancelBtn.addEventListener('click', () => {
         try { document.body.removeChild(overlay); } catch (e) {}
         resolve();
       });
 
+      //read input, call ImageStorageService to add or create session, 
+      //remove overlay, alert, navigate, resolve
       saveBtn.addEventListener('click', async () => {
         try {
           const val = input.value && input.value.trim().length > 0 ? input.value.trim() : `Session ${new Date().toLocaleString()}`;
@@ -1022,7 +1112,8 @@ addEntry() {
         }
         resolve();
       });
-
+      
+      //Append elements to compose the dialog, add to document, and focus input
       btnRow.appendChild(cancelBtn);
       btnRow.appendChild(saveBtn);
 

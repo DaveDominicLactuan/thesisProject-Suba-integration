@@ -79,6 +79,8 @@ signupForm: FormGroup;
       //  replacing history so back exits
       try { localStorage.setItem('isLoggedIn', 'true'); } catch {}
       console.log('[LoginPage] navigating to /home-page');
+
+      //only remove login page from history stack in the browser, replaceUrl true does that
       this.router.navigateByUrl('/home-page', { replaceUrl: true });
 
 
