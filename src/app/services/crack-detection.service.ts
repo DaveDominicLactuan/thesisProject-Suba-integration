@@ -1,15 +1,16 @@
 import { Injectable } from '@angular/core';
-import { BoundingBox } from '../image-storage.service';
+import { BoundingBox, BoxPrediction } from '../types';
 import { Capacitor } from '@capacitor/core';
-// We'll dynamically import onnxruntime-web at runtime so we can set wasmPaths
-// before the library attempts to load helper modules. This avoids module
-// specifier resolution errors in browsers and mobile WebViews.
+
 let ort: any = null;
 
 const TYPE_CLASSES = ['branching', 'diagonal', 'horizontal', 'map/web', 'vertical'];
 const SHAPE_CLASSES = ['branching', 'curved', 'mapped/network', 'straight'];
 const SEVERITY_CLASSES = ['hairline', 'minor', 'moderate', 'severe'];
 
+export type InferenceResult = {
+  boxes: BoxPrediction[];
+};
 
 @Injectable({
   providedIn: 'root'
@@ -17,33 +18,25 @@ const SEVERITY_CLASSES = ['hairline', 'minor', 'moderate', 'severe'];
 export class CrackDetectionService {
   private session: any = null;
 
-  /** Initialize ONNX Runtime Web session */
   private async init() {
     if (!this.session) {
-      // Dynamic import ONNX runtime if not already loaded
       if (!ort) {
         ort = await import('onnxruntime-web');
       }
 
-      // Detect environment: file://, Capacitor-localhost, or normal http(s)
       const isFileProtocol = (typeof location !== 'undefined') && location.protocol === 'file:';
       const origin = (typeof location !== 'undefined' && location.origin) ? location.origin : '';
       const isCapacitorLocal = origin.startsWith('capacitor://') || origin.includes('localhost');
 
-      // Choose wasmPaths appropriate for environment. For embedded file:// apps use relative
-      // assets; for http(s) and capacitor://localhost use origin-absolute so module specifiers
-      // resolve to full URLs (avoids 404s for helper .mjs/.wasm files).
       if (ort.env && ort.env.wasm) {
         const wasmBase = (isFileProtocol && !isCapacitorLocal) ? 'assets/onnx/' : `${origin}/assets/onnx/`;
         ort.env.wasm.wasmPaths = wasmBase;
-        console.log('[CrackDetectionService] set wasmPaths =', ort.env.wasm.wasmPaths);
       }
 
-      // Build model path similarly. Use origin when available to ensure absolute URL in WebViews.
-      const modelPath = (isFileProtocol && !isCapacitorLocal) ? 'assets/onnx/crack_multihead_cnn_with_mask.onnx' : `${origin}/assets/onnx/crack_multihead_cnn_with_mask.onnx`;
-      console.log('[CrackDetectionService] modelPath =', modelPath, 'origin=', origin, 'isFileProtocol=', isFileProtocol, 'isCapacitorLocal=', isCapacitorLocal);
+      const modelPath = (isFileProtocol && !isCapacitorLocal) ? 
+        'assets/onnx/crack_multihead_cnn_with_mask.onnx' : 
+        `${origin}/assets/onnx/crack_multihead_cnn_with_mask.onnx`;
 
-      // Try fetching model bytes first (works on both file:// and http when accessible).
       try {
         const resp = await fetch(modelPath);
         if (!resp.ok) throw new Error(`Model fetch failed: ${resp.status}`);
@@ -51,112 +44,122 @@ export class CrackDetectionService {
         const bytes = new Uint8Array(buf);
         this.session = await ort.InferenceSession.create(bytes, { executionProviders: ['wasm'] });
       } catch (err) {
-        // Fallback to letting ORT load via URL (some environments prefer that)
         console.warn('[CrackDetectionService] Model fetch failed, falling back to URL create:', err);
-        try {
-          this.session = await ort.InferenceSession.create(modelPath, { executionProviders: ['wasm'] });
-        } catch (err2) {
-          console.error('[CrackDetectionService] Failed to create session from URL:', err2);
-          throw err2;
-        }
+        this.session = await ort.InferenceSession.create(modelPath, { executionProviders: ['wasm'] });
       }
-      console.log("✅ ORT session initialized");
+
+      console.log('✅ ORT session initialized');
     }
   }
 
-  /** Run inference on a Float32Array image tensor [1,3,128,128] */
-  async runInference(inputTensor: Float32Array) {
-    try {
-      await this.init();
+  async runInference(
+    imageTensor: Float32Array, // [1,3,H,W]
+    imageWidth: number,
+    imageHeight: number
+  ): Promise<InferenceResult> {
 
-      const tensor = new ort.Tensor('float32', inputTensor, [1, 3, 128, 128]);
-      const feeds: Record<string, any> = { input: tensor };
+    await this.init();
 
-      const results = await this.session.run(feeds);
+    // get mask first
+    const baseTensor = new ort.Tensor('float32', imageTensor, [1, 3, imageHeight, imageWidth]);
+    const results = await this.session.run({ input: baseTensor });
 
-      console.log(
-        '[ORT OUTPUTS]',
-        Object.entries(results).map(([name, t]: any) => ({
-          name,
-          dims: t.dims,
-          length: t.data?.length
-        }))
+    const mask = results['mask'];
+    if (!mask) {
+      throw new Error('Model did not output mask');
+    }
+
+    // retrieve box
+    const boxes = this.maskToBBoxes(
+      mask.data,
+      mask.dims[3],
+      mask.dims[2],
+      0.5,
+      10
+    );
+
+    // classify per box
+    const predictions: BoxPrediction[] = [];
+
+    for (const box of boxes) {
+      const cropTensor = this.cropAndResize(
+        imageTensor,
+        imageWidth,
+        imageHeight,
+        box,
+        128,
+        128
       );
 
-      return this.mapResults(results);
-    } catch (err) {
-      console.warn('[CrackDetectionService] runInference failed — returning fallback prediction:', err);
-      // Return a harmless fallback so UI flow and storage still work on device when model fails
-      return {
-        severity: 'minor',
-        shape: 'straight',
-        type: 'horizontal'
-      };
-    }
-  }
+      const cropOrtTensor = new ort.Tensor('float32', cropTensor, [1, 3, 128, 128]);
+      const cropResults = await this.session.run({ input: cropOrtTensor });
 
-  /** Convert raw ONNX output to class labels */
-  private mapResults(results: Record<string, any>) {
-    console.log("🧪 Raw results:", results);
-    const out: any = {
-      severity: SEVERITY_CLASSES[this.argmax(results['severity'].data as Float32Array)],
-      shape: SHAPE_CLASSES[this.argmax(results['shape'].data as Float32Array)],
-      type: TYPE_CLASSES[this.argmax(results['type'].data as Float32Array)]
-    };
-
-    // If model produces a mask output (common name: 'mask'), extract bounding boxes
-    try {
-      const maskOutput = results['mask'] || results['masks'] || results['pred_mask'];
-      if (maskOutput && maskOutput.data) {
-        const data = maskOutput.data as Float32Array | number[];
-        const dims = Array.isArray(maskOutput.dims) ? maskOutput.dims as number[] : [];
-        // Infer H, W from dims (take last two dims)
-        let maskH = 0, maskW = 0;
-        if (dims.length >= 2) {
-          maskW = dims[dims.length - 1];
-          maskH = dims[dims.length - 2];
-        } else if ((data as any).length) {
-          const n = (data as any).length;
-          const side = Math.round(Math.sqrt(n));
-          if (side * side === n) { maskW = maskH = side; }
+      predictions.push({
+        x: box.x,
+        y: box.y,
+        w: box.w,
+        h: box.h,
+        type: TYPE_CLASSES[this.argmax(cropResults['type'].data)],
+        shape: SHAPE_CLASSES[this.argmax(cropResults['shape'].data)],
+        severity: SEVERITY_CLASSES[this.argmax(cropResults['severity'].data)],
+        prediction: {
+          type: TYPE_CLASSES[this.argmax(cropResults['type'].data)],
+          shape: SHAPE_CLASSES[this.argmax(cropResults['shape'].data)],
+          severity: SEVERITY_CLASSES[this.argmax(cropResults['severity'].data)]
         }
-
-        // Call maskToBBoxes with flat data and inferred dims
-        const boxes = this.maskToBBoxes(data as any, maskW || undefined, maskH || undefined, 0.5, 10);
-        out.boxes = boxes;
-        if (maskW && maskH) {
-          out.maskWidth = maskW;
-          out.maskHeight = maskH;
-        }
-      }
-    } catch (e) {
-      // ignore mask processing errors
-      console.warn('[CrackDetectionService] mask processing failed', e);
+      });
     }
 
-    return out;
+    return { boxes: predictions };
   }
 
-  /** Safe argmax for Float32Array or number[] */
   private argmax(arr: Float32Array | number[]): number {
-    const nums = Array.from(arr); // avoid TS reduce error
+    const nums = Array.from(arr);
     return nums.reduce((maxIdx, val, i) => val > nums[maxIdx] ? i : maxIdx, 0);
   }
 
-  /**
-   * Convert a predicted mask array into bounding boxes.
-   * Accepts a flat array (row-major) or typed array of length width*height,
-   * or a 2D nested array (number[][]) where inner arrays are rows.
-   * Returns bounding boxes in {x,y,w,h} format filtered by minArea (pixels).
-   */
-  maskToBBoxes(mask: Float32Array | Uint8Array | number[] | number[][], width?: number, height?: number, threshold = 0.5, minArea = 10): BoundingBox[] {
-    // Normalize input to a flat Uint8 binary mask of 0/1 values
+  private cropAndResize(
+    input: Float32Array,
+    W: number,
+    H: number,
+    box: BoundingBox,
+    outW: number,
+    outH: number
+  ): Float32Array {
+    const output = new Float32Array(3 * outW * outH);
+
+    for (let c = 0; c < 3; c++) {
+      for (let oy = 0; oy < outH; oy++) {
+        for (let ox = 0; ox < outW; ox++) {
+          const srcX = Math.floor(box.x + (ox / outW) * box.w);
+          const srcY = Math.floor(box.y + (oy / outH) * box.h);
+
+          const clampedX = Math.max(0, Math.min(W - 1, srcX));
+          const clampedY = Math.max(0, Math.min(H - 1, srcY));
+
+          const srcIdx = c * W * H + clampedY * W + clampedX;
+          const dstIdx = c * outW * outH + oy * outW + ox;
+
+          output[dstIdx] = input[srcIdx];
+        }
+      }
+    }
+
+    return output;
+  }
+
+  maskToBBoxes(
+    mask: Float32Array | Uint8Array | number[] | number[][],
+    width?: number,
+    height?: number,
+    threshold = 0.5,
+    minArea = 10
+  ): BoundingBox[] {
     let w = width as number;
     let h = height as number;
     let flat: Uint8Array;
 
     if (Array.isArray(mask) && mask.length > 0 && Array.isArray(mask[0])) {
-      // mask is number[][] rows
       const rows = mask as number[][];
       h = rows.length;
       w = rows[0].length;
@@ -168,36 +171,24 @@ export class CrackDetectionService {
         }
       }
     } else {
-      // 1D typed/number array
       const arr = mask as Float32Array | Uint8Array | number[];
-      if ((w === undefined || h === undefined) && arr.length) {
-        // if only one dimension provided, try to infer square shape
-        if (!w || !h) {
-          const n = arr.length;
-          const side = Math.round(Math.sqrt(n));
-          if (side * side === n) {
-            w = side; h = side;
-          } else if (!w && height) {
-            h = height; w = Math.floor(n / h);
-          } else if (!h && width) {
-            w = width; h = Math.floor(n / w);
-          } else {
-            // fallback: treat as 1-row
-            w = n; h = 1;
-          }
-        }
+      if ((!w || !h) && arr.length) {
+        const n = arr.length;
+        const side = Math.round(Math.sqrt(n));
+        if (side * side === n) { w = side; h = side; }
+        else if (!w && height) { h = height; w = Math.floor(n / h); }
+        else if (!h && width) { w = width; h = Math.floor(n / w); }
+        else { w = n; h = 1; }
       }
       flat = new Uint8Array(w * h);
       for (let i = 0; i < Math.min(arr.length, w * h); i++) {
-        const val = (arr as any)[i];
-        flat[i] = (val >= threshold) ? 1 : 0;
+        flat[i] = (arr as any)[i] >= threshold ? 1 : 0;
       }
     }
 
     const visited = new Uint8Array(w * h);
     const boxes: BoundingBox[] = [];
 
-    // helper to push neighbor index
     const pushIf = (idx: number, stack: number[]) => {
       if (idx >= 0 && idx < flat.length && flat[idx] && !visited[idx]) stack.push(idx);
     };
@@ -207,7 +198,6 @@ export class CrackDetectionService {
         const idx = y * w + x;
         if (!flat[idx] || visited[idx]) continue;
 
-        // BFS / flood fill to find connected component
         const stack = [idx];
         let minX = x, maxX = x, minY = y, maxY = y;
         let area = 0;
@@ -224,7 +214,6 @@ export class CrackDetectionService {
           if (cy < minY) minY = cy;
           if (cy > maxY) maxY = cy;
 
-          // 4-neighbors
           const left = cur - 1;
           const right = cur + 1;
           const up = cur - w;
@@ -236,7 +225,7 @@ export class CrackDetectionService {
         }
 
         if (area >= minArea) {
-          boxes.push({ x: minX, y: minY, w: maxX - minX + 1, h: maxY - minY + 1 });
+          boxes.push({ x: minX, y: minY, w: maxX - minX + 1, h: maxY - minY + 1, type: 'unknown', shape: 'unknown', severity: 'unknown' });
         }
       }
     }

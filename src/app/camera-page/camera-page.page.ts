@@ -6,12 +6,9 @@ import { Camera, CameraResultType, CameraSource } from '@capacitor/camera';
 import { Capacitor } from '@capacitor/core';
 import { CrackDetectionService } from '../services/crack-detection.service';
 import { ImageStorageService, StoredImage } from '../services/image-storage.service';
+import { BoxPrediction } from '../types';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-
-// declare var ort: any;
-
-// ort.env.wasm.wasmPaths = 'assets/onnx/';
 
 interface BoundingBox {
   x: number;
@@ -43,7 +40,6 @@ export class CameraPagePage implements AfterViewInit {
 
   imagePreview: string | null = null;
   capturedImages: string[] = [];
-  // authoritative list of images stored via ImageStorageService
   storedImages: StoredImage[] = [];
   usingFrontCamera = false;
   mediaStream: MediaStream | null = null;
@@ -79,10 +75,6 @@ export class CameraPagePage implements AfterViewInit {
     await this.processDataUrl(dataUrl, file.name);
   }
 
-  /**
-   * Mobile image picker — attempts to use Capacitor Photos API and forwards result to processDataUrl
-   * Mirrors the behaviour in upload-image-page.pickImagesMobile
-   */
   async pickImagesMobile() {
     try {
       const photo = await Camera.getPhoto({
@@ -95,7 +87,6 @@ export class CameraPagePage implements AfterViewInit {
       if (photo && photo.base64String) {
         const dataUrl = `data:image/jpeg;base64,${photo.base64String}`;
         const filename = this.generateFilename();
-        // reuse existing processing pipeline
         await this.processDataUrl(dataUrl, filename);
       } else {
         console.warn('pickImagesMobile: no photo returned');
@@ -106,24 +97,21 @@ export class CameraPagePage implements AfterViewInit {
   }
 
   async processDataUrl(dataUrl: string, filename: string) {
-    // mimic upload-image-page behaviour: preprocess, run inference, store
-    // this.imagePreview = dataUrl;
     this.capturedImages.unshift(dataUrl);
     this.isProcessing = true;
 
-    let prediction: any = null;
+    let result: any = null;
     try {
       const tensor = await this.preprocessImage(dataUrl);
-      // guard inference with timeout to avoid device hangs
       const inferenceTimeoutMs = 20_000; // 20s
       try {
-        prediction = await Promise.race([
-          this.crackDetectionService.runInference(tensor),
+        result = await Promise.race([
+          this.crackDetectionService.runInference(tensor, 128, 128),
           new Promise((_, rej) => setTimeout(() => rej(new Error('inference-timeout')), inferenceTimeoutMs))
         ]);
       } catch (infErr) {
         console.warn('Inference error/timeout during upload processing', infErr);
-        prediction = null;
+        result = null;
       }
     } catch (e) {
       console.warn('Inference failed during upload processing', e);
@@ -133,23 +121,27 @@ export class CameraPagePage implements AfterViewInit {
       original: dataUrl,
       timestamp: new Date().toISOString(),
       filename,
-      prediction: prediction || undefined
+      prediction: result || undefined
     };
     await this.imageStorage.addImage(entry);
-    // update UI counters from authoritative storage
+
+    if (result && Array.isArray(result.boxes) && result.boxes.length > 0) {
+      this.lastPrediction = null; // optional: you can summarize all later if needed
+      this.extraText = `✅ Detected ${result.boxes.length} boxes`;
+      result.boxes.forEach((b: BoxPrediction, idx: number) => {
+        console.log(`Box ${idx + 1}: type=${b.type}, shape=${b.shape}, severity=${b.severity}`);
+      });
+    } else {
+      this.lastPrediction = null;
+      this.extraText = '✅ No boxes detected';
+    }
+
     try { await this.updatePhotoCounts(); } catch (e) { /* ignore */ }
     this.isProcessing = false;
   }
 
-  toggleFlash() {
-    // stub — native flash control would require plugin access
-    console.log('toggleFlash pressed (stub)');
-  }
-
-  openMore() {
-    // stub for 'more' menu
-    console.log('openMore pressed (stub)');
-  }
+  toggleFlash() { console.log('toggleFlash pressed (stub)'); }
+  openMore() { console.log('openMore pressed (stub)'); }
 
   constructor(
     private platform: Platform,
@@ -162,8 +154,7 @@ export class CameraPagePage implements AfterViewInit {
   }
 
   ngAfterViewInit() {
-
-     if (this.backButtonSub) {
+    if (this.backButtonSub) {
       try {
         this.backButtonSub.unsubscribe();
         this.backButtonSub = null;
@@ -171,12 +162,9 @@ export class CameraPagePage implements AfterViewInit {
         console.warn('[UploadImagePage] failed to unsubscribe back button handler', e);
       }
     }
-  
-  
     this.platform.ready().then(() => this.initCamera());
   }
 
-  /** Initialize live camera feed */
   async initCamera() {
     if (Capacitor.getPlatform() === 'android' || Capacitor.getPlatform() === 'ios') {
       const permissions = await Camera.requestPermissions();
@@ -196,12 +184,7 @@ export class CameraPagePage implements AfterViewInit {
       this.mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
       const videoEl = this.videoRef.nativeElement;
       videoEl.srcObject = this.mediaStream;
-      await new Promise<void>(resolve => {
-        videoEl.onloadedmetadata = () => {
-          videoEl.play();
-          resolve();
-        };
-      });
+      await new Promise<void>(resolve => { videoEl.onloadedmetadata = () => { videoEl.play(); resolve(); }; });
       console.log('✅ Live camera preview started');
     } catch (error) {
       console.error('Camera access error:', error);
@@ -209,14 +192,9 @@ export class CameraPagePage implements AfterViewInit {
     }
   }
 
-  /** Capture a frame, preprocess, run inference, and save result */
   async takePicture() {
-    // Ensure UI shows processing state immediately
     this.isProcessing = true;
-     // bump taken so spinner shows while inference runs
-     this.photosTaken += 1;
-    // photosTaken will be synchronized from storage after save; do not increment locally here
-    // track whether inference was invoked and whether it succeeded
+    this.photosTaken += 1;
     let inferenceCalled = false;
     let inferenceSucceeded = false;
 
@@ -224,104 +202,61 @@ export class CameraPagePage implements AfterViewInit {
       const video = this.videoRef.nativeElement;
       const canvas = this.canvasRef.nativeElement;
       const ctx = canvas.getContext('2d')!;
-
       canvas.width = video.videoWidth;
       canvas.height = video.videoHeight;
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-
       const dataUrl = canvas.toDataURL('image/png');
-      // this.imagePreview = dataUrl;
       this.capturedImages.unshift(dataUrl);
 
-  // Preprocess → inference → save
-  const imageTensor = await this.preprocessImage(dataUrl);
-  // call the backend/model
-  let prediction = null;
-  try {
-    prediction = await this.crackDetectionService.runInference(imageTensor);
-    inferenceCalled = true;
-    inferenceSucceeded = true;
-  } catch (e) {
-    console.warn('Inference failed:', e);
-    inferenceCalled = true;
-    inferenceSucceeded = false;
-  }
+      const imageTensor = await this.preprocessImage(dataUrl);
+      let result: any = null;
+      try {
+        result = await this.crackDetectionService.runInference(imageTensor, canvas.width, canvas.height);
+        inferenceCalled = true;
+        inferenceSucceeded = true;
+      } catch (e) {
+        console.warn('Inference failed:', e);
+        inferenceCalled = true;
+        inferenceSucceeded = false;
+      }
 
       const now = new Date().toISOString();
       const filename = this.generateFilename();
-
       const entry: StoredImage = {
         original: dataUrl,
         timestamp: now,
         filename,
-        prediction: prediction || undefined,
-        hasPrediction: !!prediction,
+        prediction: result || undefined,
+        hasPrediction: !!result,
         statusMessage: inferenceSucceeded ? 'Prediction succeeded' : (inferenceCalled ? 'Prediction failed' : 'No prediction')
       };
-      await this.imageStorage.addImage(entry); // persists via @ionic/storage
+      await this.imageStorage.addImage(entry);
       this.savedImage = entry;
-      this.lastPrediction = prediction;
 
-      // update UI counters from authoritative storage
-      try { await this.updatePhotoCounts(); } catch (e) { /* ignore */ }
-
-      // Keep console.log before clearing isProcessing so callers/UI see processing until logging completes
-      console.log('✅ Prediction stored:', prediction);
-      // Print all currently stored images to verify persistence
-      try {
-        // getAllImages might be synchronous (returns array) or asynchronous in other implementations.
-        const allOrPromise = this.imageStorage.getAllImages();
-        let all: any[];
-        if (allOrPromise && typeof (allOrPromise as any).then === 'function') {
-          // await the promise-like value
-          all = await (allOrPromise as any);
-        } else {
-          all = allOrPromise as any;
-        }
-        // Stringify for more reliable remote/device console output, and also print a table if possible
-        try {
-          console.log('📂 Currently stored images (latest first):', JSON.stringify(all));
-          if (Array.isArray(all) && (console as any).table) (console as any).table(all);
-        } catch (e) {
-          console.log('📂 Currently stored images (latest first):', all);
-        }
-      } catch (logErr) {
-        console.warn('Failed to read stored images for verification:', logErr);
-      }
-
-      // Set a user-facing message depending on whether inference ran/succeeded
-      if (inferenceCalled && inferenceSucceeded && prediction) {
-        // TypeScript can't infer that `prediction` is non-null from the booleans above,
-        // so check explicitly before accessing properties.
-        const { type, shape, severity } = prediction;
-        this.extraText = `✅ Inference: ${type}, ${shape}, ${severity}`;
-      } else if (inferenceCalled && !inferenceSucceeded) {
-        this.extraText = '⚠️ Inference was called but failed.';
+      if (result && Array.isArray(result.boxes) && result.boxes.length > 0) {
+        this.lastPrediction = null; // optional: you can summarize all later if needed
+        this.extraText = `✅ Detected ${result.boxes.length} boxes`;
+        result.boxes.forEach((b: BoxPrediction, idx: number) => {
+          console.log(`Box ${idx + 1}: type=${b.type}, shape=${b.shape}, severity=${b.severity}`);
+        });
       } else {
-        this.extraText = '⚠️ Inference was not called.';
+        this.lastPrediction = null;
+        this.extraText = inferenceSucceeded ? '✅ No boxes detected' : '⚠️ Inference failed';
       }
+
+      try { await this.updatePhotoCounts(); } catch (e) { /* ignore */ }
+      console.log('✅ Prediction stored:', result);
+
     } catch (err) {
       console.error('Failed to take picture / run inference:', err);
-      // If inference was called but threw, mark as such
-      if (inferenceCalled && !inferenceSucceeded) {
-        this.extraText = '❌ Inference call failed. See console for details.';
-      } else if (!inferenceCalled) {
-        this.extraText = '❌ Capture or preprocessing failed before inference.';
-      } else {
-        this.extraText = '❌ Unknown error during capture/inference.';
-      }
+      this.extraText = '❌ Capture or inference failed.';
       alert('Failed to capture/process image. See console for details.');
     } finally {
-      // Increment processed locally so spinner stops promptly when inference succeeded
-      if (inferenceSucceeded) {
-        this.photosProcessed += 1;
-      }
-      // Always clear processing flag so UI is responsive again
+      if (inferenceSucceeded) this.photosProcessed += 1;
       this.isProcessing = false;
     }
   }
 
-  /** Resize + normalize image to [1,3,128,128] Float32Array */
   async preprocessImage(dataUrl: string): Promise<Float32Array> {
     const img = new Image();
     img.src = dataUrl;
@@ -337,17 +272,13 @@ export class CameraPagePage implements AfterViewInit {
     const data = new Float32Array(1 * 3 * 128 * 128);
 
     for (let i = 0; i < 128 * 128; i++) {
-      data[i] = (imageData.data[i * 4] / 255 - 0.5) / 0.5;           // R
-      data[i + 128 * 128] = (imageData.data[i * 4 + 1] / 255 - 0.5) / 0.5; // G
-      data[i + 2 * 128 * 128] = (imageData.data[i * 4 + 2] / 255 - 0.5) / 0.5; // B
+      data[i] = (imageData.data[i * 4] / 255 - 0.5) / 0.5;
+      data[i + 128 * 128] = (imageData.data[i * 4 + 1] / 255 - 0.5) / 0.5;
+      data[i + 2 * 128 * 128] = (imageData.data[i * 4 + 2] / 255 - 0.5) / 0.5;
     }
-
     return data;
   }
 
-  /**
-   * Synchronize photosTaken/photosProcessed from the ImageStorageService
-   */
   async updatePhotoCounts() {
     try {
       const all: StoredImage[] = await this.imageStorage.getAllImages();
@@ -360,57 +291,24 @@ export class CameraPagePage implements AfterViewInit {
     }
   }
 
-  closePreview() {
-    // this.imagePreview = null;
-  }
-
-  toggleCamera() {
-    this.usingFrontCamera = !this.usingFrontCamera;
-    this.initCamera();
-  }
-
-  filterThumbnails(type: string) {
-    //Optional: filtering logic by image origin
-  }
-
-  goToFeedBackPage() {
-    this.router.navigate(['/feedback-page']);
-    console.log('Navigating to Feedback page');
-  }
-
-  goToHomePage() {
-    this.router.navigate(['/home-page']);
-    console.log('Navigating to Sign Up page');
-  }
-
-  onBoxClick(box: any) {
-    // Your bounding box logic
-  }
+  closePreview() { }
+  toggleCamera() { this.usingFrontCamera = !this.usingFrontCamera; this.initCamera(); }
+  filterThumbnails(type: string) { }
+  goToFeedBackPage() { this.router.navigate(['/feedback-page']); console.log('Navigating to Feedback page'); }
+  goToHomePage() { this.router.navigate(['/home-page']); console.log('Navigating to Sign Up page'); }
+  onBoxClick(box: any) { }
 
   async requestCameraPermission() {
-    // Only request Capacitor Camera permissions on native platforms.
     try {
       const platform = Capacitor.getPlatform();
       if (platform === 'android' || platform === 'ios') {
         const permission = await Camera.requestPermissions();
-
-        if (permission.camera === 'granted') {
-          console.log('✅ Camera permission granted');
-          this.initCamera(); // Call your custom camera init
-        } else {
-          alert('❌ Camera permission denied. Please allow it in system settings.');
-        }
-      } else {
-        // Web: permissions handled by the browser when calling getUserMedia
-        console.log('Skipping Capacitor Camera.requestPermissions on web platform:', platform);
-        // still attempt to init the camera for browser
-        this.initCamera();
-      }
+        if (permission.camera === 'granted') this.initCamera();
+        else alert('❌ Camera permission denied. Please allow it in system settings.');
+      } else this.initCamera();
     } catch (error) {
-      // Some Capacitor methods throw on web (Not implemented) — ignore but log.
       console.warn('Permission request failed (continuing):', error);
-      // Attempt to initialize camera using browser APIs as a fallback
-      try { await this.initCamera(); } catch (e) { /* ignore */ }
+      try { await this.initCamera(); } catch (e) { }
     }
   }
 
@@ -421,22 +319,9 @@ export class CameraPagePage implements AfterViewInit {
     return `P${this.photosTaken}${hh}${mm}.jpg`;
   }
 
-  ngOnDestroy() {
-    this.mediaStream?.getTracks().forEach(track => track.stop());
-  }
-
-  goBack() {
-    try {
-      this.router.navigateByUrl('/home-page');
-    } catch (e) {
-      window.history.back();
-    }
-  }
-
-  // shim so templates can call onBack()
-  onBack() {
-    this.goBack();
-  }
+  ngOnDestroy() { this.mediaStream?.getTracks().forEach(track => track.stop()); }
+  goBack() { try { this.router.navigateByUrl('/home-page'); } catch (e) { window.history.back(); } }
+  onBack() { this.goBack(); }
 
   async drawBoxesOnImage(Base64: string, boxes: BoundingBox[]): Promise<string> {
     const img = new Image();
@@ -461,13 +346,11 @@ export class CameraPagePage implements AfterViewInit {
   base64ToBlob(base64Data: string, contentType = ''): Blob {
     const byteCharacters = atob(base64Data);
     const byteArrays = [];
-
     for (let offset = 0; offset < byteCharacters.length; offset += 512) {
       const slice = byteCharacters.slice(offset, offset + 512);
       const byteNumbers = Array.from(slice).map(c => c.charCodeAt(0));
       byteArrays.push(new Uint8Array(byteNumbers));
     }
-
     return new Blob(byteArrays, { type: contentType });
   }
 
@@ -480,10 +363,19 @@ export class CameraPagePage implements AfterViewInit {
     });
 
     const imageTensor = await this.preprocessImage(dataUrl);
-    const prediction = await this.crackDetectionService.runInference(imageTensor);
+    const result = await this.crackDetectionService.runInference(imageTensor, 128, 128);
+    console.log("🧪 Test Prediction:", result);
 
-    console.log("🧪 Test Prediction:", prediction);
-    this.lastPrediction = prediction;
+    if (result && Array.isArray(result.boxes) && result.boxes.length > 0) {
+      this.lastPrediction = null;
+      this.extraText = `✅ Detected ${result.boxes.length} boxes`;
+      result.boxes.forEach((b, idx) => {
+        console.log(`Box ${idx + 1}: type=${b.type}, shape=${b.shape}, severity=${b.severity}`);
+      });
+    } else {
+      this.lastPrediction = null;
+      this.extraText = '✅ No boxes detected';
+    }
   }
 
   async onFileSelected(event: Event) {
@@ -491,29 +383,15 @@ export class CameraPagePage implements AfterViewInit {
     if (!input || !input.files || input.files.length === 0) return;
 
     const fileArray = Array.from(input.files);
-
-    // Immediately update counters so UI shows the spinner/count right away
     this.photosTaken += fileArray.length;
     this.isProcessing = true;
-
-    // yield to the event loop so the spinner can render before heavy work
     await new Promise(resolve => setTimeout(resolve, 20));
 
     for (const f of fileArray) {
-      try {
-        // reuse existing processFile flow which reads, preprocesses, runs inference and stores
-        await this.processFile(f);
-      } catch (e) {
-        console.warn('Error processing selected file', e);
-        // ensure spinner can clear if something went wrong
-        this.photosProcessed++;
-      }
+      try { await this.processFile(f); } catch (e) { console.warn('Error processing selected file', e); this.photosProcessed++; }
     }
 
-    // Clear the input value so selecting the same file(s) again will trigger change event
-    try { input.value = ''; } catch (e) { /* ignore */ }
-
-    // turn off processing if everything finished
+    try { input.value = ''; } catch (e) { }
     if (this.photosProcessed >= this.photosTaken) this.isProcessing = false;
   }
 }

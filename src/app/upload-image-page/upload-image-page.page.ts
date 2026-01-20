@@ -1,4 +1,3 @@
-
 import { AfterViewInit, Component, ElementRef, OnDestroy, ViewChild, ChangeDetectorRef } from '@angular/core';
 import { Platform } from '@ionic/angular';
 import { Router } from '@angular/router';
@@ -7,17 +6,18 @@ import { DomSanitizer } from '@angular/platform-browser';
 // NOTE: these services exist in the project workspace; keep imports as they are in repo
 import { CrackDetectionService } from '../services/crack-detection.service';
 import { ImageStorageService, StoredImage } from '../services/image-storage.service';
+import { BoundingBox, BoxPrediction } from '../types';
 
 // Capacitor/Camera/Filesystem imports (used conditionally in mobile flows)
 import { Capacitor } from '@capacitor/core';
 import { Camera, CameraResultType, CameraSource } from '@capacitor/camera';
 
-// Basic bounding box types used in drawing helper
-interface BoundingBox {
+export interface ScaledBox {
   x: number;
   y: number;
   w: number;
   h: number;
+  original: BoundingBox;
 }
 
 console.log('CameraPagePage component file loaded');
@@ -46,21 +46,21 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
   photosTaken = 0;
   photosProcessed = 0;
   savedImage: StoredImage | null = null;
-  lastPrediction: { type: string; shape: string; severity: string } | null = null;
+  lastPrediction: BoxPrediction[] | null = null;
 
   // --- Gallery / testing helpers (from feedback-page) ---
   interfaceDisplayImageDummy = true; // harmless flag so source compiles when referencing DisplayImage
 
   // Small type inside the class to avoid import churn
   // DisplayImage: { original, withBoxes, fileName?, detectionMessage?, detectionResult?, rawPrediction?, statusMessage? }
-  imagePaths: Array<any> = []; // populated from stored images or test assets
+  imagePaths: { original: string; withBoxes: string; fileName: string; rawPrediction: BoxPrediction[] }[] = [];
   showWithBoxes = false;
   selectedImage: string = '';
   selectedImageTitle: string = '';
   includeTestAssets = true; // set to false after testing to remove placeholder assets
   // debug panel and selected prediction
   showDebugPanel = false;
-  selectedPrediction: { type?: string; shape?: string; severity?: string } | null = null;
+  selectedPrediction: BoxPrediction[] | null = null;
   selectedStatusMessage: string = '';
 
   scaledBoxes: ScaledBox[] = [];
@@ -184,20 +184,51 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
           const imgs: any[] = [];
           for (const k of session.imageKeys) {
             const e = (this.imageStorage as any).getEntryForImage ? (this.imageStorage as any).getEntryForImage(k) : undefined;
-            if (e) imgs.push({ original: e.original, withBoxes: (e as any).withBoxes || e.original, fileName: e.filename, rawPrediction: e.prediction });
+            if (e) imgs.push({ original: e.original, withBoxes: (e as any).withBoxes || e.original, fileName: e.filename, rawPrediction: e.predictions || [] });
           }
           this.imagePaths = imgs.concat([]);
         } else {
           this.imagePaths = [];
         }
       } else {
-        //if no session, then load global image list
-        const stored = await this.imageStorage.getAllImages();
-        this.imagePaths = (Array.isArray(stored) ? stored.map((s: StoredImage) => ({ original: s.original, withBoxes: (s as any).withBoxes || s.original, fileName: s.filename, rawPrediction: s.prediction })) : []).concat([]);
+        const stored : StoredImage[] = await this.imageStorage.getAllImages();
+
+        this.imagePaths = (Array.isArray(stored)
+          ? stored.map((s: StoredImage) => ({
+              original: s.original,
+              withBoxes: (s as any).withBoxes || s.original,
+              fileName: s.filename,
+              rawPrediction: s.predictions || []
+            }))
+          : []
+        ).concat([]);
       }
     } catch (e) {
       console.warn('[UploadImagePage] refreshDisplayedImages failed', e);
-      try { const all = await this.imageStorage.getAllImages(); this.imagePaths = Array.isArray(all) ? all.map((s: StoredImage) => ({ original: s.original, withBoxes: (s as any).withBoxes || s.original, fileName: s.filename, rawPrediction: s.prediction })) : []; } catch { this.imagePaths = []; }
+      try {
+        const all = await this.imageStorage.getAllImages();
+        this.imagePaths = Array.isArray(all)
+          ? all.map((s: StoredImage) => ({
+              original: s.original,
+              withBoxes: (s as any).withBoxes || s.original,
+              fileName: s.filename,
+              rawPrediction: Array.isArray(s.prediction)
+                ? s.prediction.map((p: any) => ({
+                    x: p.x || 0,
+                    y: p.y || 0,
+                    w: p.w || 0,
+                    h: p.h || 0,
+                    type: p.type || '',
+                    shape: p.shape || '',
+                    severity: p.severity || '',
+                    prediction: p.prediction || null
+                  }))
+                : []
+            }))
+          : [];
+      } catch {
+        this.imagePaths = [];
+      }
     }
   }
 
@@ -332,173 +363,192 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
     await this.processDataUrl(dataUrl, file.name);
   }
 
-  /** Helper to process a data URL (image) — runs inference and stores the image */
-  async processDataUrl(dataUrl: string, filename: string) {
-    // Update UI
-    this.imagePreview = dataUrl;
-    //prepend to captured images for thumbnail scroller
-    this.capturedImages.unshift(dataUrl);
-    // detect center thumbnail after UI update
-    setTimeout(() => this.detectCenterThumbnail(), 60);
-    //set processing as true to show indicator
-    this.isProcessing = true;
-    // yield to the event loop so the spinner can render/animate before heavy work
-    await this.sleep(50);
-    try { this.cdr.detectChanges(); } catch (e) { /* ignore */ }
+  private async cropImage(imageDataUrl: string, box: BoundingBox): Promise<string> {
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = box.w;
+        canvas.height = box.h;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(img, box.x, box.y, box.w, box.h, 0, 0, box.w, box.h);
+          resolve(canvas.toDataURL());
+        } else {
+          resolve(imageDataUrl);
+        }
+      };
+      img.src = imageDataUrl;
+    });
+  }
 
-    //set for tracking inference success/failure
-    let inferenceCalled = false;
-    let inferenceSucceeded = false;
-    //actual process and run interfrence
+  private getImageDimensions(dataUrl: string): Promise<{width: number, height: number}> {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => resolve({ width: img.width, height: img.height });
+      img.onerror = reject;
+      img.src = dataUrl;
+    });
+  }
+
+  /** Helper to process a data URL (image) — runs inference and stores the image */
+  async processDataUrl(dataUrl: string, filename: string, bumpCounters: boolean = true) {
+    this.capturedImages.unshift(dataUrl);
+    if (bumpCounters) this.photosTaken += 1;
+    this.isProcessing = true;
+
+    let inferenceAttempted = false;
+
+    const boxPredictions: BoxPrediction[] = [];
+
+    // Create the StoredImage entry first (TS happy)
+    const entry: StoredImage & { predictions: BoxPrediction[] } = {
+      original: dataUrl,
+      timestamp: new Date().toISOString(),
+      filename,
+      hasPrediction: false,
+      statusMessage: 'No prediction',
+      predictions: boxPredictions
+    };
+
     const doWork = async () => {
       let prediction: any = null;
+
       try {
-        inferenceCalled = true;
-        //converts the img dataURL into exact Float32 tensor the model expects
         const tensor = await this.preprocessImage(dataUrl);
-        // run the service to call the model to get back end data
+        const { width, height } = await this.getImageDimensions(dataUrl);
+        const inferenceTimeoutMs = 20_000;
+
         try {
-          prediction = await this.crackDetectionService.runInference(tensor);
-          inferenceSucceeded = !!prediction;
+          inferenceAttempted = true;
+          prediction = await Promise.race([
+            this.crackDetectionService.runInference(tensor, width, height),
+            new Promise((_, rej) =>
+              setTimeout(() => rej(new Error('inference-timeout')), inferenceTimeoutMs)
+            )
+          ]);
         } catch (infErr) {
-          console.warn('Inference error in processDataUrl', infErr);
-        }
-      } catch (err) {
-        console.warn('Preprocess failed in processDataUrl', err);
-      }
-      // Prepare storage entry or build StoredImage entry
-      const entry: StoredImage = {
-        original: dataUrl,
-        timestamp: new Date().toISOString(),
-        filename,
-        prediction: prediction || undefined,
-        hasPrediction: !!prediction,
-        statusMessage: prediction ? 'Prediction succeeded' : (inferenceCalled ? 'Prediction failed' : 'No prediction')
-      };
-
-      // If the model returned bounding boxes, create a "withBoxes" image and attach boxes
-      try {
-        // helper to compute a single box covering all predicted boxes
-        const computeAggregatedBox = (boxes: any[]) => {
-          if (!Array.isArray(boxes) || boxes.length === 0) return null;
-          let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-          boxes.forEach((b: any) => {
-            const bx = Number(b.x) || 0;
-            const by = Number(b.y) || 0;
-            const bw = Number(b.w) || 0;
-            const bh = Number(b.h) || 0;
-            minX = Math.min(minX, bx);
-            minY = Math.min(minY, by);
-            maxX = Math.max(maxX, bx + bw);
-            maxY = Math.max(maxY, by + bh);
-          });
-          return { x: minX, y: minY, w: Math.max(0, maxX - minX), h: Math.max(0, maxY - minY) };
-        };
-
-        if (prediction && Array.isArray(prediction.boxes) && prediction.boxes.length > 0) {
-          const rawBoxes = prediction.boxes;
-          // compute aggregated (max-extents) box and fallback to original boxes if aggregation fails
-          const agg = computeAggregatedBox(rawBoxes);
-          const boxesToDraw = agg ? [agg] : rawBoxes.map((b: any) => ({ x: b.x, y: b.y, w: b.w, h: b.h }));
-
-          const maskW = prediction.maskWidth || prediction.maskW || 128;
-          const maskH = prediction.maskHeight || prediction.maskH || 128;
-         // try to create withBoxes image with drawn boxes based on the bouding box data
-          try {
-            const withBoxesDataUrl = await this.drawBoxesOnImage(dataUrl, boxesToDraw, maskW, maskH);
-            (entry as any).withBoxes = withBoxesDataUrl;
-            (entry as any).boxes = boxesToDraw;
-            (entry as any).detectionMessage = `Rendered ${boxesToDraw.length} aggregated/simplified box(es) from ${rawBoxes.length} prediction box(es)`;
-            this.totalBoundingBoxesCreated += boxesToDraw.length;
-          } catch (renderErr) {
-            console.warn('[UploadImagePage] drawBoxesOnImage failed', renderErr);
-            (entry as any).withBoxes = dataUrl;
-            (entry as any).boxes = [];
-            (entry as any).detectionMessage = 'Box rendering failed';
-          }
-        } else {
-          (entry as any).withBoxes = dataUrl;
-          (entry as any).boxes = [];
-          (entry as any).detectionMessage = 'No boxes detected';
+          console.warn('[CameraPage2] Inference error/timeout', infErr);
+          prediction = null;
         }
       } catch (e) {
-        console.warn('[UploadImagePage] Failed to render boxes', e);
+        console.warn('[CameraPage2] Preprocessing/inference failed', e);
+      }
+
+      entry.hasPrediction = !!prediction;
+      entry.statusMessage = prediction
+        ? 'Prediction succeeded'
+        : inferenceAttempted
+        ? 'Prediction failed'
+        : 'No prediction';
+
+      if (prediction && Array.isArray(prediction.boxes) && prediction.boxes.length > 0) {
+        // Ensure all boxes are typed correctly
+        const boxes: BoundingBox[] = prediction.boxes.map((b: any) => ({
+          x: Number(b.x) || 0,
+          y: Number(b.y) || 0,
+          w: Number(b.w) || 0,
+          h: Number(b.h) || 0,
+          type: b.type || 'unknown',
+          shape: b.shape || 'unknown',
+          severity: b.severity || 'unknown'
+        }));
+
+        for (const box of boxes) {
+          try {
+            const croppedDataUrl = await this.cropImage(dataUrl, box);
+            const boxTensor = await this.preprocessImage(croppedDataUrl);
+            const rawBoxPred = await this.crackDetectionService.runInference(boxTensor, box.w, box.h);
+            const safePred = rawBoxPred
+              ? {
+                  type: (rawBoxPred as any).type || '',
+                  shape: (rawBoxPred as any).shape || '',
+                  severity: (rawBoxPred as any).severity || ''
+                }
+              : null;
+
+            boxPredictions.push({
+              x: box.x,
+              y: box.y,
+              w: box.w,
+              h: box.h,
+              type: box.type || '',
+              shape: box.shape || '',
+              severity: box.severity || '',
+              prediction: safePred
+            });
+
+          } catch (err) {
+            console.warn('[UploadImagePage] Box classification failed', err);
+            boxPredictions.push({
+              x: box.x,
+              y: box.y,
+              w: box.w,
+              h: box.h,
+              type: box.type || '',
+              shape: box.shape || '',
+              severity: box.severity || '',
+              prediction: null
+            });
+          }
+        }
+
+        try {
+          const withBoxesDataUrl = await this.drawBoxesOnImage(dataUrl, boxes);
+          (entry as any).withBoxes = withBoxesDataUrl;
+          (entry as any).boxes = boxes;
+          (entry as any).detectionMessage = `Rendered ${boxes.length} prediction box(es)`;
+          this.totalBoundingBoxesCreated += boxes.length;
+        } catch (renderErr) {
+          console.warn('[CameraPage2] drawBoxesOnImage failed', renderErr);
+          (entry as any).withBoxes = dataUrl;
+          (entry as any).boxes = boxes;
+          (entry as any).detectionMessage = 'Box rendering failed';
+        }
+
+        this.extraText = boxPredictions
+          .map((b: BoxPrediction, idx: number) => `Box ${idx + 1}: ${b.type}, ${b.shape}, ${b.severity}`)
+          .join(' | ');
+
+        this.lastPrediction = boxPredictions.length > 0 ? boxPredictions : null;
+      } else {
         (entry as any).withBoxes = dataUrl;
         (entry as any).boxes = [];
-        (entry as any).detectionMessage = 'Box rendering failed';
+        (entry as any).detectionMessage = 'No boxes detected';
+        this.extraText = '✅ No boxes detected';
+        this.lastPrediction = null;
       }
-      //store image entry via image storage service
+
       await this.imageStorage.addImage(entry);
-      // also add to active session if one exists
+
       try {
-        if (this.selectedSessionId && typeof (this.imageStorage.addImageToSession) === 'function') {
+        if (this.selectedSessionId && typeof this.imageStorage.addImageToSession === 'function') {
           this.imageStorage.addImageToSession(this.selectedSessionId, entry.original);
-          this.sessionIsPristine = false; // Mark session as no longer pristine
+          this.sessionIsPristine = false;
         }
         await this.refreshDisplayedImages();
       } catch (e) {
-        console.warn('[UploadImagePage] Failed to add upload to session or refresh display', e);
+        console.warn('[CameraPage2] Failed to add image to session or refresh display', e);
       }
-      this.imagePaths.unshift({ original: entry.original, withBoxes: (entry as any).withBoxes || entry.original, fileName: entry.filename, rawPrediction: entry.prediction });
-      // Increment upload counter for this session
+
       this.imagesUploadedThisSession += 1;
-      // keep counters in sync with persistent storage
+      if (prediction) this.photosProcessed += 1;
       await this.updatePhotoCounts();
-      // Force UI update and center detection with longer delay to ensure DOM is ready
-      setTimeout(() => {
-        // Trigger change detection
-        this.detectCenterThumbnail();
-      }, 250);
-      return entry;
     };
 
+    const overallTimeoutMs = 10_000;
     try {
-      // overall timeout: 10s
-      await Promise.race([doWork(), new Promise((_, rej) => setTimeout(() => rej(new Error('processing-timeout')), 10_000))]);
+      await Promise.race([
+        doWork(),
+        new Promise((_, rej) => setTimeout(() => rej(new Error('processing-timeout')), overallTimeoutMs))
+      ]);
     } catch (err: any) {
-      if (err && err.message === 'processing-timeout') {
-        console.warn('[UploadImagePage] processDataUrl overall timeout');
-        // Persist fallback entry indicating failure/no-prediction
-        try {
-          let storedCount = 0;
-          try { const all = await this.imageStorage.getAllImages(); storedCount = Array.isArray(all) ? all.length : 0; } catch (e) { storedCount = this.photosTaken || 0; }
-          const fallbackFilename = this.generateFilename(storedCount + 1);
-          const entry: StoredImage = {
-            original: dataUrl,
-            timestamp: new Date().toISOString(),
-            filename: fallbackFilename,
-            prediction: undefined,
-            hasPrediction: false,
-            statusMessage: inferenceCalled ? 'Prediction failed' : 'No prediction'
-          };
-          await this.imageStorage.addImage(entry);
-          try {
-            if (this.selectedSessionId && typeof (this.imageStorage.addImageToSession) === 'function') {
-              this.imageStorage.addImageToSession(this.selectedSessionId, entry.original);
-              this.sessionIsPristine = false; // Mark session as no longer pristine
-            }
-            await this.refreshDisplayedImages();
-          } catch (e) {
-            console.warn('[UploadImagePage] Failed to add fallback upload to session', e);
-          }
-          this.imagePaths.unshift({ original: entry.original, withBoxes: entry.original, fileName: entry.filename, rawPrediction: entry.prediction });
-          // Increment upload counter for this session
-          this.imagesUploadedThisSession += 1;
-          await this.updatePhotoCounts();
-        } catch (e) {
-          console.warn('[UploadImagePage] Failed to persist fallback entry after timeout', e);
-        }
-      } else {
-        console.warn('processDataUrl failed', err);
-      }
+      console.warn('[CameraPage2] processDataUrl timed out or failed', err);
     } finally {
-      // Do NOT increment photosProcessed here - let updatePhotoCounts handle it from storage
       this.isProcessing = false;
-      // Log cumulative bounding box stats after upload processing
       this.logBoundingBoxStats();
     }
   }
-
   
   /**
    * Draw bounding boxes on the supplied Base64 image and return a new Base64 image.
@@ -932,9 +982,20 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
     try {
       const base = 'assets/icon/';
       const items = [
-        { original: base + 'sample1.jpg', withBoxes: base + 'sample1.jpg', fileName: 'sample1.jpg' },
-        { original: base + 'sample2.jpg', withBoxes: base + 'sample2.jpg', fileName: 'sample2.jpg' }
+        {
+          original: base + 'sample1.jpg',
+          withBoxes: base + 'sample1.jpg',
+          fileName: 'sample1.jpg',
+          rawPrediction: [] as BoxPrediction[]
+        },
+        {
+          original: base + 'sample2.jpg',
+          withBoxes: base + 'sample2.jpg',
+          fileName: 'sample2.jpg',
+          rawPrediction: [] as BoxPrediction[]
+        }
       ];
+
       this.imagePaths = items.concat(this.imagePaths);
     } catch (e) {
       console.warn('Could not load test assets', e);
@@ -948,17 +1009,37 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
    */
   async loadStoredImages() {
     try {
-      const stored = await this.imageStorage.getAllImages();
-      this.imagePaths = stored.map((s: StoredImage) => ({
-        original: s.original,
-        withBoxes: (s as any).withBoxes || s.original,
-        fileName: s.filename,
-        rawPrediction: s.prediction,
-      })).concat(this.imagePaths);
-      // refresh counters after loading stored images
+      const stored: StoredImage[] = await this.imageStorage.getAllImages();
+
+      this.imagePaths = stored.map(s => {
+        const rawPrediction: BoxPrediction[] = s.prediction
+          ? [{
+              x: 0,
+              y: 0,
+              w: 1,
+              h: 1,
+              type: s.prediction.type,
+              shape: s.prediction.shape,
+              severity: s.prediction.severity,
+              prediction: {
+                type: s.prediction.type,
+                shape: s.prediction.shape,
+                severity: s.prediction.severity
+              }
+            }]
+          : [];
+
+        return {
+          original: s.original,
+          withBoxes: s.withBoxes ?? s.original,
+          fileName: s.filename,
+          rawPrediction
+        };
+      }).concat(this.imagePaths);
+
       await this.updatePhotoCounts();
     } catch (e) {
-      console.warn('loadStoredImages failed', e);
+      console.warn('[UploadImagePage] loadStoredImages failed', e);
     }
   }
 
@@ -966,7 +1047,7 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
     this.showDebugPanel = !this.showDebugPanel;
     if (this.showDebugPanel) {
       // populate debug panel with last prediction
-      this.selectedPrediction = this.lastPrediction || null;
+      this.selectedPrediction = this.lastPrediction;
     }
   }
 
@@ -1049,52 +1130,87 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
    */
   async updatePhotoCounts() {
     try {
-      // If a session is active, compute counts from that session's image keys
+      let allImages: StoredImage[] = [];
+
       if (this.selectedSessionId) {
+        // Compute from session image keys if session exists
         if (!this.sessions || this.sessions.length === 0) {
-          try { await this.loadSessions(); } catch (e) { /* ignore */ }
+          try { await this.loadSessions(); } catch {}
         }
-        const session = this.sessions.find(s => s.id === this.selectedSessionId) || null;
+
+        const session = this.sessions.find(s => s.id === this.selectedSessionId) ?? null;
+
         if (!session || !Array.isArray(session.imageKeys)) {
           this.photosTaken = 0;
           this.photosProcessed = 0;
           this.storedImages = [];
           this.imagePaths = [];
         } else {
-          const keys = session.imageKeys.slice();
-          let processed = 0;
           const imgs: StoredImage[] = [];
-          let foundCount = 0;
-          for (const k of keys) {
-            let entry: any = undefined;
-            if (typeof (this.imageStorage as any).getEntryForImage === 'function') {
-              const maybe = (this.imageStorage as any).getEntryForImage(k);
-              entry = (maybe && typeof (maybe.then) === 'function') ? await maybe : maybe;
-            } else if (typeof (this.imageStorage as any).getAllEntries === 'function') {
-              const all = await (this.imageStorage as any).getAllEntries();
-              entry = all ? all[k] : undefined;
+          let processedCount = 0;
+
+          for (const key of session.imageKeys) {
+            let entry: StoredImage | undefined;
+
+            // Try getting image from storage service
+            if (typeof this.imageStorage.getEntryForImage === 'function') {
+              const maybe = this.imageStorage.getEntryForImage(key);
+              entry = maybe instanceof Promise ? await maybe : maybe;
+            } else {
+              const all = await this.imageStorage.getAllImages();
+              entry = all.find(img => img.original === key || img.withBoxes === key);
             }
+
             if (entry) {
-              imgs.push(entry as StoredImage);
-              foundCount++;
-              if (entry.statusMessage === 'Prediction succeeded') processed++;
+              // Ensure hasPrediction is boolean
+              entry.hasPrediction = !!entry.hasPrediction;
+              // Ensure predictions is array
+              entry.predictions = Array.isArray(entry.predictions) ? entry.predictions : [];
+              entry.prediction = entry.predictions?.[0]?.prediction || undefined;
+              imgs.push(entry);
+              if (entry.statusMessage === 'Prediction succeeded') processedCount++;
             }
           }
-          this.photosProcessed = processed;
-          this.photosTaken = foundCount; // only count existing entries
+
+          this.photosTaken = imgs.length;
+          this.photosProcessed = processedCount;
           this.storedImages = imgs;
-          this.imagePaths = imgs.map((s: StoredImage) => ({ original: s.original, withBoxes: (s as any).withBoxes || s.original, fileName: s.filename, rawPrediction: s.prediction }));
+          allImages = imgs;
         }
       } else {
+        // No session, get all images from storage
         const all: StoredImage[] = await this.imageStorage.getAllImages();
-        this.photosTaken = Array.isArray(all) ? all.length : 0;
-        this.photosProcessed = Array.isArray(all) ? all.filter(i => (i.statusMessage === 'Prediction succeeded')).length : 0;
-        this.storedImages = Array.isArray(all) ? all.slice() : [];
-        this.imagePaths = this.storedImages.map((s: StoredImage) => ({ original: s.original, withBoxes: (s as any).withBoxes || s.original, fileName: s.filename, rawPrediction: s.prediction }));
+        allImages = Array.isArray(all) ? all : [];
+        this.photosTaken = allImages.length;
+        this.photosProcessed = allImages.filter(img => img.statusMessage === 'Prediction succeeded').length;
+        this.storedImages = allImages.slice();
       }
-      console.log('[UploadImagePage] updatePhotoCounts:', { photosTaken: this.photosTaken, photosProcessed: this.photosProcessed });
+
+      // Map to UI-friendly array
+      this.imagePaths = allImages.map((s: StoredImage) => ({
+        original: s.original,
+        withBoxes: s.withBoxes ?? s.original,
+        fileName: s.filename,
+        rawPrediction: s.prediction
+          ? (Array.isArray(s.prediction) ? s.prediction : [s.prediction]).map(p => ({
+              x: (p as any).x ?? 0,
+              y: (p as any).y ?? 0,
+              w: (p as any).w ?? 0,
+              h: (p as any).h ?? 0,
+              type: p.type ?? '',
+              shape: p.shape ?? '',
+              severity: p.severity ?? '',
+              prediction: (p as any).prediction ?? null,
+            }))
+          : [],
+      }));
+
+      console.log('[UploadImagePage] updatePhotoCounts:', {
+        photosTaken: this.photosTaken,
+        photosProcessed: this.photosProcessed
+      });
     } catch (e) {
-      console.warn('updatePhotoCounts failed', e);
+      console.warn('[UploadImagePage] updatePhotoCounts failed', e);
     }
   }
 
@@ -1198,16 +1314,11 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
     })();
   }
 
-
-      /** Capture a frame, preprocess, run inference, and save result */
   async takePicture() {
-    // Ensure UI shows processing state immediately
     this.isProcessing = true;
-    // yield to the event loop so the spinner can render/animate before heavy work
-    await this.sleep(50);
-    try { this.cdr.detectChanges(); } catch (e) { /* ignore */ }
-    // photosTaken will be derived from storage after save so don't increment here
-    // track whether inference was invoked and whether it succeeded
+    await this.sleep(50); // allow spinner render
+    try { this.cdr.detectChanges(); } catch {}
+
     let inferenceCalled = false;
     let inferenceSucceeded = false;
 
@@ -1215,41 +1326,22 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
       const video = this.videoRef.nativeElement;
       const canvas = this.canvasRef.nativeElement;
       const ctx = canvas.getContext('2d')!;
-
       canvas.width = video.videoWidth;
       canvas.height = video.videoHeight;
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
       const dataUrl = canvas.toDataURL('image/png');
       this.imagePreview = dataUrl;
-  this.capturedImages.unshift(dataUrl);
-  // allow DOM to update and then detect center thumbnail
-  setTimeout(() => this.detectCenterThumbnail(), 60);
+      this.capturedImages.unshift(dataUrl);
+      setTimeout(() => this.detectCenterThumbnail(), 60);
 
-      // Wrap preprocess → inference → save into a cancellable-timeout-aware sequence
       const work = async () => {
-        const imageTensor = await this.preprocessImage(dataUrl);
-        // call the backend/model
-        let prediction = null;
-        try {
-          inferenceCalled = true;
-          prediction = await this.crackDetectionService.runInference(imageTensor);
-          inferenceSucceeded = !!prediction;
-        } catch (e) {
-          console.error('Inference error', e);
-        }
-
         const now = new Date().toISOString();
-
-        // derive filename based on current stored images count so photosTaken reflects storage
         let storedCount = 0;
         try {
           const all = await this.imageStorage.getAllImages();
           storedCount = Array.isArray(all) ? all.length : 0;
-        } catch (e) {
-          // fallback to local counter if storage call fails
-          storedCount = this.photosTaken || 0;
-        }
+        } catch { storedCount = this.photosTaken || 0; }
 
         const filename = this.generateFilename(storedCount + 1);
 
@@ -1257,91 +1349,134 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
           original: dataUrl,
           timestamp: now,
           filename,
-          prediction: prediction || undefined,
-          hasPrediction: !!prediction,
-          statusMessage: prediction ? 'Prediction succeeded' : (inferenceCalled ? 'Prediction failed' : 'No prediction')
+          hasPrediction: false,
+          statusMessage: '',
+          predictions: []
         };
-        await this.imageStorage.addImage(entry);
-        // also add to active session if one exists
+
+        let fullPrediction: BoundingBox[] = [];
         try {
-          if (this.selectedSessionId && typeof (this.imageStorage.addImageToSession) === 'function') {
-            this.imageStorage.addImageToSession(this.selectedSessionId, entry.original);
-            this.sessionIsPristine = false; // Mark session as no longer pristine
+          inferenceCalled = true;
+          const imageTensor = await this.preprocessImage(dataUrl);
+          const { width, height } = await this.getImageDimensions(dataUrl);
+          const result = await this.crackDetectionService.runInference(imageTensor, width, height);
+
+          if (result?.boxes && result.boxes.length > 0) {
+            fullPrediction = result.boxes.map((b: any) => ({
+              x: Number(b.x) || 0,
+              y: Number(b.y) || 0,
+              w: Number(b.w) || 0,
+              h: Number(b.h) || 0,
+              type: b.type || '',
+              shape: b.shape || '',
+              severity: b.severity || ''
+            }));
           }
-          await this.refreshDisplayedImages();
         } catch (e) {
-          console.warn('[UploadImagePage] Failed to add taken picture to session', e);
+          console.warn('[UploadImagePage] Full image inference failed', e);
         }
-        // synchronize counters from storage so UI reflects actual stored count
+
+        for (let box of fullPrediction) {
+          try {
+            const croppedDataUrl = await this.cropImage(dataUrl, box);
+            const boxTensor = await this.preprocessImage(croppedDataUrl);
+            const boxResult = await this.crackDetectionService.runInference(boxTensor, box.w, box.h);
+            const boxPred = boxResult.boxes[0]?.prediction || null;
+
+            const boxPrediction: BoxPrediction = {
+              ...box,
+              prediction: boxPred
+            };
+            entry.predictions!.push(boxPrediction);
+          } catch (err) {
+            console.warn('[UploadImagePage] Box classification failed', err);
+            entry.predictions!.push({
+              ...box,
+              prediction: null
+            });
+          }
+        }
+
+        inferenceSucceeded = entry.predictions!.some((p: BoxPrediction) => !!p.prediction);
+
+        entry.prediction = entry.predictions!.find(p => p.prediction)?.prediction || undefined;
+
+        try {
+          const maskW = canvas.width;
+          const maskH = canvas.height;
+          entry.withBoxes = fullPrediction.length > 0
+            ? await this.drawBoxesOnImage(dataUrl, fullPrediction, maskW, maskH)
+            : dataUrl;
+        } catch (drawErr) {
+          console.warn('[UploadImagePage] drawBoxesOnImage failed', drawErr);
+          entry.withBoxes = dataUrl;
+        }
+
+        entry.hasPrediction = inferenceSucceeded;
+        entry.statusMessage = inferenceSucceeded
+          ? 'Prediction succeeded'
+          : (inferenceCalled ? 'Prediction failed' : 'No prediction');
+
+        await this.imageStorage.addImage(entry);
+
+        if (this.selectedSessionId && typeof this.imageStorage.addImageToSession === 'function') {
+          this.imageStorage.addImageToSession(this.selectedSessionId, entry.original);
+          this.sessionIsPristine = false;
+        }
+
+        await this.refreshDisplayedImages();
         await this.updatePhotoCounts();
+
         this.savedImage = entry;
-        this.lastPrediction = prediction;
+        this.lastPrediction = entry.predictions && entry.predictions.length ? entry.predictions : null;
+
         return entry;
       };
 
       try {
-        // overall timeout: 10s
-        await Promise.race([work(), new Promise((_, rej) => setTimeout(() => rej(new Error('processing-timeout')), 10_000))]);
+        await Promise.race([
+          work(),
+          new Promise((_, rej) => setTimeout(() => rej(new Error('processing-timeout')), 10_000))
+        ]);
       } catch (err: any) {
-        if (err && err.message === 'processing-timeout') {
-          console.warn('[UploadImagePage] takePicture processing timed out');
-          // Persist fallback entry indicating timeout
-          try {
-            let storedCount = 0;
-            try { const all = await this.imageStorage.getAllImages(); storedCount = Array.isArray(all) ? all.length : 0; } catch (e) { storedCount = this.photosTaken || 0; }
-            const filename = this.generateFilename(storedCount + 1);
-            const entry: StoredImage = {
-              original: dataUrl,
-              timestamp: new Date().toISOString(),
-              filename,
-              prediction: undefined,
-              hasPrediction: false,
-              statusMessage: inferenceCalled ? 'Prediction failed' : 'No prediction'
-            };
-            await this.imageStorage.addImage(entry);
-            await this.updatePhotoCounts();
-          } catch (e) {
-            console.warn('[UploadImagePage] Failed to persist fallback entry after timeout', e);
-          }
+        if (err.message === 'processing-timeout') {
+          console.warn('[UploadImagePage] takePicture timed out');
+          const fallbackFilename = this.generateFilename((this.photosTaken || 0) + 1);
+          const fallbackEntry: StoredImage = {
+            original: dataUrl,
+            timestamp: new Date().toISOString(),
+            filename: fallbackFilename,
+            hasPrediction: false,
+            statusMessage: 'Timeout',
+            predictions: []
+          };
+          await this.imageStorage.addImage(fallbackEntry);
+          await this.updatePhotoCounts();
         } else {
-          console.error('Failed during takePicture work:', err);
+          console.error('takePicture error:', err);
         }
       }
 
-  // Keep console.log before clearing isProcessing so callers/UI see processing until logging completes
-  console.log('✅ Prediction stored:', this.lastPrediction);
-      // Print all currently stored images to verify persistence
-      try {
-        const all = await this.imageStorage.getAllImages();
-        console.log('Stored images count:', all.length);
-      } catch (logErr) {
-        console.warn('Could not list stored images', logErr);
-      }
+      this.selectedStatusMessage = inferenceSucceeded
+        ? 'Prediction succeeded'
+        : (inferenceCalled ? 'Prediction failed' : 'No prediction performed');
 
-      // Set a user-facing message depending on whether inference ran/succeeded
-      if (inferenceSucceeded) {
-        this.selectedStatusMessage = 'Prediction succeeded';
-      } else if (inferenceCalled) {
-        this.selectedStatusMessage = 'Prediction failed';
-      } else {
-        this.selectedStatusMessage = 'No prediction performed';
-      }
+      console.log('Predictions stored:', this.lastPrediction);
+
     } catch (err) {
       console.error('takePicture error', err);
     } finally {
       this.isProcessing = false;
-      // Log cumulative bounding box stats after capture processing
       this.logBoundingBoxStats();
     }
   }
-
 }
 
 // Small helper type used in class
-interface ScaledBox {
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-  original: BoundingBox;
-}
+// interface ScaledBox {
+//   x: number;
+//   y: number;
+//   w: number;
+//   h: number;
+//   original: BoundingBox;
+// }
