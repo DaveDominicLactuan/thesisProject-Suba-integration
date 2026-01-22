@@ -232,6 +232,9 @@ private backButtonSub: any; // hardware back handler
       dropdown3: this.dropdown3,
       formEntry: this.formDataMap[key]
     });
+
+    // Persist current state so dropdown edits are saved immediately
+    this.updateSelectedImageFromDropdowns();
   }
 
   //Smoothly center the selected image in the horizontal scroller
@@ -614,7 +617,8 @@ detectCenterImage() {
       optType,
       'Horizontal',
       'Vertical',
-      'Diagonal'
+      'Diagonal',
+      'Straight'
     ];
 
     this.dropdownOptionsShape = [
@@ -626,6 +630,7 @@ detectCenterImage() {
 
     this.dropdownOptionsSeverity = [
       optSeverity,
+      'hairline',
       'Negligible',
       'moderate',
       'severe',
@@ -738,16 +743,84 @@ addEntry() {
   if (!this.selectedImage) return;
 
   //Persist current UI values into formDataMap for the selected image
-  this.formDataMap[this.selectedImage] = {
-    title: this.selectedImageTitle,
-    dropdown1: this.dropdown1,
-    dropdown2: this.dropdown2,
-    dropdown3: this.dropdown3,
-    extraText: this.extraText
-  };
+  this.updateSelectedImageFromDropdowns();
   //Debug & log confirmation
   console.log(`Form saved for ${this.selectedImageTitle}`);
 }
+
+  /**
+   * Update the in-memory image entry + formDataMap with the current dropdown/text values.
+   * This keeps prediction/type/shape/severity in sync after user edits.
+   */
+  updateSelectedImageFromDropdowns() {
+    // Find the selected DisplayImage (match either original or withBoxes src)
+    const matched = this.imagePaths.find(img => img.original === this.selectedImage || img.withBoxes === this.selectedImage);
+    if (!matched) return;
+
+    // Normalize key to original so data is consistent regardless of toggle state
+    const key = matched.original;
+
+    // Update prediction fields from dropdowns
+    matched.rawPrediction = matched.rawPrediction || {};
+    matched.rawPrediction.type = this.dropdown1;
+    matched.rawPrediction.shape = this.dropdown2;
+    matched.rawPrediction.severity = this.dropdown3;
+
+    // Update status/extra text
+    matched.statusMessage = this.extraText || matched.statusMessage || '';
+
+    // Recompute derived detection strings
+    matched.detectionMessage = matched.statusMessage && matched.statusMessage.length > 0
+      ? matched.statusMessage
+      : `${matched.rawPrediction.type || ''}${matched.rawPrediction.severity ? ' — ' + matched.rawPrediction.severity : ''}`.trim();
+
+    matched.detectionResult = matched.statusMessage && matched.statusMessage.length > 0
+      ? matched.statusMessage
+      : `${matched.rawPrediction.shape || ''}${matched.rawPrediction.severity ? ' — ' + matched.rawPrediction.severity : ''}`.trim();
+
+    // Sync selected* fields so UI reflects latest edits
+    this.selectedPrediction = { ...matched.rawPrediction };
+    this.selectedStatusMessage = matched.statusMessage;
+    this.detectionMessage = matched.detectionMessage;
+    this.detectionResult = matched.detectionResult;
+
+    // Persist form data map entry using the original key
+    this.formDataMap[key] = {
+      title: matched.fileName ?? this.selectedImageTitle,
+      dropdown1: this.dropdown1,
+      dropdown2: this.dropdown2,
+      dropdown3: this.dropdown3,
+      extraText: this.extraText
+    };
+
+    // Persist back to storage so Results Dashboard sees the updated prediction
+    const svc: any = this.imageStorageService as any;
+    const existingEntry = typeof svc.getEntryForImage === 'function' ? svc.getEntryForImage(key) : undefined;
+    const updatedStored: any = existingEntry ? { ...existingEntry } : {
+      original: key,
+      withBoxes: matched.withBoxes,
+      filename: matched.fileName ?? this.selectedImageTitle,
+      timestamp: new Date().toISOString()
+    };
+
+    updatedStored.prediction = {
+      type: this.dropdown1,
+      shape: this.dropdown2,
+      severity: this.dropdown3
+    };
+    // Keep optional rawPrediction/status fields aligned for consumers that read them
+    (updatedStored as any).rawPrediction = updatedStored.prediction;
+    updatedStored.statusMessage = matched.statusMessage;
+    updatedStored.detectionMessage = matched.detectionMessage;
+    updatedStored.detectionResult = matched.detectionResult;
+
+    if (typeof svc.setEntryForImage === 'function') {
+      svc.setEntryForImage(key, updatedStored);
+    }
+
+    // Also refresh selectedImage to the correct src based on toggle
+    this.selectedImage = this.showWithBoxes ? matched.withBoxes : matched.original;
+  }
 
 
 

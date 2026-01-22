@@ -24,7 +24,9 @@ async register(email: string, password: string, firstName: string, lastName: str
     throw new Error('Email is required');
   }
     try {
+      //creates the user with email and password
       const userCredential = await createUserWithEmailAndPassword(this.auth, email, password);
+      // Get the newly created user's UID
       const uid = userCredential.user.uid;
 
       // Debug: log the uid and payload we will write to Firestore
@@ -40,6 +42,7 @@ async register(email: string, password: string, firstName: string, lastName: str
       console.log('[Auth3Service] writing user profile payload to users/', uid, payload);
 
       try {
+        // Write user profile to Firestore
         await setDoc(doc(this.firestore, 'users', uid), payload);
         console.log('[Auth3Service] setDoc succeeded for users/', uid);
       } catch (setErr) {
@@ -86,14 +89,18 @@ async register(email: string, password: string, firstName: string, lastName: str
   }
 
   getCurrentUser() {
+    //gets the current user / uid
     return this.auth.currentUser;
   }
 
   // ✅ Get user profile from Firestore (uses native Firebase SDK to avoid injection warnings)
   async getUserProfile() {
+    //gets the current user uid
     const user = this.getCurrentUser();
+    // if no user logged in, throw error
     if (!user) throw new Error('No user logged in');
 
+    // Fetch user document from Firestore
     try {
       const userDoc = await getDoc(doc(this.firestore, 'users', user.uid));
       if (userDoc && userDoc.exists && userDoc.exists()) {

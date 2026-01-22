@@ -1,11 +1,32 @@
-.dashboard-bg{background:#008799;min-height:100vh}
-.ion-padding{--background:#008799;background:#008799}
+* {
+  font-family: 'Segoe UI Variable Text Semibold', sans-serif;
+}
+
+.dashboard-bg{background:#ffffff;min-height:100vh}
+.ion-padding{--background:#ffffff;background:#ffffff}
 
 .card{background:#fff;border-radius:12px;box-shadow:0 4px 12px rgba(0,0,0,.15);padding:16px;margin:12px auto;max-width:360px}
-.card.header-card{margin-top:13px}
+.card {
+  /* Gradient border */
+  background:
+    linear-gradient(#fff, #fff) padding-box,
+    linear-gradient(to right, #ff512f, #f09819) border-box;
+}
+
+.card.header-card{margin-top:13px; /* Gradient border */
+  background:
+    linear-gradient(#fff, #fff) padding-box,
+    linear-gradient(to right, #ff512f, #f09819) border-box;}
 .header-card .header-row{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
 .header-card .title{font-weight:700;color:#000c2e}
 .header-card .scope{font-size:12px;color:#666}
+
+/* Gradient border */
+.header-card {
+  background:
+    linear-gradient(#fff, #fff) padding-box,
+    linear-gradient(to right, #ff512f, #f09819) border-box;
+}
 
 .donut-row{display:flex;gap:16px;align-items:center}
 .donut{--percent:0;width:90px;height:90px;border-radius:50%;background:conic-gradient(#ff512f calc(var(--percent)*1%), #e6e6e6 0);display:flex;align-items:center;justify-content:center}
@@ -18,8 +39,13 @@
 
 .tiles{display:flex;gap:16px;justify-content:center;margin:16px}
 .tile{width:150px;height:150px;border-radius:12px;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#fff;box-shadow:0 6px 18px rgba(0,0,0,.2)}
-.tile.blue{background:linear-gradient(to right,#ff512f,#f09819)}
-.tile.red{background:linear-gradient(to right,#ff512f,#f09819)}
+.tile.blue, .tile.red {
+  /* Gradient border */
+  background:
+    linear-gradient(#fff, #fff) padding-box,
+    linear-gradient(to right, #ff512f, #f09819) border-box;
+  color: #000; /* Replace text color to ensure visibility */
+}
 .tile-value{font-size:36px;font-weight:800}
 .tile-label{margin-top:6px;font-weight:600}
 
@@ -69,7 +95,7 @@
 .graph-menu .check{width:16px;display:inline-block;color:#1c1c28;font-weight:700;text-align:center}
 .graph-menu .menu-divider{height:1px;background:#d3d7f5;margin:6px 0}
 
-.graph-display{border:2px solid transparent;border-radius:12px;padding:14px 14px;background:linear-gradient(#fff,#fff) padding-box,linear-gradient(to right,#ff512f,#f09819) border-box;box-shadow:0 2px 8px rgba(0,0,0,.08);display:grid;grid-template-columns:1fr;gap:12px}
+.graph-display{border:2px solid transparent;border-radius:12px;padding:14px 14px;background:linear-gradient(#fff,#fff) padding-box,linear-gradient(to right,#ff512f,#f09819) border-box;box-shadow:0 6px 18px rgba(0,0,0,.2);display:grid;grid-template-columns:1fr;gap:12px}
 .graph-card{background:#fff;border-radius:10px;padding:12px;box-shadow:0 4px 10px rgba(0,0,0,.06);border:1px solid rgba(0,0,0,.03)}
 .graph-card.subtle{background:#f6f7fb}
 .graph-card-title{font-weight:700;color:#000;margin-bottom:8px}
@@ -109,5 +135,23 @@
 .overlay-apply-btn{flex:1;background:linear-gradient(to right,#ff512f,#f09819);color:#fff;border:none;border-radius:12px;padding:12px 16px;font-weight:700;box-shadow:0 4px 14px rgba(255,81,47,0.35);cursor:pointer;transition:all 0.2s;font-size:14px}
 
 .overlay-apply-btn:hover{box-shadow:0 6px 20px rgba(255,81,47,0.45);transform:translateY(-2px)}
+/* Added CSS variable for gradient border size */
+:root {
+  --gradient-border-size: 5px; /* Updated gradient border size */
+}
+
+.card.header-card {
+  border: var(--gradient-border-size) solid transparent; /* Use CSS variable for border size */
+  background:
+    linear-gradient(#fff, #fff) padding-box,
+    linear-gradient(to right, #ff512f, #f09819) border-box;
+}
+
+.tile.blue, .tile.red {
+  border: var(--gradient-border-size) solid transparent; /* Use CSS variable for border size */
+  background:
+    linear-gradient(#fff, #fff) padding-box,
+    linear-gradient(to right, #ff512f, #f09819) border-box;
+}
 
 

@@ -53,7 +53,7 @@
 
       <div class="form-group">
         <label for="dropdown1">Type of Crack</label>
-        <select id="dropdown1" [(ngModel)]="dropdown1" class="input-item" [disabled]="isUserReadOnly">
+        <select id="dropdown1" [(ngModel)]="dropdown1" (ngModelChange)="updateSelectedImageFromDropdowns()" class="input-item" [disabled]="isUserReadOnly">
           <option *ngFor="let option of dropdownOptionsDirection" [value]="option">{{ option }}</option>
         </select>
       </div>
@@ -61,14 +61,14 @@
       
       <div class="form-group">
         <label for="dropdown2">Shape</label>
-        <select id="dropdown2" [(ngModel)]="dropdown2" class="input-item" [disabled]="isUserReadOnly">
+        <select id="dropdown2" [(ngModel)]="dropdown2" (ngModelChange)="updateSelectedImageFromDropdowns()" class="input-item" [disabled]="isUserReadOnly">
           <option *ngFor="let option of dropdownOptionsShape" [value]="option">{{ option }}</option>
         </select>
       </div>
 
       <div class="form-group">
         <label for="dropdown1">Severity of Crack</label>
-        <select id="dropdown1" [(ngModel)]="dropdown3" class="input-item" [disabled]="isUserReadOnly">
+        <select id="dropdown1" [(ngModel)]="dropdown3" (ngModelChange)="updateSelectedImageFromDropdowns()" class="input-item" [disabled]="isUserReadOnly">
           <option *ngFor="let option of dropdownOptionsSeverity" [value]="option">{{ option }}</option>
         </select>
       </div>

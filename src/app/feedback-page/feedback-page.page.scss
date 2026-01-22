@@ -1,8 +1,10 @@
-
+* {
+  font-family: 'Segoe UI Variable Text Semibold', sans-serif;
+}
 
 .background {
-  --background: background-color: #008799;;
-  background-color: #008799;
+  --background: background-color: #ffffff;;
+  background-color: #ffffff;
 
   height: 100vh;
   width: 100vw;
@@ -10,7 +12,7 @@
 }
 
 .background.scrollable-container {
-  background-color: #008799;
+  background-color: #ffffff;
   display: flex;
   flex-direction: column;
   height: 100vh;
@@ -41,7 +43,7 @@
   border-radius: 12px;
   font-size: 16px;
   font-weight: bold;
-//   font-family: 'Times New Roman', Times, serif
+  font-family: 'Segoe UI Variable Text Semibold', sans-serif;
   cursor: pointer;
   padding-left: 0px;
   padding-right: 0px;
@@ -54,7 +56,7 @@
 
 .ion-padding {
     --background: background-color: #008799;;
-  background-color: #008799;
+  background-color: #f9f9f9;
   
   --padding-start: 0px;
   --padding-end: 0px;
@@ -124,6 +126,12 @@
   margin-top: 9.5%;
   min-height: 12%;
 
+  border: 0.8px solid transparent; /* keeps original size */
+  
+  background:
+    linear-gradient(#fffdfd, #fffdfd) padding-box,
+    linear-gradient(to right, #ff512f, #f09819) border-box;
+
   .top-title {
     font-size: 14px;
     font-weight: 600;
@@ -164,8 +172,8 @@
 
 .scroll-wrapper {
   position: relative;
-  top: -3%; /* Push down under fixed top bar */
-  background-color: #008799;
+  top: -5%; /* Push down under fixed top bar */
+  background-color: #ffffff;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -174,7 +182,7 @@
   overflow-x: hidden;
   overflow-y: visible;
   padding: 10px 0;
-  height: 500px;
+  height: 450px;
   transition: height 0.3s ease;
   box-sizing: border-box;
 
@@ -204,12 +212,12 @@
 
 .image-item {
   flex: 0 0 auto;
-  max-width: 95%;
-  max-height: 95%;
+  max-width: 90%;
+  max-height: 90%;
   width: auto;
   height: auto;
-  min-height: 390px;
-  min-width: 320px;
+  min-height: 350px;
+  min-width: 270px;
   object-fit: contain; /* preserve aspect and avoid cropping */
   scroll-snap-align: center;
   border-radius: 10px;
@@ -250,11 +258,11 @@
 .login-form {
   margin-top: 50px;
   position: relative;
-  bottom: 8%;
+  bottom: 10%;
   z-index: 5;
   max-width: 100%;
   width: 800px;
-  height: 410px;
+  height: 420px;
   background-color: #fff;
   border-radius: 15px;
   padding: 30px;
@@ -263,6 +271,8 @@
   padding-right: 20px;
   padding-bottom: 20px;
   box-shadow: 0px 5px 20px rgba(0, 0, 0, 0.1);
+
+  border: 0.8px solid transparent; /* keeps original size */
   
   background:
     linear-gradient(#fffdfd, #fffdfd) padding-box,
@@ -278,6 +288,7 @@
 
 .button-group .sign-in-button {
   width: 100%;
+  font-family: 'Segoe UI Variable Text Semibold', sans-serif;
 }
 
 
@@ -409,6 +420,7 @@
   color: black;
   text-align: center;
   padding-bottom: 10px;
+  font-family: 'Segoe UI Variable Text Semibold', sans-serif;
 }
 
 /* wrapper to position a left-side delete button while keeping the title centered */
@@ -423,7 +435,7 @@
   right: 2px; /* positioned at right side of wrapper */
   top: 10%;
   transform: translateY(-50%);
-  background: #ff4d4d; /* red background */
+  background: #f09819; /* red background */
   border: 0.5px solid #000; /* thin black border */
   border-radius: 0 10px 0 0; /* top-left corner rounded 10px only */
   padding: 6px; /* spacing around icon */
@@ -571,6 +583,7 @@
   margin-top: 10px;
   margin-bottom: 15px;
   color: #222;
+  font-family: 'Segoe UI Variable Text Semibold', sans-serif;
 }
 
 // .input-item {
@@ -647,5 +660,16 @@
   border-radius: 25px;
   font-size: 16px;
   cursor: pointer;
+}
+
+.form-group select option {
+  font-family: 'Segoe UI Variable Text Semibold', sans-serif;
+}
+
+.login-form, .top-bar {
+  /* Gradient border */
+  background:
+    linear-gradient(#fff, #fff) padding-box,
+    linear-gradient(to right, #ff512f, #f09819) border-box;
 }
 

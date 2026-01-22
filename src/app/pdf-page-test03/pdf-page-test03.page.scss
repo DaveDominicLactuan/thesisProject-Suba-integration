@@ -1,3 +1,7 @@
+* {
+  font-family: 'Segoe UI Variable Text Semibold', sans-serif;
+}
+
 .bottom-actions {
 	background: white;
 	/* Replace solid black border with gradient border */
@@ -32,6 +36,15 @@
 		ion-icon {
 			font-size: 1.2rem;
 			margin-bottom: 4px;
+		}
+
+		/* Added gradient background styling to ion-button */
+		.bottom-actions ion-button {
+			background:
+				linear-gradient(#fff, #fff) padding-box,
+				linear-gradient(to right, #ff512f, #f09819) border-box;
+			border: 0.5px solid transparent; /* Ensure gradient border is visible */
+			border-radius: 8px; /* Optional: Adjust border radius */
 		}
 	}
 }

@@ -1,7 +1,6 @@
-
 :host {
 	display: block;            /* don't change children positioning */
-  background: #008799;
+  background: #ffffff;
   min-height: 100vh;
 }
 
@@ -74,6 +73,8 @@ form, input, optgroup, select {
 	padding: 0 12px;
 	z-index: 20;
 	margin-top: 5%;
+	/* Add a border to the bottom of the top-bar */
+	border-bottom: var(--border-size) solid #e0e0e0; /* Use CSS variable for border size */
 }
 
 .top-btn {
@@ -117,6 +118,10 @@ form, input, optgroup, select {
   z-index: 20;
   box-shadow: 0 6px 18px rgba(0,0,0,0.12);
   margin-bottom: 7%;
+  border: 1px solid transparent;
+  background:
+    linear-gradient(#fff, #fff) padding-box,
+    linear-gradient(to right, #ff512f, #f09819) border-box;
 }
 
 .bottom-top-row {
@@ -508,4 +513,30 @@ form, input, optgroup, select {
 	width: 25px;
 	height: 25px;
 	display: block;
+}
+
+.func-action .action-label {
+  font-family: 'Segoe UI Variable Text Semibold', sans-serif;
+}
+
+.function-btn {
+  font-family: 'Segoe UI Variable Text Semibold', sans-serif;
+}
+
+.function-btn .action-icon {
+  font-family: 'Segoe UI Variable Text Semibold', sans-serif;
+}
+
+/* Added gradient background to top-bar */
+.top-bar {
+  background: linear-gradient(to right, #ff512f, #f09819);
+}
+
+/* Added CSS variable for border size to allow dynamic adjustment */
+:root {
+  --border-size: 0.5px; /* Default border size */
+}
+
+.top-bar {
+  border-bottom: var(--border-size) solid #e0e0e0; /* Use CSS variable for border size */
 }

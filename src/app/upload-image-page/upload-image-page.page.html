@@ -1,10 +1,12 @@
-
-
-  <!-- 🔝 Top Bar -->
+<!-- 🔝 Top Bar -->
   <div class="top-bar">
     <button class="back-btn" type="button" (click)="onBack()">
       <img src="assets/wArrow.png" alt="Back" class="back-icon" />
     </button>
+    
+    <!-- Center label showing current toggle state and selected image title -->
+    <span class="top-title">{{ selectedImageTitle || (showWithBoxes ? 'With Boxes' : 'Original') }}</span>
+
     <div class="toggle-wrapper">
       <label class="switch">
         <input type="checkbox" [(ngModel)]="showWithBoxes" (change)="detectCenterThumbnail()" />

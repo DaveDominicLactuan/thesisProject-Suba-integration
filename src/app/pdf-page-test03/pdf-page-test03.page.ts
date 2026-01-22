@@ -362,6 +362,7 @@ export class PdfPageTest03Page {
              // CSS for centered, responsive display
              mainCanvas.style.display = 'block';
              mainCanvas.style.margin = '2px auto 0';
+             mainCanvas.style.marginTop = '10px auto 0';
              mainCanvas.style.maxWidth = '95%';
              mainCanvas.style.width = '95%';
              mainCanvas.style.height = 'auto';

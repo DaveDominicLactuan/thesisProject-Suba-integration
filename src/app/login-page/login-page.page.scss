@@ -1,8 +1,11 @@
+* {
+  font-family: 'Segoe UI Variable Text Semibold', sans-serif;
+}
 
 .background {
   --background: none;
   // background: linear-gradient(to bottom, #1ecbe1, #eaeaea);
-  background-color: #5797a0;
+  background-color: #ffffff;
   height: 100vh;
   width: 100vw;
   overflow: hidden;
@@ -276,4 +279,12 @@ margin: 20px auto 30px auto;
   padding: 10px;
   text-align: center;
   z-index: 2;
+}
+
+/* Apply consistent box-shadow and gradient border styling to login-form */
+.login-form {
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+  background:
+    linear-gradient(#fff, #fff) padding-box,
+    linear-gradient(to right, #ff512f, #f09819) border-box;
 }

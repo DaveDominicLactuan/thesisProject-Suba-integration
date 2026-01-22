@@ -1,85 +1,122 @@
-<ion-content class="home-page">
+<div class="custom-sidebar" [ngClass]="{'open': isSidebarOpen}" (click)="$event.stopPropagation()">
+  <div class="profile-section">
+    <div class="profile-avatar">
+      <img src="assets/engIcon.png" alt="Profile" />
+    </div>
+    <div class="profile-info">
+      <h1>Good Morning,</h1>
+      <p *ngIf="firstName && lastName" class="profileName">
+        {{ firstName }} {{ lastName }}
+      </p>
+      <p *ngIf="(!firstName || !lastName) && userName" class="profileName">
+        {{ userName }}
+      </p>
+    </div>
+  </div>
+  <ul class="menu-items">
+    <li class="menu-item">
+      <ion-icon name="checkmark-circle"></ion-icon>
+      <span>Available</span>
+    </li>
+    <li class="menu-item">
+      <ion-icon name="create-outline"></ion-icon>
+      <span>Set status message</span>
+    </li>
+    <li class="menu-item">
+      <ion-icon name="notifications-outline"></ion-icon>
+      <span>Notifications</span>
+    </li>
+    <li class="menu-item">
+      <ion-icon name="settings-outline"></ion-icon>
+      <span>Settings</span>
+    </li>
+    <li class="menu-item">
+      <ion-icon name="document-outline"></ion-icon>
+      <span>Your current sessions</span>
+    </li>
+    <li class="menu-item">
+      <ion-icon name="people-outline"></ion-icon>
+      <span>Messages</span>
+    </li>
+    <li class="menu-item">
+      <ion-icon name="bookmark-outline"></ion-icon>
+      <span>Saved Sessions</span>
+    </li>
+    <li class="menu-item">
+      <ion-icon name="document-outline"></ion-icon>
+      <span>Files</span>
+    </li>
+    <li class="menu-item" (click)="logout()">
+      <ion-icon name="add-outline"></ion-icon>
+      <span>Logout</span>
+    </li>
+  </ul>
+</div>
+
+<div class="menu-btn unique-menu top-left-corner" (click)="openMenu('sidebarMenu')">
+  <img src="assets/moreIcon.png" alt="Menu" class="big-icon1" />
+</div>
+
+<ion-content id="main-content" class="home-page" (click)="closeSidebar()">
 
   <!-- Greeting Section -->
-  <div class="greeting">
-    <!-- <h1>Good Morning,<br><p *ngIf="userName">Signed in as: {{ firstName }}</p></h1> -->
-     <h1>
-  Good Morning,<br>
-  <p *ngIf="firstName && lastName" class="profileName">
-     {{ firstName }} {{ lastName }}
-  </p>
-  <!-- <p *ngIf="userRole" style="font-size:14px;color:#666;margin-top:4px;">
-    Role: {{ userRole | titlecase }}
-  </p> -->
-  <p *ngIf="(!firstName || !lastName) && userName" class="profileName">
-    {{ userName }}
-  </p>
-  <!-- <p *ngIf="engineeringID" style="font-size:14px;color:#666;margin-top:4px;">
-    Engineering ID: {{ engineeringID }}
-  </p> -->
-  <!-- <p *ngIf="email" style="font-size:14px;color:#666;margin-top:4px;">
-    Email: {{ email }}
-  </p> -->
-</h1>
-
-    <ion-avatar class="profile-avatar" (click)="showTestOverlay()" title="Open test overlay" style="cursor:pointer;">
+  <!-- <div class="greeting">
+    <ion-avatar class="profile-avatar" (click)="showTestOverlay()" title="Open test overlay">
       <img src="assets/engIcon.png" alt="Profile" />
     </ion-avatar>
-    <!-- <div style="margin-top:12px;">
-      <ion-button color="danger" (click)="showTestOverlay()">Log Out</ion-button>
-    </div> -->
-  </div>
+    <div class="greeting-text">
+      <h1>
+        Good Morning,<br>
+        <p *ngIf="firstName && lastName" class="profileName">
+          {{ firstName }} {{ lastName }}
+        </p>
+        <p *ngIf="(!firstName || !lastName) && userName" class="profileName">
+          {{ userName }}
+        </p>
+      </h1>
+    </div>
+  </div> -->
 
   <!-- Big Action Boxes -->
- <!-- Big Action Boxes -->
-<div class="main-buttons">
-  <div class="big-btn grammar" (click)="goToCameraPage2()">
-    <img src="assets/Camera_White.png" alt="Camera" class="big-icon1" />
-    <h2 class="dark-text">Start New Session</h2>
-    <!-- <p>120 × 30 words</p> -->
-  </div>
-
-  <div class="right-column">
-    <div class="big-btn lessons"  (click)="goSessionPage()">
-      <!-- <ion-icon name="reader-outline"></ion-icon> -->
-       <img src="assets/Session-White.png" alt="Upload" class="big-icon2" />
-      <h2>Previous Sessions</h2>
-      <!-- <p>20 × 8 words</p> -->
+  <div class="main-buttons">
+    <div class="big-btn grammar" (click)="goToCameraPage2()">
+      <img src="assets/Camera_White.png" alt="Camera" class="big-icon1" />
+      <h2 class="dark-text">Start New Session</h2>
     </div>
 
-    <div class="big-btn tests" (click)="goToUploadImage()">
-      <img src="assets/Upload_Image_White.png" alt="Upload" class="big-icon2" />
-  <h2 class="dark-text">Upload Image</h2>
-      <!-- <p>60 × 2 words</p> -->
+    <div class="right-column">
+      <div class="big-btn lessons" (click)="goSessionPage()">
+        <img src="assets/Session-White.png" alt="Upload" class="big-icon2" />
+        <h2>Previous Sessions</h2>
+      </div>
+
+      <div class="big-btn tests" (click)="goToUploadImage()">
+        <img src="assets/Upload_Image_White2.png" alt="Upload" class="big-icon2" />
+        <h2 class="dark-text">Upload Image</h2>
+      </div>
     </div>
   </div>
-</div>
 
-<!-- Sessions summary + list -->
-<div class="sessions-summary">
-  <div class="summary-title">Saved Sessions</div>
-  <div class="summary-count">Total Sessions: {{ sessions.length || 0 }}</div>
-</div>
+  <!-- Sessions summary + list -->
+  <div class="sessions-summary">
+    <div class="summary-title">Saved Sessions</div>
+    <div class="summary-count">Total Sessions: {{ sessions.length || 0 }}</div>
+  </div>
 
-<div class="sessions-list" style="margin-top:12px;padding:0 16px;">
-  <div style="display:flex;flex-direction:column;gap:8px;">
+  <div class="sessions-list">
     <div *ngFor="let s of sessions" class="session-item" (click)="goToSession(s)">
       <div class="session-info">
         <div class="session-name">{{ s.name }}</div>
         <div class="session-details">{{ s.imageKeys?.length || 0 }} images • {{ s.created | date:'short' }}</div>
       </div>
-      <button class="delete-btn" (click)="deleteSession(s, $event)">Delete</button>
+      <button class="delete-btn" (click)="deleteSession(s, $event)">
+        <img src="assets/Camera_White.png" alt="Delete" style="width: 24px; height: 24px; object-fit: contain;" />
+      </button>
+    </div>
+    <div *ngIf="!sessions || sessions.length === 0" class="no-sessions">
+      No sessions yet. Start a new session to get started.
     </div>
   </div>
-  <div *ngIf="!sessions || sessions.length === 0" style="text-align:center;padding:16px;color:#999;font-size:14px;">
-    No sessions yet. Start a new session to get started.
-  </div>
-</div>
-
-
-<!-- Bottom Navigation -->
-<div class="bottom-nav">
-
-</div>
 
 </ion-content>
+

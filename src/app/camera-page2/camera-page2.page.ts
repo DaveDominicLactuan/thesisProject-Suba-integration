@@ -720,6 +720,8 @@ export class CameraPage2Page implements AfterViewInit {
       box.style.borderRadius = '8px';
       box.style.minWidth = '280px';
       box.style.maxWidth = '92vw';
+      box.style.height = '600px';
+      box.style.width = '400px';
       box.style.boxShadow = '0 6px 18px rgba(0,0,0,0.2)';
       box.style.display = 'flex';
       box.style.flexDirection = 'column';
@@ -793,7 +795,8 @@ export class CameraPage2Page implements AfterViewInit {
       thumbScroll.style.gap = '16px';
       thumbScroll.style.padding = '12px';
       thumbScroll.style.width = '100%';
-      thumbScroll.style.maxHeight = '60vh';
+      thumbScroll.style.height = '490px';
+      thumbScroll.style.maxHeight = '90vh';
       thumbScroll.style.boxSizing = 'border-box';
 
       const updateThumbnails = () => {
@@ -823,8 +826,13 @@ export class CameraPage2Page implements AfterViewInit {
           const img = document.createElement('img');
           img.className = 'thumbnail2';
           img.style.display = 'block';
-          img.style.maxWidth = '85%';
-          img.style.maxHeight = '60vh';
+          img.style.maxWidth = '95%';
+          // img.style.maxHeight = '60vh';
+          img.style.maxHeight = '95%';
+          img.style.height = '400px'
+          img.style.width = '490px';
+          img.style.minWidth = '250px';
+          img.style.minHeight = '250px'
           img.style.objectFit = 'contain';
           img.style.borderRadius = '6px';
           img.style.boxShadow = '0 0 6px rgba(0,0,0,0.12)';
@@ -853,8 +861,15 @@ export class CameraPage2Page implements AfterViewInit {
           img.src = src;
           img.className = 'thumbnail2';
           img.style.display = 'block';
-          img.style.maxWidth = '85%';
-          img.style.maxHeight = '60vh';
+          // img.style.maxWidth = '85%';
+          // img.style.maxHeight = '60vh';
+          img.style.maxWidth = '95%';
+          // img.style.maxHeight = '60vh';
+          img.style.maxHeight = '95%';
+          img.style.height = '400px'
+          img.style.width = '490px';
+          img.style.minWidth = '250px';
+          img.style.minHeight = '250px'
           img.style.objectFit = 'contain';
           img.style.borderRadius = '6px';
           img.style.border = src === this.selectedThumbSrc ? '3px solid #2ecc71' : '2px solid #fff';

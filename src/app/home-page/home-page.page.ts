@@ -26,6 +26,7 @@ export class HomePagePage implements OnInit, OnDestroy {
   private backButtonSub: any; // hardware back handler
   isLoggedIn: boolean = false;
   userRole: string | null = null;
+  isSidebarOpen: boolean = false;
 
   /** Inject auth, router, and image storage services for navigation and data. */
   constructor(private formBuilder: FormBuilder, private router: Router, private authService: AuthService, private navCtrl: NavController, private auth3: Auth3Service, private imageStorage: ImageStorageService, private platform: Platform) {
@@ -116,11 +117,20 @@ private async initialize(): Promise<void> {
 
   // Wait for Firebase auth to emit a user or timeout
   private waitForUserAuth(timeoutMs: number = 8000): Promise<User | null> {
+    //A new Promise is created to handle the asynchronous waiting process.
+    //The settled flag ensures that the promise is resolved only once, 
+    //even if multiple events occur (e.g., user detected and timeout).
     return new Promise((resolve) => {
       let settled = false as boolean;
+      //This helper function resolves the promise with the provided user 
+      // u) only if the promise has not already been resolved (settled is false).
       const maybeResolve = (u: User | null) => {
         if (!settled) { settled = true; resolve(u); }
       };
+      //The onAuthChange method from auth3 is used to listen for changes 
+      // in the authentication state. user (u) is detected, the promise 
+      // is resolved with the user, and the listener (unsub) is unsubscribed to 
+      // prevent further calls.
       let unsub: any = null;
       try {
         unsub = this.auth3.onAuthChange((u) => {
@@ -130,6 +140,9 @@ private async initialize(): Promise<void> {
           }
         });
       } catch {}
+      //A setTimeout is used to enforce the maximum wait time (timeoutMs). 
+      //If the timeout is reached, the listener is unsubscribed, and the promise 
+      // is resolved with the current user (if available) or null.
       setTimeout(() => {
         try { if (unsub) unsub(); } catch {}
         maybeResolve(this.auth3.getCurrentUser() || null);
@@ -247,6 +260,25 @@ private async initialize(): Promise<void> {
   goSessionPage() {
     // this.router.navigate(['/session-page']);
     console.log('pdf 2 page');
+  }
+
+  /** Shared logout flow used by overlay button and menu item. */
+  async logout(closeOverlay: boolean = false) {
+    try {
+      await this.auth3.logout();
+    } catch {}
+    try { localStorage.setItem('isLoggedIn', 'false'); } catch {}
+    try { localStorage.removeItem('userData'); } catch {}
+    this.isLoggedIn = false;
+    if (closeOverlay) {
+      this.removeTestOverlay();
+    }
+    // Navigate to landing page replacing history so next back exits
+    try {
+      this.router.navigateByUrl('/landing-page', { replaceUrl: true });
+    } catch {
+      this.router.navigate(['/landing-page']);
+    }
   }
 
   /**
@@ -581,19 +613,7 @@ private async initialize(): Promise<void> {
 
     // Logout flow
     logoutBtn.addEventListener('click', async () => {
-      try {
-        await this.auth3.logout();
-      } catch {}
-      try { localStorage.setItem('isLoggedIn', 'false'); } catch {}
-      try { localStorage.removeItem('userData'); } catch {}
-      this.isLoggedIn = false;
-      try { cleanupOverlay(); } catch {}
-      // Navigate to landing page replacing history so next back exits
-      try {
-        this.router.navigateByUrl('/landing-page', { replaceUrl: true });
-      } catch {
-        this.router.navigate(['/landing-page']);
-      }
+      await this.logout(true);
     });
 
     // Test create session button: create a session populated with stored images and refresh list
@@ -704,10 +724,7 @@ private async initialize(): Promise<void> {
 
     // local cleanup helper removes overlay element
     const cleanupOverlay = () => {
-      try {
-        const el = document.getElementById('test-overlay');
-        if (el && el.parentElement) el.parentElement.removeChild(el);
-      } catch (e) {}
+      this.removeTestOverlay();
     };
 
     document.body.appendChild(overlay);
@@ -724,7 +741,7 @@ private async initialize(): Promise<void> {
         try {
           const overlay = document.getElementById('test-overlay');
           if (overlay) {
-            try { overlay.remove(); } catch (e) {}
+            try { this.removeTestOverlay(); } catch (e) {}
             return;
           }
         } catch (e) {}
@@ -733,6 +750,14 @@ private async initialize(): Promise<void> {
     } catch (e) {
       console.warn('[HomePage] registerBackButtonHandler failed', e);
     }
+  }
+
+  /** Remove the test overlay from DOM if present. */
+  private removeTestOverlay() {
+    try {
+      const el = document.getElementById('test-overlay');
+      if (el && el.parentElement) el.parentElement.removeChild(el);
+    } catch {}
   }
 
   /** Remove the home-page back handler so other pages can handle back navigation normally, 
@@ -753,5 +778,11 @@ private async initialize(): Promise<void> {
     this.removeBackButtonHandler();
   }
   
-  
+  openMenu(menuId: string) {
+    this.isSidebarOpen = !this.isSidebarOpen;
+  }
+
+  closeSidebar() {
+    this.isSidebarOpen = false;
+  }
 }
