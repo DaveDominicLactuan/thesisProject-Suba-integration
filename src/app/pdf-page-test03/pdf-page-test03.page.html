@@ -9,17 +9,33 @@
   <div #pdfContainer style="display: flex; justify-content: center; align-items: flex-start; width: 100%; margin-top: 0; padding-top: 0;"></div>
 
   <div class="bottom-actions">
-    <ion-button fill="clear" (click)="openPDF()">
-      <ion-icon name="open-outline"></ion-icon>
-      <span>Open</span>
-    </ion-button>
-    <ion-button fill="clear" (click)="previewPdf()">
-      <ion-icon name="open-outline"></ion-icon>
-      <span>Generate & Preview PDF</span>
-    </ion-button>
-    <ion-button fill="clear" (click)="downloadPDF()">
-      <ion-icon name="download-outline"></ion-icon>
-      <span>Download</span>
-    </ion-button>
+    <!-- Upload and Finish blocks (now siblings of the spinner block for even spacing) -->
+    <div class="func-action" (click)="openPDF()">
+      <button class="function-btn icon-btn" aria-label="Open PDF">
+        <img src="assets/updatedOpenPDF.png" class="action-icon" />
+      </button>
+      <div class="action-label">Open</div>
+    </div>
+
+    <div class="func-action" (click)="previewPdf()">
+      <button class="function-btn icon-btn" aria-label="Preview PDF">
+          <img src="assets/updatedPreviewDownload.png" class="action-icon" />
+        </button>
+      <div class="action-label">Generate & Preview</div>
+    </div>
+
+    <div class="func-action" (click)="downloadPDF()">
+      <button class="function-btn icon-btn" aria-label="Download PDF">
+        <img src="assets/updatedDownloadPDF.png" class="action-icon" />
+      </button>
+      <div class="action-label">Download</div>
+    </div>
   </div>
+
+   <div class="back-button-container">
+      <button class="back-btn" type="button" (click)="onBack()">
+        <img src="assets/back.png" alt="Back" class="back-icon" />
+      </button>
+    </div>
+    
 </ion-content>

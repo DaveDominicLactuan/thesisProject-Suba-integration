@@ -81,7 +81,7 @@ signupForm: FormGroup;
       console.log('[LoginPage] navigating to /home-page');
 
       //only remove login page from history stack in the browser, replaceUrl true does that
-      this.router.navigateByUrl('/home-page', { replaceUrl: true });
+      this.router.navigateByUrl('/home-page2', { replaceUrl: true });
 
 
     } catch (err: any) {
@@ -125,6 +125,12 @@ togglePasswordVisibility() {
   /** Navigate directly to Home page (bypasses login flow). */
   goToHomePage() {
     this.router.navigate(['/home-page']);
+    console.log('camera page');
+  }
+
+  /** Navigate directly to Home page (bypasses login flow). */
+  goToHomePage2() {
+    this.router.navigate(['/home-page2']);
     console.log('camera page');
   }
 

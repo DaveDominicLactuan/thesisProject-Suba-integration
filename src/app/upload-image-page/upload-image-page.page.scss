@@ -62,18 +62,30 @@ form, input, optgroup, select {
 	height: 100%;
 }
 
+/* Unified control bar container (stacks top then bottom) */
+.control-bar {
+	position: fixed;
+	left: 8px;
+	right: 8px;
+	bottom: 15%;
+	height: 50px;
+	display: flex;
+	flex-direction: column;
+	gap: 0px;
+	z-index: 25;
+	box-shadow: 0 6px 18px rgba(0,0,0,0.14);
+}
+
 /* Top Bar */
 .top-bar {
-	position: absolute;
-	top: 0;
+	position: relative;
 	width: 100%;
 	height: 60px;
 	display: flex;
 	align-items: center;
 	padding: 0 12px;
 	z-index: 20;
-	margin-top: 5%;
-	/* Add a border to the bottom of the top-bar */
+	border-radius: 16px 16px 0 0;
 	border-bottom: var(--border-size) solid #e0e0e0; /* Use CSS variable for border size */
 }
 
@@ -108,28 +120,33 @@ form, input, optgroup, select {
 
 /* Bottom Bar Container */
 .bottom-bar {
-  position: fixed;
-  bottom: 8px;
-  left: 8px;
-  right: 8px;
-  background: #f0f0f0;
-  border-radius: 16px;
-  padding: 12px;
-  z-index: 20;
-  box-shadow: 0 6px 18px rgba(0,0,0,0.12);
-  margin-bottom: 7%;
-  border: 1px solid transparent;
-  background:
-    linear-gradient(#fff, #fff) padding-box,
-    linear-gradient(to right, #ff512f, #f09819) border-box;
+	position: relative;
+	background: #f0f0f0;
+	border-radius: 0 0 16px 16px;
+	padding: 9px;
+// 	padding-top: 12px;
+// padding-right: 12px;
+// padding-bottom: 12px;
+// padding-left: 12px;
+	z-index: 20;
+	border: 1px solid transparent;
+	background:
+		linear-gradient(#fff, #fff) padding-box,
+		linear-gradient(to right, #ff512f, #f09819) border-box;
+		margin-bottom: 10px;
 }
 
 .bottom-top-row {
   display: flex;
   justify-content: space-around; /* spread the three action blocks evenly */
-  margin-bottom: 6px;
+  margin-bottom: 1px;
   align-items: center;
-  padding: 6px 4px;
+  padding: 2px 4px;
+  //6px top and bottom and 4px left and right
+//   padding-top: 6px;
+// padding-right: 4px;
+// padding-bottom: 6px;
+// padding-left: 4px;
 }
 
 .function-btn {
@@ -156,9 +173,7 @@ form, input, optgroup, select {
   padding: 6px;
   border-radius: 10px;
   border: 1px solid transparent; /* enable gradient border */
-  background:
-    linear-gradient(#fff, #fff) padding-box,
-    linear-gradient(to right, #ff512f, #f09819) border-box;
+  background: #f09819;
 }
 .action-icon { font-size:20px; }
 .action-label { font-size:12px; font-weight:600; color:#000; text-align:center; }
@@ -176,6 +191,13 @@ form, input, optgroup, select {
 	width: 28px;
 	height: 28px;
 	object-fit: contain;
+}
+
+/* Center title in top bar */
+.top-title {
+	flex: 1;
+	text-align: center;
+	margin-right: -20px;
 }
 
 /* Toggle switch styles (used in top-bar) */
@@ -328,7 +350,7 @@ form, input, optgroup, select {
 			margin: 0 auto;
 			z-index: 5;
 			position: absolute;
-			top: 7%;
+			top: 5%;
 			left: 0%;
 			scroll-snap-type: x mandatory;
 			scroll-padding-left: 50%;
@@ -352,8 +374,8 @@ form, input, optgroup, select {
 			display: block;
 			margin: 0 12px;
 			flex: 1 1 0;
-			max-width: 95%;
-			max-height: 95%;
+			max-width: 75%;
+			max-height: 75%;
 			width: auto;
 			height: auto;
 			min-height: 390px;
@@ -377,8 +399,8 @@ form, input, optgroup, select {
 			/* Active/selected state */
 			&[style*="border: 3px solid #2ecc71"] {
 				transform: scale(1.08);
-				box-shadow: 0 6px 20px rgba(46, 204, 113, 0.6);
-				border: 3px solid #2ecc71 !important;
+				box-shadow: 0 6px 20px #ffaa32;
+				border: 3px solid #f09819 !important;
 			}
 }
 
@@ -510,9 +532,11 @@ form, input, optgroup, select {
 }
 
 .back-icon {
-	width: 25px;
-	height: 25px;
-	display: block;
+	width: 40px;
+	height: 40px;
+	// display: block;
+	margin-left: 2.2px;
+	margin-bottom: 5px;
 }
 
 .func-action .action-label {
@@ -529,7 +553,8 @@ form, input, optgroup, select {
 
 /* Added gradient background to top-bar */
 .top-bar {
-  background: linear-gradient(to right, #ff512f, #f09819);
+//   background: linear-gradient(to right, #ff512f, #f09819);
+ background: #f09819;;
 }
 
 /* Added CSS variable for border size to allow dynamic adjustment */
@@ -539,4 +564,119 @@ form, input, optgroup, select {
 
 .top-bar {
   border-bottom: var(--border-size) solid #e0e0e0; /* Use CSS variable for border size */
+}
+
+.back-button-container {
+  position: fixed;
+  top: 43px;
+  left: 30px;
+  z-index: 1000;
+  width: 45px;
+  height: 45px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: rgba(255, 255, 255, 0.907); /* Slightly transparent background */
+  border-radius: 8px; /* Optional for rounded corners */
+  box-shadow: 0px 2px 6px rgba(0, 0, 0, 0.2); /* Optional for subtle shadow */
+}
+
+.back-button-container .back-btn {
+  /* Fill container and center content */
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  padding: 0;
+}
+
+.back-button-container img {
+  max-width: 65%;
+  max-height: 65%;
+  object-fit: contain;
+  display: block; /* avoid baseline gaps */
+}
+
+
+
+.back-button-container2 {
+  position: fixed;
+  top: 43px;
+  right: 30px;
+  z-index: 1000;
+  width: 43px;
+  height: 43px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: rgba(255, 255, 255, 0.907); /* Slightly transparent background */
+  border-radius: 8px; /* Optional for rounded corners */
+  box-shadow: 0px 2px 6px rgba(0, 0, 0, 0.2); /* Optional for subtle shadow */
+}
+
+
+.back-button-container .back-btn {
+  /* Fill container and center content */
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  padding: 0;
+}
+
+.back-button-container img {
+  max-width: 65%;
+  max-height: 65%;
+  object-fit: contain;
+  display: block; /* avoid baseline gaps */
+  margin-right: 3px;
+  margin-bottom: 8px;
+}
+
+
+
+.back-button-container2 {
+  position: fixed;
+  top: 43px;
+  right: 30px;
+  z-index: 1000;
+  width: 43px;
+  height: 43px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: rgb(255, 255, 255); /* Slightly transparent background */
+  border-radius: 8px; /* Optional for rounded corners */
+  box-shadow: 0px 2px 6px rgba(0, 0, 0, 0.2); /* Optional for subtle shadow */
+}
+
+
+.back-button-container2 .back-btn2 {
+  /* Fill container and center content */
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  padding: 0;
+}
+
+.back-button-container2 img {
+  max-width: 45%;
+  max-height: 45%;
+  object-fit: contain;
+  display: block; /* avoid baseline gaps */
+  margin-right: 1px;
+  margin-bottom: 0px;
 }

@@ -1,6 +1,13 @@
 
 <div class="background">
 
+  <!-- Background image and overlay -->
+  <div class="page-bg" aria-hidden="true">
+    <img src="assets/backgroundImage2.png" alt="Background" />
+    <div class="overlay"></div>
+    <!-- pointer-events disabled via CSS so UI remains clickable -->
+  </div>
+
 
 
   <div class="logo">
@@ -11,6 +18,8 @@
     <h5>Welcome to</h5>
     <h3>D.A.M.A.G.E.</h3>
   </div>
+
+  <div class="register-login-bg"></div>
 
   <div class="registerLogin">
     <button class="sign-in-button"(click)="goToLogIn()">Login</button>

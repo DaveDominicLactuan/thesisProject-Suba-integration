@@ -1,7 +1,14 @@
+<!-- Background image and overlay -->
+<div class="page-bg" aria-hidden="true">
+  <img src="assets/resultImage2.png" alt="Background" />
+  <div class="overlay"></div>
+  <!-- pointer-events disabled via CSS so UI remains clickable -->
+ </div>
+
 <div class="dashboard-bg">
   <ion-content class="ion-padding">
     <!-- Header Card -->
-    <div class="card header-card">
+    <!-- <div class="card header-card" style="margin-top: 75px;">
       <div class="header-row">
         <div class="title">Tests Result</div>
         <div class="scope">{{ getScopeText() }}</div>
@@ -15,10 +22,10 @@
           <div class="legend-item"><span class="dot motion"></span> Total Images - {{ stats.totalImages }}</div>
         </div>
       </div>
-    </div>
+    </div> -->
 
     <!-- Tiles Row -->
-    <div class="tiles">
+    <div class="tiles" style="margin-top: 85px;">
       <div class="tile blue">
         <div class="tile-value">{{ stats.totalCracks }}</div>
         <div class="tile-label">Total Cracks:</div>
@@ -154,7 +161,14 @@
 
     <!-- Export Button -->
     <div class="footer">
-      <button class="export-btn" (click)="ExportPDF()">Export & Preview PDF Results</button>
+      <button class="export-btn2" (click)="ExportPDF()">Export & Preview PDF Results</button>
     </div>
   </ion-content>
 </div>
+
+<!-- Back button at the top left corner -->
+ <div class="back-button-container">
+      <button class="back-btn" type="button" (click)="onBack()">
+        <img src="assets/back.png" alt="Back" class="back-icon" />
+      </button>
+    </div>

@@ -15,8 +15,8 @@ export class AppComponent {
       let loggedIn = false;
       try { loggedIn = localStorage.getItem('isLoggedIn') === 'true'; } catch {}
       if (loggedIn) {
-        // Navigate directly to home-page
-        this.router.navigateByUrl('/home-page', { replaceUrl: true });
+        // Navigate directly to home-page2
+        this.router.navigateByUrl('/home-page2', { replaceUrl: true });
       } else {
         // Navigate to landing-page
         this.router.navigateByUrl('/landing-page', { replaceUrl: true });

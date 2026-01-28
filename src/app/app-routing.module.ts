@@ -88,7 +88,11 @@ const routes: Routes = [
   {
     path: 'results-dashboard',
     loadChildren: () => import('./results-dashboard/results-dashboard.module').then(m => m.ResultsDashboardModule)
+  },  {
+    path: 'home-page2',
+    loadChildren: () => import('./home-page2/home-page2.module').then( m => m.HomePage2PageModule)
   },
+
 
 
 ];

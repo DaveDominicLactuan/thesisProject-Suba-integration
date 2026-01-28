@@ -11,15 +11,15 @@
 /* Image above gradient header */
 .home-page-img {
   position: fixed;
-  top: -2.7%;
+  top: -3%;
   left: 0;
   right: 0;
   width: 100%;
   height: 300px;
   z-index: 9; /* below gradient header but above page base */
   object-fit: cover;
-  border-bottom-left-radius: 11%;
-  border-bottom-right-radius: 11%;
+  border-bottom-left-radius: 15%;
+  border-bottom-right-radius: 15%;
   opacity: 0.8; /* soften background image */
 
 }
@@ -467,17 +467,17 @@ ion-content.home-page {
   border-bottom-left-radius: 8px;
   background-color: #fff;
   box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
-  height: 430px;
+  height: 450px;
   overflow-y: auto;
   position: relative;
-  top: 31%;
+  top: 30%;
   gap: 5px;
   z-index: 20;
 }
 
 /* Sessions summary pill */
 .sessions-summary {
-   width: 90.8%;
+   width: 90%;
    height: 50px;
   margin: 16px;
   padding: 16px;
@@ -489,10 +489,8 @@ ion-content.home-page {
   box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
   color: #2f2f2f;
   display: flex;
-  flex-direction: row;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
+  flex-direction: column;
+  gap: 4px;
   position: relative;
   top: 35%;
   z-index: 20;
@@ -508,37 +506,6 @@ ion-content.home-page {
     font-size: 15px;
     font-weight: 600;
     line-height: 1.2;
-  }
-
-  .sort-btn {
-    // background: linear-gradient(to right, #ff512f, #f09819);
-    background: rgba(240, 152, 25, 0.15);
-    color: #f09819;
-    border: none;
-    // border-radius: 8px;
-    border-radius: 12px;
-    width: 40px;
-    height: 40px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-    // color: #fff;
-    transition: transform 0.2s ease, box-shadow 0.2s ease;
-    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
-
-    ion-icon {
-      font-size: 24px;
-    }
-
-    &:hover {
-      transform: translateY(-2px);
-      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
-    }
-
-    &:active {
-      transform: translateY(0);
-    }
   }
 }
 
@@ -858,142 +825,4 @@ ion-menu ion-item:hover {
   inset: 0;
   background: rgba(0, 0, 0, 0.35);
   z-index: 900; /* sits behind the sidebar but above page content */
-}
-
-/* Sort overlay styles */
-.sort-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.5);
-  z-index: 1001;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  animation: fadeIn 0.2s ease;
-}
-
-.sort-menu {
-  background: #fff;
-  border-radius: 16px;
-  width: 90%;
-  max-width: 400px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
-  animation: slideUp 0.3s ease;
-
-  .sort-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 20px;
-    border-bottom: 1px solid #e0e0e0;
-
-    h3 {
-      margin: 0;
-      font-size: 18px;
-      font-weight: 700;
-      color: #333;
-    }
-
-    .close-sort-btn {
-      background: transparent;
-      border: none;
-      cursor: pointer;
-      padding: 4px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      color: #666;
-      transition: color 0.2s ease;
-
-      ion-icon {
-        font-size: 28px;
-      }
-
-      &:hover {
-        color: #333;
-      }
-    }
-  }
-
-  .sort-options {
-    padding: 16px;
-
-    .sort-section {
-      margin-bottom: 20px;
-
-      &:last-child {
-        margin-bottom: 0;
-      }
-
-      h4 {
-        margin: 0 0 12px 0;
-        font-size: 14px;
-        font-weight: 600;
-        color: #666;
-        text-transform: uppercase;
-        letter-spacing: 0.5px;
-      }
-
-      .sort-option {
-        width: 100%;
-        padding: 14px 16px;
-        margin-bottom: 8px;
-        background: #f8f8f8;
-        border: 2px solid transparent;
-        border-radius: 10px;
-        display: flex;
-        align-items: center;
-        gap: 12px;
-        cursor: pointer;
-        transition: all 0.2s ease;
-        color: #333;
-        font-size: 15px;
-        font-weight: 500;
-
-        &:last-child {
-          margin-bottom: 0;
-        }
-
-        ion-icon {
-          font-size: 22px;
-          color: #666;
-        }
-
-        &:hover {
-          background: #f0f0f0;
-          border-color: #f09819;
-        }
-
-        &.active {
-          background: linear-gradient(135deg, rgba(255, 81, 47, 0.1), rgba(240, 152, 25, 0.1));
-          border-color: #f09819;
-          color: #f09819;
-
-          ion-icon {
-            color: #f09819;
-          }
-        }
-      }
-    }
-  }
-}
-
-@keyframes fadeIn {
-  from {
-    opacity: 0;
-  }
-  to {
-    opacity: 1;
-  }
-}
-
-@keyframes slideUp {
-  from {
-    transform: translateY(20px);
-    opacity: 0;
-  }
-  to {
-    transform: translateY(0);
-    opacity: 1;
-  }
 }

@@ -1,11 +1,21 @@
-<!-- 🔝 Top Bar -->
+<!-- Thumbnail section (outside control-bar, above) -->
+<div *ngIf="imagePaths.length === 0 && capturedImages.length === 0" class="thumbnail-placeholder"></div>
+<div *ngIf="imagePaths.length > 0" class="thumbnail-scroll2" #thumbScroll (scroll)="onThumbnailScroll($event)" [ngClass]="getThumbClasses(imagePaths.length)">
+  <img *ngFor="let img of imagePaths" [src]="(showWithBoxes && img.withBoxes) ? img.withBoxes : img.original" class="thumbnail2" [style.border]="selectedThumbSrc===((showWithBoxes && img.withBoxes) ? img.withBoxes : img.original) ? '3px solid #f09819' : 'none'" (click)="onStoredThumbClick(img)" />
+</div>
+<div *ngIf="imagePaths.length === 0 && capturedImages.length > 0" class="thumbnail-scroll2" #thumbScroll (scroll)="onThumbnailScroll($event)" [ngClass]="getThumbClasses(capturedImages.length)">
+  <img *ngFor="let img of capturedImages" [src]="img" class="thumbnail2" [style.border]="selectedThumbSrc===img ? '3px solid #f09819' : 'none'" (click)="onStoredThumbClick({ original: img, withBoxes: img, fileName: '' })" />
+</div>
+
+<!-- Combined control bar (top on top, bottom below) -->
+<div class="control-bar">
   <div class="top-bar">
-    <button class="back-btn" type="button" (click)="onBack()">
+    <!-- <button class="back-btn" type="button" (click)="onBack()">
       <img src="assets/wArrow.png" alt="Back" class="back-icon" />
-    </button>
+    </button> -->
     
     <!-- Center label showing current toggle state and selected image title -->
-    <span class="top-title">{{ selectedImageTitle || (showWithBoxes ? 'With Boxes' : 'Original') }}</span>
+    <span class="top-title" styles="5px";>{{ selectedImageTitle || (showWithBoxes ? 'With Boxes' : 'Original') }}</span>
 
     <div class="toggle-wrapper">
       <label class="switch">
@@ -15,19 +25,6 @@
     </div>
   </div>
 
-
-  <div *ngIf="imagePaths.length === 0 && capturedImages.length === 0" class="thumbnail-placeholder"></div>
-  <div *ngIf="imagePaths.length > 0" class="thumbnail-scroll2" #thumbScroll (scroll)="onThumbnailScroll($event)" [ngClass]="getThumbClasses(imagePaths.length)">
-    <img *ngFor="let img of imagePaths" [src]="(showWithBoxes && img.withBoxes) ? img.withBoxes : img.original" class="thumbnail2" [style.border]="selectedThumbSrc===((showWithBoxes && img.withBoxes) ? img.withBoxes : img.original) ? '3px solid #2ecc71' : 'none'" (click)="onStoredThumbClick(img)" />
-  </div>
-  <div *ngIf="imagePaths.length === 0 && capturedImages.length > 0" class="thumbnail-scroll2" #thumbScroll (scroll)="onThumbnailScroll($event)" [ngClass]="getThumbClasses(capturedImages.length)">
-    <img *ngFor="let img of capturedImages" [src]="img" class="thumbnail2" [style.border]="selectedThumbSrc===img ? '3px solid #2ecc71' : 'none'" (click)="onStoredThumbClick({ original: img, withBoxes: img, fileName: '' })" />
-  </div>
-
-    <!-- Hidden multi-file input used by Upload Images button -->
-    <input type="file" #fileInput accept="image/*" multiple style="display:none" (change)="onFileSelected($event)" />
-
-  <!-- Bottom rounded action bar reworked to have two sections like camera-page (top + bottom) -->
   <div class="bottom-bar">
     <!-- Top section: keep existing controls here (spinner + action buttons) -->
     <div class="bottom-top-row">
@@ -40,38 +37,45 @@
           <div class="center-value-rect">{{ photosProcessed }}/{{ photosTaken }}</div>
           <div class="red-circle" [ngClass]="{ 'green': photosProcessed === photosTaken, 'red': photosProcessed < photosTaken }"></div>
         </div>
-        
       </div>
 
       <!-- Upload and Finish blocks (now siblings of the spinner block for even spacing) -->
-      <div class="func-action" (click)="deleteSelectedImage()">
-        <button class="function-btn icon-btn" aria-label="Upload Image">
-          <img src="assets/upload_img2.png" alt="Upload" class="action-icon" />
-        </button>
-        <div class="action-label">Delete Image</div>
-      </div>
-
-      <div class="func-action" (click)="pickImagesMobile()">
+       <div class="func-action" (click)="pickImagesMobile()">
         <button class="function-btn icon-btn" aria-label="Upload Image">
           <img src="assets/upload_img2.png" alt="Upload" class="action-icon" />
         </button>
         <div class="action-label">Upload Image</div>
       </div>
 
-      <div class="func-action" (click)="goToFeedBackPage()">
+      <div class="func-action" (click)="deleteSelectedImage()">
+        <button class="function-btn icon-btn" aria-label="Upload Image">
+          <img src="assets/Trash.png" alt="Upload" class="action-icon" />
+        </button>
+        <div class="action-label">Delete Image</div>
+      </div>
+
+      
+      <!-- <div class="func-action" (click)="goToFeedBackPage()">
         <button class="function-btn icon-btn" aria-label="Finish Session">
           <img src="assets/Check_Black.png" alt="Finish" class="action-icon" />
         </button>
         <div class="action-label">Finish Session</div>
-      </div>
-
+      </div> -->
     </div>
 
-    <!-- Bottom section: empty placeholder to match camera-page's two-section layout (for future controls) -->
-    <div class="bottom-bottom-row" style="display:flex;justify-content:center;align-items:center;padding-top:8px;">
-      <!-- Intentionally left blank for upload-image specific controls if needed -->
-    </div>
   </div>
+</div>
 
-  <!-- </ion-content>
-</div> -->
+<!-- Back button at the top left corner -->
+<div class="back-button-container">
+  <button class="back-btn" type="button" (click)="onBack()">
+    <img src="assets/back.png" alt="Back" class="back-icon" />
+  </button>
+</div>
+
+<!-- Back button at the top left corner -->
+<div class="back-button-container2">
+  <button class="back-btn2" type="button" (click)="goToFeedBackPage()">
+    <img src="assets/Check_Black.png" alt="Back" class="back-icon" />
+  </button>
+</div>

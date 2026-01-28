@@ -1332,16 +1332,16 @@ export class CameraPage2Page implements AfterViewInit {
           } else if (typeof this.imageStorage.removeSession === 'function') {
             this.imageStorage.removeSession(activeId);
           }
-          this.router.navigate(['/home-page']);
+          this.router.navigate(['/home-page2']);
           return;
         }
         if (choice === 'stay' || choice === null) return;
       }
 
-      this.router.navigate(['/home-page']);
+      this.router.navigate(['/home-page2']);
     } catch (e) {
       console.warn('handleGoHome failed', e);
-      this.router.navigate(['/home-page']);
+      this.router.navigate(['/home-page2']);
     }
   }
 

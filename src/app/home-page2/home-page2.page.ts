@@ -10,12 +10,12 @@ import { App } from '@capacitor/app';
 import { jsPDF } from 'jspdf';
 
 @Component({
-  selector: 'app-session-page',
-  templateUrl: './session-page.page.html',
-  styleUrls: ['./session-page.page.scss'],
+  selector: 'app-home-page2',
+  templateUrl: './home-page2.page.html',
+  styleUrls: ['./home-page2.page.scss'],
   standalone: false
 })
-export class SessionPagePage implements OnInit, OnDestroy {
+export class HomePage2Page implements OnInit, OnDestroy {
   userName: string | null = null;
   firstName: string | null = null;
   lastName: string | null = null;
@@ -27,8 +27,6 @@ export class SessionPagePage implements OnInit, OnDestroy {
   isLoggedIn: boolean = false;
   userRole: string | null = null;
   isSidebarOpen: boolean = false;
-  isSortOverlayOpen: boolean = false;
-  currentSort: string = 'time-newest'; // default sorting
 
   /** Inject auth, router, and image storage services for navigation and data. */
   constructor(private formBuilder: FormBuilder, private router: Router, private authService: AuthService, private navCtrl: NavController, private auth3: Auth3Service, private imageStorage: ImageStorageService, private platform: Platform) {
@@ -150,16 +148,12 @@ private async initialize(): Promise<void> {
   // Called by Ionic when page becomes active — refresh and loads sessions/counts/
   /** Ionic hook: refresh sessions each time page becomes active. */
   ionViewWillEnter() {
-    // Ensure any existing back button handlers are cleared before entering
-    this.removeBackButtonHandler();
     this.loadSessions();
   }
 
   /** Register hardware back handler only while this view is active, 
    * allowing for hardware back button navigation */
   ionViewDidEnter() {
-    // Double-check removal of any lingering handlers before registering new one
-    this.removeBackButtonHandler();
     this.registerBackButtonHandler();
   }
 
@@ -259,7 +253,7 @@ private async initialize(): Promise<void> {
 
   /** Navigate to sessions list page. */
   goSessionPage() {
-    // this.router.navigate(['/session-page']);
+    this.router.navigate(['/session-page']);
     console.log('pdf 2 page');
   }
 
@@ -347,7 +341,7 @@ private async initialize(): Promise<void> {
     this.router.navigate(['/upload-image-page']);
     console.log('pdf 3 page');
   }
-
+  
 
 
   /**
@@ -732,40 +726,24 @@ private async initialize(): Promise<void> {
     // No local back subscription: page-level handler will close the overlay when present
   }
 
-  /** Register back button handler for closing overlays only (no app exit). */
+  /** Register a one-page-only back button that exits the app from home. 
+   * and if test-overlay is currently append close the overlay before exit app logic from home */
   private registerBackButtonHandler() {
     try {
       this.removeBackButtonHandler();
       // priority 10: high enough to intercept overlay/back behavior on this page
       this.backButtonSub = this.platform.backButton.subscribeWithPriority(10, () => {
         try {
-          // Check for test overlay first
           const overlay = document.getElementById('test-overlay');
           if (overlay) {
             try { this.removeTestOverlay(); } catch (e) {}
             return;
           }
-          
-          // Check for sort overlay
-          if (this.isSortOverlayOpen) {
-            this.closeSortOverlay();
-            return;
-          }
-          
-          // Check for sidebar
-          if (this.isSidebarOpen) {
-            this.closeSidebar();
-            return;
-          }
-          
-          // No overlays open - allow default back navigation
-          // (navigate back in history or let other handlers process)
-        } catch (e) {
-          console.warn('[SessionPage] back button handler error', e);
-        }
+        } catch (e) {}
+        try { App.exitApp(); } catch (e) { console.warn('App.exitApp failed', e); }
       });
     } catch (e) {
-      console.warn('[SessionPage] registerBackButtonHandler failed', e);
+      console.warn('[HomePage2] registerBackButtonHandler failed', e);
     }
   }
 
@@ -777,7 +755,8 @@ private async initialize(): Promise<void> {
     } catch {}
   }
 
-  /** Remove the session page back handler so other pages can handle back navigation normally. */
+  /** Remove the home-page back handler so other pages can handle back navigation normally, 
+   * without exit app logic and behavior */
   private removeBackButtonHandler() {
     try {
       if (this.backButtonSub && typeof this.backButtonSub.remove === 'function') {
@@ -800,57 +779,5 @@ private async initialize(): Promise<void> {
 
   closeSidebar() {
     this.isSidebarOpen = false;
-  }
-
-  /** Show the sort overlay */
-  showSortOverlay() {
-    this.isSortOverlayOpen = true;
-  }
-
-  /** Close the sort overlay */
-  closeSortOverlay() {
-    this.isSortOverlayOpen = false;
-  }
-
-  /** Sort sessions based on selected criteria */
-  sortSessions(sortType: string) {
-    this.currentSort = sortType;
-    
-    switch (sortType) {
-      case 'time-newest':
-        this.sessions.sort((a, b) => {
-          const dateA = new Date(a.created).getTime();
-          const dateB = new Date(b.created).getTime();
-          return dateB - dateA; // newest first
-        });
-        break;
-      
-      case 'time-oldest':
-        this.sessions.sort((a, b) => {
-          const dateA = new Date(a.created).getTime();
-          const dateB = new Date(b.created).getTime();
-          return dateA - dateB; // oldest first
-        });
-        break;
-      
-      case 'images-most':
-        this.sessions.sort((a, b) => {
-          const countA = a.imageKeys?.length || 0;
-          const countB = b.imageKeys?.length || 0;
-          return countB - countA; // most images first
-        });
-        break;
-      
-      case 'images-least':
-        this.sessions.sort((a, b) => {
-          const countA = a.imageKeys?.length || 0;
-          const countB = b.imageKeys?.length || 0;
-          return countA - countB; // least images first
-        });
-        break;
-    }
-    
-    // Close overlay after sorting
-    this.closeSortOverlay();
   }
 }

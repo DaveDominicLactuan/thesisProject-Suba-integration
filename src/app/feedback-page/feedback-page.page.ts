@@ -924,7 +924,7 @@ addEntry() {
       }
     
       // Final fallback: navigate to home page
-      this.router.navigateByUrl('/home-page');
+      this.router.navigateByUrl('/home-page2');
     } catch (e) {
       try { window.history.back(); } catch (err) { /* no-op */ }
     }
@@ -957,7 +957,7 @@ addEntry() {
           //prefer app level back, then browser than router, if all fails navigate to home
           this.navCtrl.back();
         } catch (e) {
-          try { window.history.back(); } catch (err) { this.router.navigateByUrl('/home-page'); }
+          try { window.history.back(); } catch (err) { this.router.navigateByUrl('/home-page2'); }
         }
       });
     } catch (e) {
@@ -1178,7 +1178,7 @@ addEntry() {
 
           try { document.body.removeChild(overlay); } catch (e) {}
           alert('Session saved successfully');
-          this.router.navigate(['/home-page']);
+          this.router.navigate(['/home-page2']);
         } catch (ee) {
           console.warn('Failed to save session via prompt', ee);
           alert('Failed to create session. See console.');

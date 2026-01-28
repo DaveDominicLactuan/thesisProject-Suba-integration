@@ -3,7 +3,8 @@
 }
 
 .home-page {
-  --background: #ffffff;
+  /* Use transparent background; HTML-layer provides image + overlay */
+  --background: transparent;
 
   .greeting {
     display: flex;
@@ -41,7 +42,7 @@
     gap: 16px;
     padding: 16px;
     position:relative;
-    top: 110px;
+    top: 185px;
 
     .big-btn {
       display: flex;
@@ -76,7 +77,8 @@
 
       /* make specific big-btn titles black when desired */
       .dark-text {
-        color: #ffffff;
+        // color: #ffffff;
+        color: rgb(0, 0, 0);
       }
     }
 
@@ -88,7 +90,7 @@
       flex: 1;
       min-height: 145px;
       min-width: 100px;
-      box-shadow: 14px 12px 15px -2px rgba(0,0,0,0.12)
+      box-shadow: 14px 12px 15px -2px rgba(0,0,0,0.12);
 
       h2 {
         font-family: 'Segoe UI Variable Text Semibold', sans-serif;
@@ -106,7 +108,7 @@
         border: 1px solid transparent;
         min-height: 75px;
         min-width: 100px;
-        box-shadow: 14px 12px 15px -2px rgba(0,0,0,0.12)
+        box-shadow: 14px 12px 15px -2px rgba(0,0,0,0.12);
 
         h2 {
           font-family: 'Segoe UI Variable Text Semibold', sans-serif;
@@ -123,9 +125,74 @@
         // min-height: 100px;
         min-height: 75px;
         min-width: 100px;
-        box-shadow: 14px 12px 15px -2px rgba(0,0,0,0.12)
+        box-shadow: 14px 12px 15px -2px rgba(0,0,0,0.12);
 
    
+      }
+    }
+  }
+
+  .quick-actions {
+    position: relative;
+    z-index: 10;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 16px;
+    margin: 16px;
+    margin-top: 90px;
+
+    .qa-card {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 12px 14px;
+      background: #ffffff;
+      border-radius: 14px;
+      box-shadow: 0 6px 14px rgba(0, 0, 0, 0.12);
+      border: 1px solid rgba(0, 0, 0, 0.04);
+      cursor: pointer;
+      transition: transform 0.1s ease, box-shadow 0.2s ease;
+
+      &:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 8px 18px rgba(0, 0, 0, 0.16);
+      }
+
+      .qa-icon {
+        width: 42px;
+        height: 42px;
+        border-radius: 12px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: rgba(240, 152, 25, 0.15);
+        color: #f09819;
+        font-size: 22px;
+      }
+
+      .qa-text {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+
+        .qa-title {
+          font-size: 16px;
+          font-weight: 700;
+          color: #1f1f1f;
+        }
+
+        .qa-subtitle {
+          font-size: 13px;
+          color: #666;
+          line-height: 1.2;
+        }
+      }
+
+      .qa-chevron {
+        font-size: 20px;
+        color: #b3b3b3;
       }
     }
   }
@@ -196,6 +263,38 @@
 }
 
 
+.page-bg {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 0;
+  pointer-events: none; /* keep UI clickable */
+
+  img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+
+  .overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(255, 255, 255, 0.6);
+  }
+}
+
+/* ensure content stacks above the background layer */
+ion-content.home-page {
+  position: relative;
+  z-index: 1;
+}
+
 .session-item {
   padding: 10px;
   border-radius: 8px;
@@ -257,16 +356,17 @@
   border-bottom-left-radius: 8px;
   background-color: #fff;
   box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
-  height: 280px;
+  height: 230px;
   overflow-y: auto;
   position: relative;
-  top: 100px;
+  top: 150px;
   gap: 5px;
 }
 
 /* Sessions summary pill */
 .sessions-summary {
    width: 50%;
+   height: 80px;
   margin: 16px;
   padding: 16px;
   border: 2px solid #f09819;
@@ -280,7 +380,8 @@
   flex-direction: column;
   gap: 4px;
   position: relative;
-  top: 118px;
+  top: 180px;
+
 
   .summary-title {
     font-size: 20px;
@@ -395,7 +496,7 @@ ion-menu ion-item:hover {
     width: 40px;
     height: 40px;
     margin-right: 0px;
-    margin-top: 10px;
+    margin-top: 5px;
   }
 
   .dark-text {
@@ -420,7 +521,7 @@ ion-menu ion-item:hover {
   align-items: center;
   justify-content: center;
   background-color: #ffffff;
-  border-radius: 50%;
+  border-radius: 25%;
   width: 48px;
   height: 48px;
   box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
@@ -433,20 +534,23 @@ ion-menu ion-item:hover {
 }
 
 .scroll-y {
-  background-color: white;
-  background: white;
-  --background: white;
+  /* allow background image to be visible */
+  background-color: transparent;
+  background: transparent;
+  --background: transparent;
 }
 
 .inner-scroll {
   height: 100%;
   overflow-y: auto;
-  background-color: white;
+  /* transparent to show page background */
+  background-color: transparent;
 }
 
 .inner-scroll.scroll-y.overscroll {
   color: #ffffff;
-  background-color: #ffffff;
+  /* keep transparent so overlay is effective */
+  background-color: transparent;
 }
 
 .big-btn.grammar, .big-btn.lessons, .big-btn.tests {
@@ -460,7 +564,8 @@ ion-menu ion-item:hover {
 
 #background-content {
   color: #ffffff;
-  background-color: #ffffff;
+  /* transparent to allow background image */
+  background-color: transparent;
 }
 
 .custom-sidebar {
@@ -484,17 +589,19 @@ ion-menu ion-item:hover {
 
 .profile-section {
   display: flex;
+  flex-direction: row;
   align-items: center;
-  margin-bottom: 20px;
   margin-top: 50px;
+  margin-bottom: 20px;
+  text-align: left;
 }
 
 .profile-avatar {
-  width: 64px;
-  height: 64px;
+  width: 80px;
+  height: 80px;
   border-radius: 50%;
   overflow: hidden;
-  margin-right: 16px;
+  margin-right: 10px;
 }
 
 .profile-avatar img {
@@ -503,16 +610,23 @@ ion-menu ion-item:hover {
   object-fit: cover;
 }
 
-.profile-info h1 {
-  font-size: 1.2rem;
+.profile-info {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.profile-name {
+  font-size: 1.5rem;
   font-weight: bold;
   color: #333;
   margin: 0;
 }
 
-.profile-info .profileName {
+.profile-email {
   font-size: 1rem;
   color: #666;
+  margin: 5px 0 0;
 }
 
 .menu-items {
@@ -521,13 +635,26 @@ ion-menu ion-item:hover {
   margin: 0;
 }
 
+.menu-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.menu-divider {
+  border: none;
+  border-top: 1px solid #ddd;
+  margin: 16px 0;
+}
+
 .menu-item {
   display: flex;
   align-items: center;
-  padding: 10px 0;
+  padding: 10px;
   cursor: pointer;
   transition: background-color 0.3s;
-  border-bottom: 1px solid #f0f0f0;
+  border-bottom: none; /* Remove bottom border */
 }
 
 .menu-item:hover {
@@ -541,7 +668,7 @@ ion-menu ion-item:hover {
 
 .menu-item span {
   font-size: 1rem;
-  color: #333;
+  color: black;
 }
 
 .menu-btn {
@@ -579,3 +706,4 @@ ion-menu ion-item:hover {
   width: 30px;
   height: 30px;
 }
+

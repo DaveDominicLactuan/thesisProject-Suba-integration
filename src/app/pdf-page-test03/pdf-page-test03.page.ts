@@ -230,8 +230,8 @@ export class PdfPageTest03Page {
               // images as two columns
               content.push({
                 columns: [
-                  { image: originalImg, width: 250, alignment: 'center' },
-                  { image: withBoxesImg, width: 250, alignment: 'center' }
+                  { image: originalImg, width: 250, height: 500, alignment: 'center' },
+                  { image: withBoxesImg, width: 250, height: 500, alignment: 'center' }
                 ],
                 columnGap: 10,
                 margin: [0, 0, 0, 20]
@@ -668,4 +668,28 @@ export class PdfPageTest03Page {
         console.error('Error opening downloaded PDF', err);
       }
     }
+
+    onBack() {
+    this.goBack();
+  }
+
+  goBack() {
+    try {
+      // Try to navigate back in app history (preferred) or app level back navigation if from camera , upload or home
+      try { this.navCtrl.back(); return; } catch (e) { /* ignore and fallback */ }
+
+      // Fallback to browser history.back when navController isn't effective, 
+      // checks the browser history for fallback
+      if (window.history.length > 1) {
+        window.history.back();
+        return;
+      }
+    
+      // Final fallback: navigate to home page
+      this.router.navigateByUrl('/home-page');
+    } catch (e) {
+      try { window.history.back(); } catch (err) { /* no-op */ }
+    }
+  }
+
 }

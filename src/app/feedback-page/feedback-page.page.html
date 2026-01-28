@@ -1,112 +1,85 @@
+<!-- Background image and overlay -->
+<div class="page-bg" aria-hidden="true">
+  <img src="assets/resultImage2.png" alt="Background" />
+  <div class="overlay"></div>
+  <!-- pointer-events disabled via CSS so UI remains clickable -->
+</div>
+
 <div class="background">
   <ion-content class="ion-padding">
-    
-    <!-- Toggle: Original vs With Boxes -->
-    <!-- <div class="toggle-wrapper">
-      <label class="switch">
-        <input type="checkbox" [(ngModel)]="showWithBoxes" (change)="detectCenterImage()">
-        <span class="slider round"></span>
-      </label>
-      <span class="toggle-label">{{ showWithBoxes ? 'With Boxes' : 'Original' }}</span>
-    </div> -->
 
-    <div class="top-bar">
+    <!-- Back button at the top left corner -->
+    <div class="back-button-container">
       <button class="back-btn" type="button" (click)="onBack()">
         <img src="assets/back.png" alt="Back" class="back-icon" />
       </button>
-
-      <!-- center label showing current toggle state -->
-      <span class="top-title">{{ showWithBoxes ? 'With Boxes' : 'Original' }}</span>
-
-      <!-- toggle control placed on the right side -->
-      <div class="toggle-wrapper">
-        <label class="switch">
-          <input type="checkbox" [(ngModel)]="showWithBoxes" (change)="detectCenterImage()" />
-          <span class="slider round"></span>
-        </label>
-      </div>
-      <!-- Delete selected image button was moved below (left of the image title) -->
     </div>
 
-    <!-- Scrollable image gallery -->
-    <div class="scroll-wrapper">
-      <div class="image-scroll" #scrollContainer (scroll)="onScroll($event)" [ngClass]="getScrollClasses(imagePaths.length)">
-        <img
-          *ngFor="let img of imagePaths"
-          [src]="showWithBoxes ? img.withBoxes : img.original"
-          [class.selected]="(showWithBoxes ? img.withBoxes : img.original) === selectedImage"
-          (click)="onImageClick(img)"
-          class="image-item"
-        />
-      </div>
-    </div>
-
-    <!-- Form metadata section -->
-    <div class="login-form">
-      <!-- Wrapper keeps the title in the same visual position; delete button is placed to its left -->
-      <div class="image-title-wrapper">
-        <button class="delete-left-btn" type="button" (click)="deleteSelectedImage()" title="Delete selected image">
-          <img src="assets/Trash.png" alt="Delete" class="trash-icon" />
-        </button>
-        <div class="image-title">{{ selectedImageTitle }}</div>
-      </div>
-
-      <div class="form-group">
-        <label for="dropdown1">Type of Crack</label>
-        <select id="dropdown1" [(ngModel)]="dropdown1" (ngModelChange)="updateSelectedImageFromDropdowns()" class="input-item" [disabled]="isUserReadOnly">
-          <option *ngFor="let option of dropdownOptionsDirection" [value]="option">{{ option }}</option>
-        </select>
-      </div>
-
-      
-      <div class="form-group">
-        <label for="dropdown2">Shape</label>
-        <select id="dropdown2" [(ngModel)]="dropdown2" (ngModelChange)="updateSelectedImageFromDropdowns()" class="input-item" [disabled]="isUserReadOnly">
-          <option *ngFor="let option of dropdownOptionsShape" [value]="option">{{ option }}</option>
-        </select>
-      </div>
-
-      <div class="form-group">
-        <label for="dropdown1">Severity of Crack</label>
-        <select id="dropdown1" [(ngModel)]="dropdown3" (ngModelChange)="updateSelectedImageFromDropdowns()" class="input-item" [disabled]="isUserReadOnly">
-          <option *ngFor="let option of dropdownOptionsSeverity" [value]="option">{{ option }}</option>
-        </select>
-      </div>
-
-
-
-      <!-- <div class="form-group">
-  <label for="extraText">Detection Info</label>
-  <input
-    id="extraText"
-    type="text"
-    [(ngModel)]="detectionMessage"
-    class="input-item"
-    readonly
-  />
+    <!-- Confirm button at the top left corner -->
+<div class="back-button-container2">
+  <button class="back-btn2" type="button" (click)="saveCurrentStoredImageAndGoHome()">
+    <img src="assets/Check_Black.png" alt="Back" class="back-icon" />
+  </button>
 </div>
 
- <div class="form-group">
-  <label for="extraText">Detection Info</label>
-  <input
-    id="extraText"
-    type="text"
-    [(ngModel)]="detectionResult"
-    class="input-item"
-    readonly
-  />
-</div> -->
+    <div class="page-body">
+      <!-- Scrollable image gallery with margin-top -->
+      <div class="scroll-wrapper">
+        <div class="image-scroll" #scrollContainer (scroll)="onScroll($event)" [ngClass]="getScrollClasses(imagePaths.length)">
+          <img
+            *ngFor="let img of imagePaths"
+            [src]="showWithBoxes ? img.withBoxes : img.original"
+            [class.selected]="(showWithBoxes ? img.withBoxes : img.original) === selectedImage"
+            (click)="onImageClick(img)"
+            class="image-item"
+          />
+        </div>
+      </div>
 
-
-
-      <!-- <button class="sign-in-button" (click)="getAllEntries()">Submit</button>
-      <button class="sign-in-button" (click)="testApi()">Test API</button> -->
-      <!-- <button class="sign-in-button" (click)="gopdfPage()">Proceed to PDF</button> -->
-          <!-- Save current StoredImage as a session, then navigate home -->
-          <div class="button-group">
-            <button class="sign-in-button" (click)="viewResults()">View Results</button>
-            <button class="sign-in-button" (click)="saveCurrentStoredImageAndGoHome()">Save Session</button>
+      <!-- Form metadata section -->
+      <div class="login-form">
+        <!-- Wrapper keeps the title in the same visual position; delete button is placed to its left -->
+        <div class="image-title-wrapper">
+          <button class="delete-left-btn" type="button" (click)="deleteSelectedImage()" title="Delete selected image">
+            <img src="assets/Trash.png" alt="Delete" class="trash-icon" />
+          </button>
+          <div class="image-title">{{ selectedImageTitle }}</div>
+          <!-- Toggle control placed beside the title on the right side -->
+          <div class="toggle-wrapper">
+            <label class="switch">
+              <input type="checkbox" [(ngModel)]="showWithBoxes" (change)="detectCenterImage()" />
+              <span class="slider round"></span>
+            </label>
           </div>
+        </div>
+
+        <div class="form-group">
+          <label for="dropdown1">Type of Crack</label>
+          <select id="dropdown1" [(ngModel)]="dropdown1" (ngModelChange)="updateSelectedImageFromDropdowns()" class="input-item" [disabled]="isUserReadOnly">
+            <option *ngFor="let option of dropdownOptionsDirection" [value]="option">{{ option }}</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label for="dropdown2">Shape</label>
+          <select id="dropdown2" [(ngModel)]="dropdown2" (ngModelChange)="updateSelectedImageFromDropdowns()" class="input-item" [disabled]="isUserReadOnly">
+            <option *ngFor="let option of dropdownOptionsShape" [value]="option">{{ option }}</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label for="dropdown3">Severity of Crack</label>
+          <select id="dropdown3" [(ngModel)]="dropdown3" (ngModelChange)="updateSelectedImageFromDropdowns()" class="input-item" [disabled]="isUserReadOnly">
+            <option *ngFor="let option of dropdownOptionsSeverity" [value]="option">{{ option }}</option>
+          </select>
+        </div>
+
+        <div class="button-group">
+              <button class="sign-in-button" (click)="viewResults()">View Results</button>
+              <!-- <button class="sign-in-button" (click)="saveCurrentStoredImageAndGoHome()">Save Session</button> -->
+            </div>
+
+      </div>
     </div>
   </ion-content>
 </div>

@@ -4,7 +4,7 @@
 
 .background {
   // background-color: #008799;
-    background-color: #ffffff;
+    background-color: transparent; /* transparent to reveal fixed page background */
   height: 100vh;
   width: 100vw;
   overflow: hidden;
@@ -16,21 +16,37 @@
     width: 100vw;
     overflow-y: auto;
     position: relative;
+    z-index: 1; /* ensure content sits above the fixed .page-bg */
     padding-bottom: 10px;
   }
 }
 
-.overlay-image {
-  position: absolute;
+/* Fixed, full-viewport background image with semi-transparent overlay */
+.page-bg {
+  position: fixed;
   top: 0;
   left: 0;
   width: 100%;
   height: 100%;
-  background-image: url('/assets/backgroundCover.png');
-  background-size: cover;
-  background-position: center;
-  opacity: 0.5;
-  z-index: 1;
+  z-index: 0;
+  pointer-events: none; /* keep UI clickable */
+
+  img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+
+  .overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    // background: rgba(255, 255, 255, 0.6);
+    background: rgba(255, 255, 255, 0.174);
+  }
 }
 
 .logo {
@@ -163,7 +179,7 @@ width: 500px;
 }
 
 .role-label {
-  color: #b2ebf2;
+  color: #ff7315;
   font-weight: 700;
   margin: 20px 0 10px;
   text-align: center;

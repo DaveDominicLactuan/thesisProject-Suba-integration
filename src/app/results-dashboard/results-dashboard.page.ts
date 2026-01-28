@@ -444,5 +444,9 @@ export class ResultsDashboardPage implements OnInit {
     this.router.navigate(['/pdf-page-test03'], { queryParams });
   }
 
+  onBack() {
+    this.goBack();
+  }
+
   
 }

@@ -13,19 +13,30 @@
 
   <!-- 🔝 Top Bar -->
     <div class="top-bar">
-      <button class="top-btn left" (click)="goToHomePage()">←</button>
-      <div class="top-center">
+      <!-- <button class="top-btn left" (click)="goToHomePage()">←</button> -->
+      <!-- <div class="top-center">
         <button class="top-btn" (click)="toggleFlash()"></button>
       </div>
-      <button class="top-btn right" (click)="showTestOverlay()">⋮</button>
+      <button class="top-btn right" (click)="showTestOverlay()">⋮</button> -->
     </div>
 
   <!-- 🔽 Bottom Bar -->
   <div class="bottom-bar">
     <!-- Top Section (Buttons + Face Detection) -->
       <div class="bottom-top-row">
-  <button class="function-btn" (click)="pickImagesMobile()">Upload Image <img src="assets/Upload_Image_White.png" alt="Upload" class="action-icon" /></button>
-      <button class="function-btn" (click)="goToFeedBackPage()">Finish Session <img src="assets/check2.png" alt="Finish" class="action-icon" /></button>
+  <!-- <button class="function-btn" (click)="pickImagesMobile()">Upload Image <img src="assets/Upload_Image_White.png" alt="Upload" class="action-icon" /></button>
+      <button class="function-btn" (click)="goToFeedBackPage()">Finish Session <img src="assets/check2.png" alt="Finish" class="action-icon" /></button> -->
+      <button class="function-btn" (click)="pickImagesMobile()">
+        <img src="assets/Upload_Image_White.png" alt="Upload" class="action-icon" />
+      </button>
+<!-- 
+       <button class="function-btn" (click)="showTestOverlay()">
+        <img src="assets/Session-White.png" alt="Finish" class="action-icon" />
+      </button> -->
+
+      <button class="function-btn" (click)="goToFeedBackPage()">
+        <img src="assets/check2.png" alt="Finish" class="action-icon" />
+      </button>
     </div>
 
 
@@ -60,4 +71,11 @@
   
     </div>
   </div>
+</div>
+
+<!-- Back button at the top left corner -->
+<div class="back-button-container">
+  <button class="back-btn" type="button" (click)="goToHomePage()">
+    <img src="assets/back.png" alt="Back" class="back-icon" />
+  </button>
 </div>

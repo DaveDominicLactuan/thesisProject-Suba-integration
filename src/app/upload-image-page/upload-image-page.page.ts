@@ -640,7 +640,7 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
           if (typeof (this.imageStorage.removeSession) === 'function') {
             this.imageStorage.removeSession(this.selectedSessionId);
           }
-          this.router.navigate(['/home-page']);
+          this.router.navigate(['/home-page2']);
         } else if (shouldDelete === 'stay') {
           // User wants to stay, do nothing
           console.log('User chose to stay in upload-image page');
@@ -652,11 +652,11 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
         }
       } else {
         // Session has images or no active session, navigate normally
-        this.router.navigate(['/home-page']);
+        this.router.navigate(['/home-page2']);
       }
     } catch (e) {
       console.warn('handleGoHome failed', e);
-      this.router.navigate(['/home-page']);
+      this.router.navigate(['/home-page2']);
     }
   }
 
@@ -818,14 +818,14 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
         } else if (typeof this.imageStorage.removeSession === 'function') {
           this.imageStorage.removeSession(activeId);
         }
-        this.router.navigate(['/home-page']);
+        this.router.navigate(['/home-page2']);
         return;
       }
       if (choice === 'stay' || choice === null) return;
     }
 
     try {
-      this.router.navigateByUrl('/home-page');
+      this.router.navigateByUrl('/home-page2');
     } catch (e) {
       window.history.back();
     }
