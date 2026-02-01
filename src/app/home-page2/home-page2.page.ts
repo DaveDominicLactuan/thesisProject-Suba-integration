@@ -223,7 +223,7 @@ private async initialize(): Promise<void> {
 
   /** Navigate to legacy camera page route. */
   goToHomePage() {
-    this.router.navigate(['/camera-page']);
+    this.router.navigate(['/home-page2']);
     console.log('camera page');
   }
   

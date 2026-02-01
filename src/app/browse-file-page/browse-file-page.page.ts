@@ -10,12 +10,12 @@ import { App } from '@capacitor/app';
 import { jsPDF } from 'jspdf';
 
 @Component({
-  selector: 'app-session-page',
-  templateUrl: './session-page.page.html',
-  styleUrls: ['./session-page.page.scss'],
+  selector: 'app-browse-file-page',
+  templateUrl: './browse-file-page.page.html',
+  styleUrls: ['./browse-file-page.page.scss'],
   standalone: false
 })
-export class SessionPagePage implements OnInit, OnDestroy {
+export class BrowseFilePagePage implements OnInit, OnDestroy {
   userName: string | null = null;
   firstName: string | null = null;
   lastName: string | null = null;
@@ -226,16 +226,16 @@ private async initialize(): Promise<void> {
   }
 
   // Additional methods can be added here
+
+  /** Navigate to legacy camera page route. */
+  goToHomePage() {
+    this.router.navigate(['/camera-page']);
+    console.log('camera page');
+  }
   
   /** Navigate to enhanced camera page with sessions support. */
   goToCameraPage2() {
     this.router.navigate(['/camera-page2']);
-    console.log('camera page');
-  }
-
-  /** Navigate to enhanced camera page with sessions support. */
-  goToHomePage() {
-    this.router.navigate(['/home-page2']);
     console.log('camera page');
   }
 
@@ -732,7 +732,7 @@ private async initialize(): Promise<void> {
     // No local back subscription: page-level handler will close the overlay when present
   }
 
-  /** Register back button handler for closing overlays and navigating back. */
+  /** Register back button handler for closing overlays only (no app exit). */
   private registerBackButtonHandler() {
     try {
       this.removeBackButtonHandler();
@@ -758,8 +758,8 @@ private async initialize(): Promise<void> {
             return;
           }
           
-          // No overlays open - navigate back to previous page
-          this.navCtrl.back();
+          // No overlays open - allow default back navigation
+          // (navigate back in history or let other handlers process)
         } catch (e) {
           console.warn('[SessionPage] back button handler error', e);
         }

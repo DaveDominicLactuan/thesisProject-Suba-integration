@@ -36,20 +36,24 @@
         <ion-icon name="notifications-outline"></ion-icon>
         <span>Notifications</span>
       </li>
-      <li class="menu-item">
-        <ion-icon name="settings-outline"></ion-icon>
-        <span>Settings</span>
+      <li class="menu-item" (click)="goToHomePage()">
+        <ion-icon name="home-outline"></ion-icon>
+        <span>Home</span>
       </li>
-    </div>
-    <hr class="menu-divider" />
-    <div class="menu-section">
-      <li class="menu-item">
+      <li class="menu-item" (click)="goSessionPage()">
         <ion-icon name="bookmark-outline"></ion-icon>
         <span>Show Current Sessions</span>
       </li>
+    </div>
+    <hr class="menu-divider" />
+    <div class="menu-section">     
       <li class="menu-item">
         <ion-icon name="folder-outline"></ion-icon>
         <span>Files</span>
+      </li>
+      <li class="menu-item">
+        <ion-icon name="settings-outline"></ion-icon>
+        <span>Settings</span>
       </li>
     </div>
     <hr class="menu-divider" />
@@ -107,7 +111,7 @@
         </div>
         <div class="explore-label">Browse Files</div>
       </div>
-      <div class="explore-card">
+      <div class="explore-card" (click)="goSessionPage()">
         <div class="explore-icon" aria-hidden="true">
           <img src="assets/updatedSession.png" alt="Camera" />
         </div>

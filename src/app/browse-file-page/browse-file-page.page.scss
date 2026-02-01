@@ -11,15 +11,15 @@
 /* Image above gradient header */
 .home-page-img {
   position: fixed;
-  top: -13%;
+  top: -2.7%;
   left: 0;
   right: 0;
   width: 100%;
   height: 300px;
   z-index: 9; /* below gradient header but above page base */
   object-fit: cover;
-  border-bottom-left-radius: 30%;
-  border-bottom-right-radius: 30%;
+  border-bottom-left-radius: 11%;
+  border-bottom-right-radius: 11%;
   opacity: 0.8; /* soften background image */
 
 }
@@ -27,13 +27,13 @@
 /* Orange gradient header at the top */
 .gradient-header {
   position: fixed;
-  top: -10%;
+  top: 0;
   left: -10%;
   right: 0;
   height: 280px;
   width: 120%;
-  border-bottom-left-radius: 45%;
-  border-bottom-right-radius: 45%;
+  border-bottom-left-radius: 25%;
+  border-bottom-right-radius: 25%;
   background: linear-gradient(to top, #ff8c00, #ffb347);
   z-index: 8; /* slightly above image so gradient is visible */
   box-shadow: 0 4px 12px rgba(255, 149, 0, 0.15);
@@ -407,11 +407,7 @@ ion-content.home-page {
 }
 
 .session-item {
-  // padding: 16px;
-  padding-top: 16px;
-  padding-bottom: 12px;
-  padding-left: 16px;
-  padding-right: 16px;
+  padding: 16px;
   border-radius: 16px;
   background: linear-gradient(135deg, #f5e6d3 0%, #f9f2e8 100%);
   text-align: left;
@@ -502,19 +498,17 @@ ion-content.home-page {
   border-bottom-left-radius: 8px;
   background-color: #fff;
   box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
-  height: 515px;
-  width: 96.6%;
+  height: 430px;
   overflow-y: auto;
   position: relative;
-  top: 21%;
-  left: -2.9%;
+  top: 31%;
   gap: 5px;
   z-index: 20;
 }
 
 /* Sessions summary pill */
 .sessions-summary {
-   width: 96.5%;
+   width: 90.8%;
    height: 50px;
   margin: 16px;
   padding: 16px;
@@ -531,8 +525,7 @@ ion-content.home-page {
   justify-content: space-between;
   gap: 8px;
   position: relative;
-  top: 25%;
-  left: -3%;
+  top: 35%;
   z-index: 20;
 
 

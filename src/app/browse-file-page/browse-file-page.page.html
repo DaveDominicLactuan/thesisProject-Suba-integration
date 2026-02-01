@@ -36,24 +36,20 @@
         <ion-icon name="notifications-outline"></ion-icon>
         <span>Notifications</span>
       </li>
-       <li class="menu-item" (click)="goToHomePage()">
-        <ion-icon name="home-outline"></ion-icon>
-        <span>Home</span>
-      </li>
-      <li class="menu-item" (click)="goSessionPage()">
-        <ion-icon name="bookmark-outline"></ion-icon>
-        <span>Show Current Sessions</span>
-      </li>
-    </div>
-    <hr class="menu-divider" />
-    <div class="menu-section">  
-      <li class="menu-item">
-        <ion-icon name="folder-outline"></ion-icon>
-        <span>Files</span>
-      </li>
       <li class="menu-item">
         <ion-icon name="settings-outline"></ion-icon>
         <span>Settings</span>
+      </li>
+    </div>
+    <hr class="menu-divider" />
+    <div class="menu-section">
+      <li class="menu-item">
+        <ion-icon name="bookmark-outline"></ion-icon>
+        <span>Show Current Sessions</span>
+      </li>
+      <li class="menu-item">
+        <ion-icon name="folder-outline"></ion-icon>
+        <span>Files</span>
       </li>
     </div>
     <hr class="menu-divider" />
@@ -135,7 +131,7 @@
       <div class="session-right">
         <div class="session-time">{{ s.created | date:'shortTime' }}</div>
         <button class="delete-btn" (click)="deleteSession(s, $event)">
-          <img src="assets/trashIcon.png" alt="Delete" style="width: 28px; height: 28px; object-fit: contain;" />
+          <img src="assets/trashIcon.png" alt="Delete" style="width: 24px; height: 24px; object-fit: contain;" />
         </button>
       </div>
     </div>

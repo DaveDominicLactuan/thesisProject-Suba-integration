@@ -227,7 +227,7 @@
   border-radius: 7.5%;
   transition: height 0.3s ease;
   box-sizing: border-box;
-  width: 100%;
+  width: 110%;
 
   &.shrink {
     height: 200px; /* Shrinks when scrolling */
@@ -325,7 +325,7 @@
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 12px;
-  margin-top: 16px;
+  margin-top: 7px;
 }
 
 .button-group .sign-in-button {
@@ -441,9 +441,12 @@
 // }
 
 .image-item.selected {
-  border: 3px solid #f09819;
+  // border: 3px solid #f9a52e;
   transform: scale(1.08);
-  box-shadow: 0 6px 20px #c97f17;
+  // box-shadow: 0 6px 20px #d49844;
+
+  border: 2px solid #f97316;
+  box-shadow: 0 19px 38px -6.333333333333333px rgba(249, 115, 22, 0.51);
 }
 
 .selector-arrow {
@@ -469,7 +472,7 @@
 /* wrapper to position a left-side delete button while keeping the title centered */
 .image-title-wrapper {
   position: relative;
-  margin-top: 25px; /* preserve the original visual spacing of .image-title */
+  margin-top: 14px; /* preserve the original visual spacing of .image-title */
   padding-bottom: 10px;
   display: flex;
   align-items: center;

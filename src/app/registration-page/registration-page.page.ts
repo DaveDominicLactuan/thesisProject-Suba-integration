@@ -30,6 +30,7 @@ rememberMe: boolean = false;
 showPassword: boolean = false;
 username: string = '';
 firstName: string = '';
+userID: string = '';
 lastName: string = '';
 selectedRole: string | null = null;
 error = '';
@@ -155,6 +156,7 @@ async onRegister() {
           lastName: lastName ?? '',
           engineeringID: engineeringID ?? '',
           email: email ?? '',
+          // userID: uid ?? '',
           role: this.selectedRole ?? 'user',
           created: new Date()
         });

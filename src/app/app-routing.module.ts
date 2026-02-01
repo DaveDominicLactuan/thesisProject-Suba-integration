@@ -92,6 +92,10 @@ const routes: Routes = [
     path: 'home-page2',
     loadChildren: () => import('./home-page2/home-page2.module').then( m => m.HomePage2PageModule)
   },
+  {
+    path: 'browse-file-page',
+    loadChildren: () => import('./browse-file-page/browse-file-page.module').then( m => m.BrowseFilePagePageModule)
+  },
 
 
 
