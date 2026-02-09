@@ -26,6 +26,7 @@ lastName: string = '';
 selectedRole: string | null = null;
 error = '';
 engineeringID: string = '';
+userID: string = '';
 fullName: string = '';
 
 signupForm: FormGroup;
@@ -57,15 +58,17 @@ signupForm: FormGroup;
         const lastName = profile['lastName'] || '';
         const engineeringID = profile['engineeringID'] || '';
         const email = profile['email'] || this.email;
+        const userID = profile['userID'] || '';
         const username = (firstName && lastName) ? `${firstName} ${lastName}` : (email || '');
         const userRole = engineeringID ? 'engineer' : 'user';
         //compiles user data as object for storing locally on device for offline access
-        const userData = { username, userRole, firstName, lastName, engineeringID, email };
+        const userData = { username, userRole, firstName, lastName, engineeringID, email, userID };
         // Keep component fields updated for template/console visibility
         this.firstName = firstName;
         this.lastName = lastName;
         this.username = username;
         this.engineeringID = engineeringID;
+        this.userID = userID;
         // Print user details for quick verification on login page
         console.log('[LoginPage] Login succeeded', userData);
         // Store user data locally for offline access

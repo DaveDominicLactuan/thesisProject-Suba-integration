@@ -147,9 +147,21 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
   async createSessionOnEnter() {
     try {
       //Generate a human-friendly session name with current date/time.
-      //Call the ImageStorageService to create a new session (empty image list). Fallback to null if API missing.
       const name = `Session ${new Date().toLocaleString()}`;
-      const s = (this.imageStorage && typeof (this.imageStorage.createSession) === 'function') ? this.imageStorage.createSession(name, []) : null;
+      
+      // Retrieve the stored userID from storage
+      let userId: string | undefined = undefined;
+      try {
+        const storage = await (this.imageStorage as any)._storage;
+        if (storage) {
+          userId = await storage.get('userID');
+        }
+      } catch (e) {
+        console.warn('[UploadImagePage] Failed to retrieve userID from storage', e);
+      }
+      
+      //Call the ImageStorageService to create a new session (empty image list) with userId. Fallback to null if API missing.
+      const s = (this.imageStorage && typeof (this.imageStorage.createSession) === 'function') ? this.imageStorage.createSession(name, [], userId) : null;
 
      //select session as current session, mark as pristine(new session or no images inside session), 
         //reset counter for uploaded images, abd refresh displayed images and records the newly 
@@ -206,8 +218,14 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
     //attempt to notify the servuce of the selectionm, calls the service to mark 
     // the image as selected, if API exist and error handling
     try {
-      if (this.imageStorage && typeof this.imageStorage.selectImageByOriginal === 'function') {
-        this.imageStorage.selectImageByOriginal(img.original);
+      if (this.imageStorage) {
+        // Use filename as primary key, fallback to original for backward compatibility
+        const key = img.filename || img.original;
+        if (typeof (this.imageStorage as any).selectImageByKey === 'function') {
+          (this.imageStorage as any).selectImageByKey(key);
+        } else if (typeof this.imageStorage.selectImageByOriginal === 'function') {
+          this.imageStorage.selectImageByOriginal(key);
+        }
       }
     } catch (e) {
       console.warn('onStoredThumbClick: selectImage failed', e);
@@ -349,6 +367,18 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
     //set for tracking inference success/failure
     let inferenceCalled = false;
     let inferenceSucceeded = false;
+    
+    // Retrieve the stored userID from storage
+    let userId: string | undefined = undefined;
+    try {
+      const storage = await (this.imageStorage as any)._storage;
+      if (storage) {
+        userId = await storage.get('userID');
+      }
+    } catch (e) {
+      console.warn('[UploadImagePage] processDataUrl: Failed to retrieve userID from storage', e);
+    }
+    
     //actual process and run interfrence
     const doWork = async () => {
       let prediction: any = null;
@@ -373,7 +403,9 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
         filename,
         prediction: prediction || undefined,
         hasPrediction: !!prediction,
-        statusMessage: prediction ? 'Prediction succeeded' : (inferenceCalled ? 'Prediction failed' : 'No prediction')
+        statusMessage: prediction ? 'Prediction succeeded' : (inferenceCalled ? 'Prediction failed' : 'No prediction'),
+        userId: userId,
+        sessionId: this.selectedSessionId || undefined
       };
 
       // If the model returned bounding boxes, create a "withBoxes" image and attach boxes
@@ -428,11 +460,11 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
         (entry as any).detectionMessage = 'Box rendering failed';
       }
       //store image entry via image storage service
-      await this.imageStorage.addImage(entry);
+      await this.imageStorage.addImage(entry, this.selectedSessionId || undefined);
       // also add to active session if one exists
       try {
         if (this.selectedSessionId && typeof (this.imageStorage.addImageToSession) === 'function') {
-          this.imageStorage.addImageToSession(this.selectedSessionId, entry.original);
+          this.imageStorage.addImageToSession(this.selectedSessionId, entry.filename);
           this.sessionIsPristine = false; // Mark session as no longer pristine
         }
         await this.refreshDisplayedImages();
@@ -469,12 +501,14 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
             filename: fallbackFilename,
             prediction: undefined,
             hasPrediction: false,
-            statusMessage: inferenceCalled ? 'Prediction failed' : 'No prediction'
+            statusMessage: inferenceCalled ? 'Prediction failed' : 'No prediction',
+            userId: userId,
+            sessionId: this.selectedSessionId || undefined
           };
-          await this.imageStorage.addImage(entry);
+          await this.imageStorage.addImage(entry, this.selectedSessionId || undefined);
           try {
             if (this.selectedSessionId && typeof (this.imageStorage.addImageToSession) === 'function') {
-              this.imageStorage.addImageToSession(this.selectedSessionId, entry.original);
+              this.imageStorage.addImageToSession(this.selectedSessionId, entry.filename);
               this.sessionIsPristine = false; // Mark session as no longer pristine
             }
             await this.refreshDisplayedImages();
@@ -1261,11 +1295,11 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
           hasPrediction: !!prediction,
           statusMessage: prediction ? 'Prediction succeeded' : (inferenceCalled ? 'Prediction failed' : 'No prediction')
         };
-        await this.imageStorage.addImage(entry);
+        await this.imageStorage.addImage(entry, this.selectedSessionId || undefined);
         // also add to active session if one exists
         try {
           if (this.selectedSessionId && typeof (this.imageStorage.addImageToSession) === 'function') {
-            this.imageStorage.addImageToSession(this.selectedSessionId, entry.original);
+            this.imageStorage.addImageToSession(this.selectedSessionId, entry.filename);
             this.sessionIsPristine = false; // Mark session as no longer pristine
           }
           await this.refreshDisplayedImages();
@@ -1298,7 +1332,7 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
               hasPrediction: false,
               statusMessage: inferenceCalled ? 'Prediction failed' : 'No prediction'
             };
-            await this.imageStorage.addImage(entry);
+            await this.imageStorage.addImage(entry, this.selectedSessionId || undefined);
             await this.updatePhotoCounts();
           } catch (e) {
             console.warn('[UploadImagePage] Failed to persist fallback entry after timeout', e);

@@ -232,9 +232,21 @@ export class CameraPage2Page implements AfterViewInit {
   async createSessionOnEnter() {
     try {
       //creates session and Generate a human-friendly session name with current date/time. 
-      // , and calls service to create a session (empty image list) and Fallback to null if API missing.
       const name = `Session ${new Date().toLocaleString()}`;
-      const s = (this.imageStorage && typeof (this.imageStorage.createSession) === 'function') ? this.imageStorage.createSession(name, []) : null;
+      
+      // Retrieve the stored userID from storage
+      let userId: string | undefined = undefined;
+      try {
+        const storage = await (this.imageStorage as any)._storage;
+        if (storage) {
+          userId = await storage.get('userID');
+        }
+      } catch (e) {
+        console.warn('[CameraPage2] Failed to retrieve userID from storage', e);
+      }
+      
+      // calls service to create a session (empty image list) with userId and Fallback to null if API missing.
+      const s = (this.imageStorage && typeof (this.imageStorage.createSession) === 'function') ? this.imageStorage.createSession(name, [], userId) : null;
       if (s) {
         //select session as current session, mark as pristine(new session), 
         //reset counter for uploaded images, abd refresh displayed images and records the newly 
@@ -342,10 +354,23 @@ export class CameraPage2Page implements AfterViewInit {
 
     // Track whether inference was started so if timeout, we can choose the proper status message to store/show
     let inferenceAttempted = false;
+    
+    // Retrieve the stored userID from storage
+    let userId: string | undefined = undefined;
+    try {
+      const storage = await (this.imageStorage as any)._storage;
+      if (storage) {
+        userId = await storage.get('userID');
+      }
+    } catch (e) {
+      console.warn('[CameraPage2] processDataUrl: Failed to retrieve userID from storage', e);
+    }
+    
     //preprocess
     const doWork = async () => {
       let prediction: any = null;
       try {
+        inferenceAttempted = true;
         //converts the img dataURL into exact Float32 tensor the model expects
         const tensor = await this.preprocessImage(dataUrl);
         // guard inference with timeout to avoid device hangs
@@ -370,7 +395,9 @@ export class CameraPage2Page implements AfterViewInit {
         filename,
         prediction: prediction || undefined,
         hasPrediction: !!prediction,
-        statusMessage: prediction ? 'Prediction succeeded' : (inferenceAttempted ? 'Prediction failed' : 'No prediction')
+        statusMessage: prediction ? 'Prediction succeeded' : (inferenceAttempted ? 'Prediction failed' : 'No prediction'),
+        userId: userId,
+        sessionId: this.selectedSessionId || undefined
       };
 
       // If the model returned bounding boxes, create a "withBoxes" image and attach boxes
@@ -430,7 +457,7 @@ export class CameraPage2Page implements AfterViewInit {
       try {
         //add to current session in use and set sessioIsPristine to false, then refresh displayed images
         if (this.selectedSessionId && typeof (this.imageStorage.addImageToSession) === 'function') {
-          this.imageStorage.addImageToSession(this.selectedSessionId, entry.original);
+          this.imageStorage.addImageToSession(this.selectedSessionId, entry.filename);
           this.sessionIsPristine = false; // Mark session as no longer pristine
         }
         await this.refreshDisplayedImages();
@@ -459,13 +486,15 @@ export class CameraPage2Page implements AfterViewInit {
           filename,
           prediction: undefined,
           hasPrediction: false,
-          statusMessage: inferenceAttempted ? 'Prediction failed' : 'No prediction'
+          statusMessage: inferenceAttempted ? 'Prediction failed' : 'No prediction',
+          userId: userId,
+          sessionId: this.selectedSessionId || undefined
         };
         try {
-          await this.imageStorage.addImage(entry);
+          await this.imageStorage.addImage(entry, this.selectedSessionId || undefined);
           try {
             if (this.selectedSessionId && typeof (this.imageStorage.addImageToSession) === 'function') {
-              this.imageStorage.addImageToSession(this.selectedSessionId, entry.original);
+              this.imageStorage.addImageToSession(this.selectedSessionId, entry.filename);
             }
             await this.refreshDisplayedImages();
           } catch (err) {
@@ -1196,7 +1225,13 @@ export class CameraPage2Page implements AfterViewInit {
    */
   onStoredThumbClick(img: StoredImage) {
     try {
-      this.imageStorage.selectImageByOriginal(img.original);
+      // Use filename as primary key, fallback to original for backward compatibility
+      const key = img.filename || img.original;
+      if (typeof (this.imageStorage as any).selectImageByKey === 'function') {
+        (this.imageStorage as any).selectImageByKey(key);
+      } else {
+        this.imageStorage.selectImageByOriginal(key);
+      }
     } catch (e) {
       // ignore
     }

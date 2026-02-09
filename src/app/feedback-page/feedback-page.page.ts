@@ -207,7 +207,8 @@ private backButtonSub: any; // hardware back handler
     // update form map for this image
     //Ensure a persistant per-image entry in formDataMap (defaults from current UI/prediction)
     //This is used to store selections for later retrieval, saving, or export:
-    const key = img.original;
+    // Use filename as primary key, fallback to original for backward compatibility
+    const key = img.fileName || img.filename || img.original;
     this.formDataMap[key] = this.formDataMap[key] ?? {
       title: img.fileName ?? this.selectedImageTitle,
       dropdown1: this.dropdown1,
@@ -757,8 +758,8 @@ addEntry() {
     const matched = this.imagePaths.find(img => img.original === this.selectedImage || img.withBoxes === this.selectedImage);
     if (!matched) return;
 
-    // Normalize key to original so data is consistent regardless of toggle state
-    const key = matched.original;
+    // Use filename as primary key, fallback to original for backward compatibility
+    const key = matched.fileName || matched.filename || matched.original;
 
     // Update prediction fields from dropdowns
     matched.rawPrediction = matched.rawPrediction || {};

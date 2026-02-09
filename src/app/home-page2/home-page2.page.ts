@@ -21,6 +21,7 @@ export class HomePage2Page implements OnInit, OnDestroy {
   lastName: string | null = null;
   email: string | null = null;
   engineeringID: string | null = null;
+  userID: string | null = null;
   sessions: any[] = [];
   lastSessionDisplayName: string | null = null;
   private backButtonSub: any; // hardware back handler
@@ -54,6 +55,7 @@ private async initialize(): Promise<void> {
     this.lastName = profile['lastName'];
     this.engineeringID = profile['engineeringID'] || '';
     this.email = profile['email'] || '';
+    this.userID = profile['userID'] || '';
     // Read role from Firestore profile (authoritative source)
     this.userRole = profile['role'] || (this.engineeringID ? 'engineer' : 'user');
     //gets username from firatName and lastName
@@ -64,6 +66,7 @@ private async initialize(): Promise<void> {
       lastName: this.lastName,
       email: this.email,
       engineeringID: this.engineeringID,
+      userID: this.userID,
       userRole: this.userRole,
       userName: this.userName
     });
@@ -75,7 +78,8 @@ private async initialize(): Promise<void> {
         firstName: this.firstName || '',
         lastName: this.lastName || '',
         engineeringID: this.engineeringID || '',
-        email: this.email || ''
+        email: this.email || '',
+        userID: this.userID || ''
       }));
       localStorage.setItem('isLoggedIn', 'true');
     } catch {}
@@ -87,7 +91,8 @@ private async initialize(): Promise<void> {
          firstName: this.firstName || '',
          lastName: this.lastName || '',
          engineeringID: this.engineeringID || '',
-         email: this.email || ''
+         email: this.email || '',
+         userID: this.userID || ''
        }));
        sessionStorage.setItem('isLoggedInSession', 'true');
      } catch {}
@@ -104,6 +109,7 @@ private async initialize(): Promise<void> {
         this.userRole = data.userRole || 'user';
         this.email = data.email || null;
         this.engineeringID = data.engineeringID || null;
+        this.userID = data.userID || null;
         console.log('[HomePage2] loaded user profile from cache', data);
       }
     } catch {}
@@ -286,8 +292,13 @@ private async initialize(): Promise<void> {
      try {
       if (session && session.imageKeys && session.imageKeys.length > 0) {
         const key = session.imageKeys[0];
-        if (this.imageStorage && typeof this.imageStorage.selectImageByOriginal === 'function') {
-          this.imageStorage.selectImageByOriginal(key);
+        if (this.imageStorage) {
+          // Try new method first, fallback to old one
+          if (typeof (this.imageStorage as any).selectImageByKey === 'function') {
+            (this.imageStorage as any).selectImageByKey(key);
+          } else if (typeof this.imageStorage.selectImageByOriginal === 'function') {
+            this.imageStorage.selectImageByOriginal(key);
+          }
         }
       }
     } catch (e) { console.warn('goToSession warning', e); }

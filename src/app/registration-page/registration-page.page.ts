@@ -142,7 +142,7 @@ async onRegister() {
       engineeringID ?? '',   // Engineering ID (use empty string if null)
       this.selectedRole ?? 'user'  // User role ('engineer' or 'user')
     );
-
+   
     // Log that the registration call succeeded at the auth layer
     const createdUid = userCredential?.user?.uid;
     console.log('[RegistrationPage] Auth registration succeeded for', email, 'uid=', createdUid);
@@ -158,9 +158,29 @@ async onRegister() {
           email: email ?? '',
           // userID: uid ?? '',
           role: this.selectedRole ?? 'user',
-          created: new Date()
+          created: new Date(),
+          userID: uid
         });
         console.log(`[RegistrationPage] Firestore profile written for uid: ${uid}`);
+
+        // Also create a pending account record for administrative review/approval
+        try {
+          await this.firestore.collection('pendingAccounts').doc(uid).set({
+            firstName: firstName ?? '',
+            lastName: lastName ?? '',
+            engineeringID: engineeringID ?? '',
+            email: email ?? '',
+            role: this.selectedRole ?? 'user',
+            userID: uid,
+            created: new Date(),
+            status: 'pending',
+            approvedAt: null,
+            approvedBy: null
+          });
+          console.log(`[RegistrationPage] Pending account record written for uid: ${uid}`);
+        } catch (pendingErr) {
+          console.warn('[RegistrationPage] Failed to write pending account record:', pendingErr);
+        }
       } else {
         console.warn('[RegistrationPage] could not determine uid after register; profile not written');
       }

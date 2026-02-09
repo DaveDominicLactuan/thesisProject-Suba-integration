@@ -98,10 +98,10 @@ export class ResultsDashboardPage implements OnInit {
         );
 
         //Remove duplicate stored images in case of duplicates by a stable key
-        //  (original / filename / withBoxes) to avoid double-counting.
+        //  (filename preferred, fallback to original / withBoxes) to avoid double-counting.
         const seen = new Set<string>();
         imgs = imgs.filter(i => {
-          const key = i.original || i.filename || (i.withBoxes as string) || '';
+          const key = i.filename || i.original || (i.withBoxes as string) || '';
           if (!key) return false;
           if (seen.has(key)) return false;
           seen.add(key);

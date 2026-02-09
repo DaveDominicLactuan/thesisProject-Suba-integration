@@ -1,7 +1,9 @@
 import { Injectable } from '@angular/core';
 import { Storage } from '@ionic/storage-angular';
 import { BehaviorSubject, Observable } from 'rxjs';
+import { Firestore, collection, doc, setDoc, deleteDoc, getDocs, query, where, writeBatch } from '@angular/fire/firestore';
 
+//image object in the session
 export interface StoredImage {
   original: string; // Base64 image
   withBoxes?: string;
@@ -15,8 +17,12 @@ export interface StoredImage {
   hasPrediction?: boolean;
   statusMessage?: string;
   detectionMessage?: string;
+  sessionId?: string; // optional link to a session
+  userId?: string; // optional link to a user (if multi-user support is added)
+  fileImageName?: string; // optional original filename if available
 }
 
+//session
 export interface ImageSession {
   id: string;
   name: string;
@@ -24,6 +30,8 @@ export interface ImageSession {
   created: string;
   // cumulative number of bounding boxes across all images in this session
   totalBoundingBoxes?: number;
+  userId?: string; // optional link to a user (if multi-user support is added)
+  sessionId?: string; // optional link to a session (for easier querying if needed)
 }
 
 @Injectable({
@@ -37,8 +45,12 @@ export class ImageStorageService {
   private sessions: ImageSession[] = [];
   private readonly STORAGE_KEY = 'stored_images';
   private readonly SESSIONS_KEY = 'stored_image_sessions';
+  private readonly FIRESTORE_IMAGES_COLLECTION = 'images';
+  private readonly FIRESTORE_SESSIONS_COLLECTION = 'sessionsImages';
+  // Counter map to track image number per session
+  private sessionImageCounters: Map<string, number> = new Map();
 
-  constructor(private storage: Storage) {
+  constructor(private storage: Storage, private firestore: Firestore) {
     this.init();
   }
 
@@ -54,18 +66,89 @@ export class ImageStorageService {
     } catch (e) {
       this.sessions = [];
     }
+    // Initialize session counters from existing images
+    this.initializeSessionCounters();
     console.log('📂 Loaded images from storage:', this.images.length);
   }
 
+  /** Initialize session image counters from existing images */
+  private initializeSessionCounters() {
+    this.sessionImageCounters.clear();
+    // Count images per session from existing data
+    this.sessions.forEach(session => {
+      const count = session.imageKeys ? session.imageKeys.length : 0;
+      this.sessionImageCounters.set(session.id, count);
+    });
+  }
+
+  /**
+   * Generate a unique filename based on date/time and session counter.
+   * Format: img_YYYYMMDD_HHMMSS_N.jpg where N is the image number in the session
+   * @param sessionId Optional session ID to track counter per session
+   * @param timestamp Optional timestamp (defaults to now)
+   * @returns Generated filename string
+   */
+  generateImageFilename(sessionId?: string, timestamp?: string): string {
+    const date = timestamp ? new Date(timestamp) : new Date();
+    
+    // Format: YYYYMMDD
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    const dateStr = `${year}${month}${day}`;
+    
+    // Format: HHMMSS
+    const hours = String(date.getHours()).padStart(2, '0');
+    const minutes = String(date.getMinutes()).padStart(2, '0');
+    const seconds = String(date.getSeconds()).padStart(2, '0');
+    const timeStr = `${hours}${minutes}${seconds}`;
+    
+    // Get counter for this session (or use global counter if no session)
+    const key = sessionId || 'global';
+    const currentCount = this.sessionImageCounters.get(key) || 0;
+    const nextCount = currentCount + 1;
+    this.sessionImageCounters.set(key, nextCount);
+    
+    return `img_${dateStr}_${timeStr}_${nextCount}.jpg`;
+  }
+
+  /**
+   * Get the next counter value for a session without incrementing it.
+   * Useful for preview/planning purposes.
+   */
+  getNextImageNumber(sessionId?: string): number {
+    const key = sessionId || 'global';
+    const currentCount = this.sessionImageCounters.get(key) || 0;
+    return currentCount + 1;
+  }
+
+  /**
+   * Reset the counter for a session (e.g., when session is deleted).
+   */
+  private resetSessionCounter(sessionId: string) {
+    this.sessionImageCounters.delete(sessionId);
+  }
+
   /** Add a new image and persist it, handling duplicates */
-  async addImage(image: StoredImage) {
-    // Check for duplicates based on the original image data
+  async addImage(image: StoredImage, sessionId?: string) {
+    // Auto-generate filename if not provided
+    if (!image.filename || image.filename === '') {
+      image.filename = this.generateImageFilename(sessionId, image.timestamp);
+      console.log(`🔖 Auto-generated filename: ${image.filename}`);
+    }
+
+    // Set fileImageName for backward compatibility if not present
+    if (!image.fileImageName) {
+      image.fileImageName = image.filename;
+    }
+
+    // Check for duplicates based on filename
     const duplicate = this.images.find(
-      img => img.original === image.original && img.timestamp === image.timestamp
+      img => img.filename === image.filename
     );
 
     if (duplicate) {
-      console.warn('Duplicate image detected. Skipping addition:', image.filename);
+      console.warn('Duplicate image detected (same filename). Skipping addition:', image.filename);
       return; // Skip adding duplicate image
     }
 
@@ -73,13 +156,20 @@ export class ImageStorageService {
     this.images.unshift(image);
     await this._storage?.set(this.STORAGE_KEY, this.images);
 
+    // Persist to Firestore 'images' collection
+    try {
+      await this.saveImageToFirestore(image);
+    } catch (e) {
+      console.warn('[ImageStorageService] Failed to save image to Firestore', e);
+    }
+
     // Update map selection if this was selected externally
-    if (this._currentImage && this._currentImage.original === image.original) {
+    if (this._currentImage && this._currentImage.filename === image.filename) {
       this._currentImage = image;
       this._currentImage$.next(this._currentImage);
     }
 
-    console.log(`📤 Image saved. Total stored images: ${this.images.length}`);
+    console.log(`📤 Image saved: ${image.filename}. Total stored images: ${this.images.length}`);
   }
 
   /** Persist sessions to storage */
@@ -88,6 +178,13 @@ export class ImageStorageService {
       //The set method of the _storage object is used to save the sessions array.
       //The SESSIONS_KEY constant is used as the key under which the sessions array is stored.
       await this._storage?.set(this.SESSIONS_KEY, this.sessions);
+      
+      // Persist all sessions to Firestore 'sessionsImages' collection
+      try {
+        await this.saveSessionsToFirestore(this.sessions);
+      } catch (e) {
+        console.warn('[ImageStorageService] Failed to save sessions to Firestore', e);
+      }
     } catch (e) {
       console.warn('Failed to persist sessions', e);
     }
@@ -106,14 +203,14 @@ export class ImageStorageService {
     return Promise.resolve(this.getAllImages());
   }
 
-  /** Convenience: update or insert an entry by its original key */
+  /** Convenience: update or insert an entry by its image key (filename preferred, fallback to original) */
   setEntryForImage(imageKey: string, entry: StoredImage) {
-    const idx = this.images.findIndex(i => i.original === imageKey);
+    const idx = this.images.findIndex(i => i.filename === imageKey || i.original === imageKey);
     if (idx !== -1) this.images[idx] = entry;
     else this.images.unshift(entry);
     this._storage?.set(this.STORAGE_KEY, this.images);
     // update current image subject if needed
-    if (this._currentImage && this._currentImage.original === imageKey) {
+    if (this._currentImage && (this._currentImage.filename === imageKey || this._currentImage.original === imageKey)) {
       this._currentImage = entry;
       this._currentImage$.next(this._currentImage);
     }
@@ -142,19 +239,18 @@ export class ImageStorageService {
     return si;
   }
 
-  /** Select a StoredImage by its original key and expose via observable */
-  selectImageByOriginal(original: string): StoredImage | undefined {
-    //The find method is used to search the images array for an image 
-    //whose original property matches the provided original key.
-    const found = this.images.find(i => i.original === original);
-    //The _currentImage property is updated to the found image if it exists. If 
-    //found is undefined, _currentImage is set to null using the nullish coalescing operator (??).
+  /** Select a StoredImage by its key (filename preferred, fallback to original) and expose via observable */
+  selectImageByKey(imageKey: string): StoredImage | undefined {
+    // Try filename first, then fall back to original for backward compatibility
+    const found = this.images.find(i => i.filename === imageKey || i.original === imageKey);
     this._currentImage = found ?? null;
-    //The BehaviorSubject _currentImage$ is updated with the new value of _currentImage.
-    //This tells any subscribers (e.g., components or services) that the current image has changed.
     this._currentImage$.next(this._currentImage);
-    //The function returns the found image to the caller. If no image was found, it returns undefined.
     return found;
+  }
+
+  /** @deprecated Use selectImageByKey instead. Kept for backward compatibility. */
+  selectImageByOriginal(original: string): StoredImage | undefined {
+    return this.selectImageByKey(original);
   }
 
   getCurrentImage(): StoredImage | null {
@@ -170,18 +266,27 @@ export class ImageStorageService {
   }
 
   /** Sessions */
-  createSession(name: string, imageKeys: string[] = []): ImageSession {
+  createSession(name: string, imageKeys: string[] = [], userId?: string): ImageSession {
     // compute total bounding boxes for provided keys
     let totalBoxes = 0;
     for (const k of imageKeys) {
-      const img = this.images.find(i => i.original === k || (i.withBoxes && i.withBoxes === k));
+      const img = this.images.find(i => i.filename === k || i.original === k || (i.withBoxes && i.withBoxes === k));
       //If an image is found and it has a boxes property (an array), 
       //the length of the boxes array is added to totalBoxes.
       if (img && Array.isArray((img as any).boxes)) totalBoxes += (img as any).boxes.length;
     }
-    const s: ImageSession = { id: `s-${Date.now()}`, name, imageKeys: [...imageKeys], created: new Date().toISOString(), totalBoundingBoxes: totalBoxes };
+    const s: ImageSession = { 
+      id: `s-${Date.now()}`, 
+      name, 
+      imageKeys: [...imageKeys], 
+      created: new Date().toISOString(), 
+      totalBoundingBoxes: totalBoxes,
+      userId: userId
+    };
     //The new session is added to the beginning of the sessions array using unshift.
     this.sessions.unshift(s);
+    // Initialize counter for this new session
+    this.sessionImageCounters.set(s.id, imageKeys.length);
     // persist sessions
     this.persistSessions();
     return s;
@@ -213,10 +318,13 @@ export class ImageStorageService {
     //array if it is not already present.
     if (!s.imageKeys.includes(imageKey)) s.imageKeys.push(imageKey);
     // if the image entry exists and has boxes, add to session total
-    const img = this.images.find(i => i.original === imageKey || (i.withBoxes && i.withBoxes === imageKey));
+    const img = this.images.find(i => i.filename === imageKey || i.original === imageKey || (i.withBoxes && i.withBoxes === imageKey));
     if (img && Array.isArray((img as any).boxes)) {
       s.totalBoundingBoxes = (s.totalBoundingBoxes || 0) + (img as any).boxes.length;
     }
+    // Update the session counter to match actual image count
+    const imageCount = s.imageKeys ? s.imageKeys.length : 0;
+    this.sessionImageCounters.set(sessionId, imageCount);
     this.persistSessions();
     return true;
   }
@@ -230,6 +338,8 @@ export class ImageStorageService {
     if (idx === -1) return false;
     //The splice method is used to remove the session at the index idx
     this.sessions.splice(idx, 1);
+    // Reset counter for this session
+    this.resetSessionCounter(id);
     //After removing the session, the persistSessions method 
     //is called to save the updated sessions array to storage
     this.persistSessions();
@@ -261,19 +371,19 @@ export class ImageStorageService {
     await this._storage?.remove(this.STORAGE_KEY);
   }
 
-  /** Remove a single image by its original data URL or identifier
+  /** Remove a single image by its key (filename, original data URL, or identifier)
    * Returns true if an image was removed, false otherwise
    */
-  async removeImageByOriginal(original: string): Promise<boolean> {
+  async removeImageByOriginal(imageKey: string): Promise<boolean> {
     //The before variable stores the initial count of images in the images array. 
     //This is used later to determine if an image was actually removed.
     const before = this.images.length;
-    // find the image being removed so we can adjust session counts
-    const removedImage = this.images.find(img => img.original === original || (img.withBoxes && img.withBoxes === original));
+    // find the image being removed so we can adjust session counts (support filename lookup)
+    const removedImage = this.images.find(img => img.filename === imageKey || img.original === imageKey || (img.withBoxes && img.withBoxes === imageKey));
     const removedBoxes = removedImage && Array.isArray((removedImage as any).boxes) ? (removedImage as any).boxes.length : 0;
     //The filter method creates a new images array that excludes the 
-    //image with the matching original key
-    this.images = this.images.filter(img => img.original !== original);
+    //image with the matching key
+    this.images = this.images.filter(img => img.filename !== imageKey && img.original !== imageKey);
     //The after variable stores the new count of images in the images array.
     const after = this.images.length;
     //If the count of images (after) is less than the initial count 
@@ -281,14 +391,28 @@ export class ImageStorageService {
     if (after < before) {
       //The updated images array is saved to persistent storage using the STORAGE_KEY.
       await this._storage?.set(this.STORAGE_KEY, this.images);
-      // Also remove this image key from any sessions that reference it
+      
+      // Remove from Firestore 'images' collection
+      if (removedImage) {
+        try {
+          await this.deleteImageFromFirestore(removedImage);
+        } catch (e) {
+          console.warn('[ImageStorageService] Failed to delete image from Firestore', e);
+        }
+      }
+      
+      // Also remove this image key from any sessions that reference it (check both filename and original)
       let sessionsChanged = false;
       for (const s of this.sessions) {
         const prevLen = s.imageKeys.length;
-        const hadKey = s.imageKeys.includes(original);
-        s.imageKeys = s.imageKeys.filter(k => k !== original);
+        const hadKey = s.imageKeys.includes(imageKey) || (removedImage && s.imageKeys.includes(removedImage.filename)) || (removedImage && s.imageKeys.includes(removedImage.original));
+        s.imageKeys = s.imageKeys.filter(k => k !== imageKey && (!removedImage || (k !== removedImage.filename && k !== removedImage.original)));
         //If the session's imageKeys array changes, the sessionsChanged flag is set to true.
-        if (s.imageKeys.length !== prevLen) sessionsChanged = true;
+        if (s.imageKeys.length !== prevLen) {
+          sessionsChanged = true;
+          // Update counter for this session
+          this.sessionImageCounters.set(s.id, s.imageKeys.length);
+        }
         // subtract removed boxes from session total if applicable
         if (hadKey && removedBoxes > 0) {
           s.totalBoundingBoxes = Math.max(0, (s.totalBoundingBoxes || 0) - removedBoxes);
@@ -296,7 +420,7 @@ export class ImageStorageService {
       }
       //If any session was modified, the updated sessions array is saved to persistent storage.
       if (sessionsChanged) await this.persistSessions();
-      console.log(`🗑️ Removed image. Remaining images: ${this.images.length}`);
+      console.log(`🗑️ Removed image: ${removedImage?.filename || imageKey}. Remaining images: ${this.images.length}`);
       return true;
     }
     return false;
@@ -316,9 +440,9 @@ export class ImageStorageService {
     }
   }
 
-  /** Return a StoredImage entry by its image key (original or withBoxes) */
+  /** Return a StoredImage entry by its image key (filename preferred, fallback to original or withBoxes) */
   getEntryForImage(imageKey: string): StoredImage | undefined {
-    return this.images.find(i => i.original === imageKey || (i.withBoxes && i.withBoxes === imageKey));
+    return this.images.find(i => i.filename === imageKey || i.original === imageKey || (i.withBoxes && i.withBoxes === imageKey));
   }
 
   /** Remove a session only if it has no images; returns true when removed */
@@ -336,9 +460,128 @@ export class ImageStorageService {
       //The splice method is used to remove the session at the index idx
       this.sessions.splice(idx, 1);
       this.persistSessions();
+      
+      // Remove from Firestore 'sessionsImages' collection
+      try {
+        this.deleteSessionFromFirestore(session.id).catch(e => 
+          console.warn('[ImageStorageService] Failed to delete session from Firestore', e)
+        );
+      } catch (e) {
+        console.warn('[ImageStorageService] Failed to initiate session deletion from Firestore', e);
+      }
+      
       return true;
     }
     return false;
+  }
+
+  // ==================== Firestore Helper Methods ====================
+
+  /**
+   * Save a single StoredImage to Firestore 'images' collection.
+   * Uses timestamp as document ID to ensure uniqueness.
+   */
+  private async saveImageToFirestore(image: StoredImage): Promise<void> {
+    try {
+      const imagesCollection = collection(this.firestore, this.FIRESTORE_IMAGES_COLLECTION);
+      // Use timestamp + random suffix as doc ID to avoid collisions
+      const docId = `${image.timestamp}_${Math.random().toString(36).substr(2, 9)}`;
+      const docRef = doc(imagesCollection, docId);
+      
+      // Prepare data (exclude Base64 'original' and 'withBoxes' if too large for Firestore doc limit)
+      const firestoreData: any = {
+        timestamp: image.timestamp,
+        filename: image.filename,
+        userId: image.userId || null,
+        sessionId: image.sessionId || null,
+        hasPrediction: image.hasPrediction || false,
+        statusMessage: image.statusMessage || '',
+        detectionMessage: image.detectionMessage || '',
+        prediction: image.prediction || null,
+        boxes: image.boxes || [],
+        // Note: Omitting 'original' and 'withBoxes' Base64 strings to avoid Firestore doc size limits
+        // If needed, store references to Cloud Storage instead
+      };
+      
+      await setDoc(docRef, firestoreData);
+      console.log(`✅ Image saved to Firestore: ${docId}`);
+    } catch (error) {
+      console.error('[ImageStorageService] Error saving image to Firestore:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Save all sessions to Firestore 'sessionsImages' collection.
+   * Each session is stored as a separate document with session.id as doc ID.
+   */
+  private async saveSessionsToFirestore(sessions: ImageSession[]): Promise<void> {
+    try {
+      const sessionsCollection = collection(this.firestore, this.FIRESTORE_SESSIONS_COLLECTION);
+      const batch = writeBatch(this.firestore);
+      
+      for (const session of sessions) {
+        const docRef = doc(sessionsCollection, session.id);
+        const firestoreData: any = {
+          id: session.id,
+          name: session.name,
+          imageKeys: session.imageKeys || [],
+          created: session.created,
+          totalBoundingBoxes: session.totalBoundingBoxes || 0,
+          userId: session.userId || null,
+        };
+        batch.set(docRef, firestoreData);
+      }
+      
+      await batch.commit();
+      console.log(`✅ ${sessions.length} session(s) saved to Firestore`);
+    } catch (error) {
+      console.error('[ImageStorageService] Error saving sessions to Firestore:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Delete a StoredImage from Firestore 'images' collection.
+   * Queries by timestamp and filename to find matching document(s).
+   */
+  private async deleteImageFromFirestore(image: StoredImage): Promise<void> {
+    try {
+      const imagesCollection = collection(this.firestore, this.FIRESTORE_IMAGES_COLLECTION);
+      const q = query(
+        imagesCollection,
+        where('timestamp', '==', image.timestamp),
+        where('filename', '==', image.filename)
+      );
+      
+      const querySnapshot = await getDocs(q);
+      const batch = writeBatch(this.firestore);
+      
+      querySnapshot.forEach((docSnapshot) => {
+        batch.delete(docSnapshot.ref);
+      });
+      
+      await batch.commit();
+      console.log(`✅ Image deleted from Firestore: ${image.filename}`);
+    } catch (error) {
+      console.error('[ImageStorageService] Error deleting image from Firestore:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Delete a session from Firestore 'sessionsImages' collection.
+   */
+  private async deleteSessionFromFirestore(sessionId: string): Promise<void> {
+    try {
+      const sessionsCollection = collection(this.firestore, this.FIRESTORE_SESSIONS_COLLECTION);
+      const docRef = doc(sessionsCollection, sessionId);
+      await deleteDoc(docRef);
+      console.log(`✅ Session deleted from Firestore: ${sessionId}`);
+    } catch (error) {
+      console.error('[ImageStorageService] Error deleting session from Firestore:', error);
+      throw error;
+    }
   }
   
 }
