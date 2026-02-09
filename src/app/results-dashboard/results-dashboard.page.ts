@@ -159,15 +159,15 @@ export class ResultsDashboardPage implements OnInit {
     }
   }
 
-  // Return a stable key for an image (filename preferred fallback to original)
+  // Return a stable key for an image (filename as the only primary key)
   getImageKey(img: StoredImage): string {
-    // Ensure the filename is properly retrieved or fallback to a default value
-    return img.filename ? img.filename : (img.original || 'No Filename');
+    // Use filename as the only key; return empty string if not present
+    return img.filename || '';
   }
 
 
    // Return a stable key for an image used in selection and lookup.
-   // Prefers `filename`, falls back to `original`.
+   // Uses `filename` only.
    // Interaction: used by selection helpers and to deduplicate images.
 
   isSelectedImage(img: StoredImage): boolean {

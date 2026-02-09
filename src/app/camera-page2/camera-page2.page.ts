@@ -1099,19 +1099,23 @@ export class CameraPage2Page implements AfterViewInit {
       return;
     }
 
-    // find in imagePaths (stored images) first, delete logic
+    // find in storedImages first, delete logic
     // If the selected thumbnail maps to a stored/persisted 
-    // image, remove it via the ImageStorageService
+    // image, remove it via the ImageStorageService using filename as key
     const storedIdx = this.storedImages.findIndex(p => p.original === src || p.withBoxes === src);
     if (storedIdx !== -1) {
       const imgEntry = this.storedImages[storedIdx];
-      const filename = imgEntry.filename || imgEntry.timestamp || imgEntry.original || '(unnamed)';
+      const filename = imgEntry.filename || '(unnamed)';
       const confirmMsg = `Delete stored image "${filename}"? This action cannot be undone.`;
       if (!confirm(confirmMsg)) return;
 
       try {
-        // Use the canonical delete API on the ImageStorageService
-        await (this.imageStorage as any).deleteImage(imgEntry.original);
+        // Use filename as the canonical key for deletion
+        if (imgEntry.filename) {
+          await this.imageStorage.deleteImage(imgEntry.filename);
+        } else {
+          console.warn('[CameraPage2] Image has no filename, cannot delete');
+        }
       } catch (err) {
         console.warn('[CameraPage2] Failed to remove stored image via service', err);
       }
@@ -1225,15 +1229,12 @@ export class CameraPage2Page implements AfterViewInit {
    */
   onStoredThumbClick(img: StoredImage) {
     try {
-      // Use filename as primary key, fallback to original for backward compatibility
-      const key = img.filename || img.original;
-      if (typeof (this.imageStorage as any).selectImageByKey === 'function') {
-        (this.imageStorage as any).selectImageByKey(key);
-      } else {
-        this.imageStorage.selectImageByOriginal(key);
+      // Use filename as the only primary key
+      if (img.filename) {
+        this.imageStorage.selectImageByKey(img.filename);
       }
     } catch (e) {
-      // ignore
+      console.warn('onStoredThumbClick failed:', e);
     }
     this.selectedThumbSrc = img.withBoxes || img.original;
     this.selectedImageTitle = img.filename ?? '';

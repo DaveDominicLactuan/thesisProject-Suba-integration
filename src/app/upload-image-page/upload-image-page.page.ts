@@ -215,17 +215,12 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
 
   /** Called when a stored-image thumbnail is clicked */
   onStoredThumbClick(img: any) {
-    //attempt to notify the servuce of the selectionm, calls the service to mark 
-    // the image as selected, if API exist and error handling
+    //attempt to notify the service of the selection, calls the service to mark 
+    // the image as selected using filename as the primary key
     try {
-      if (this.imageStorage) {
-        // Use filename as primary key, fallback to original for backward compatibility
-        const key = img.filename || img.original;
-        if (typeof (this.imageStorage as any).selectImageByKey === 'function') {
-          (this.imageStorage as any).selectImageByKey(key);
-        } else if (typeof this.imageStorage.selectImageByOriginal === 'function') {
-          this.imageStorage.selectImageByOriginal(key);
-        }
+      if (this.imageStorage && img.filename) {
+        // Use filename as the only primary key
+        this.imageStorage.selectImageByKey(img.filename);
       }
     } catch (e) {
       console.warn('onStoredThumbClick: selectImage failed', e);
@@ -233,7 +228,7 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
     // Respect the current toggle: show boxed version when toggled on, otherwise show original
     // update the selected thumbnail src and title with respect to the toggle, and auto-scroll to center
     this.selectedThumbSrc = this.showWithBoxes ? (img.withBoxes ?? img.original) : (img.original ?? img.withBoxes ?? '');
-    this.selectedImageTitle = img.fileName ?? '';
+    this.selectedImageTitle = img.filename ?? img.fileName ?? '';
     
     // Auto-scroll to center the selected thumbnail or item (Android Recent Apps style).  
     // after a short delay let the DOM update then center the clicked thumbnail in the scroller.
@@ -1146,41 +1141,45 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
 
     // find in imagePaths (stored images) first, delete logic
     // If the selected thumbnail maps to a stored/persisted 
-    // image, remove it via the ImageStorageService
-    const idx = this.imagePaths.findIndex((p: any) => p.original === src || p.withBoxes === src);
+    // image, remove it via the ImageStorageService using filename as key
+    const idx = this.imagePaths.findIndex((p: any) => {
+      const imgKey = p.filename || p.fileName;
+      return imgKey && (p.original === src || p.withBoxes === src);
+    });
     const capturedIdx = this.capturedImages.indexOf(src);
     //compute human filename for prompt and ask user to confirm.
     //Resolve display filename and confirm deletion
-    const filename = idx !== -1 ? (this.imagePaths[idx].fileName ?? '(unnamed)') : (capturedIdx !== -1 ? `Captured ${capturedIdx + 1}` : src);
+    const filename = idx !== -1 ? (this.imagePaths[idx].filename || this.imagePaths[idx].fileName || '(unnamed)') : (capturedIdx !== -1 ? `Captured ${capturedIdx + 1}` : src);
     const confirmMsg = `Delete image "${filename}"? This action cannot be undone.`;
     if (!confirm(confirmMsg)) return;
 
     try {
-      // determine a canonical original key to pass to storage (handle withBoxes URLs)
-      //Determine canonical original key for storage operations
-      let canonical = src;
-      if (idx !== -1 && this.imagePaths[idx] && this.imagePaths[idx].original) {
-        canonical = this.imagePaths[idx].original;
-      } else {
-        const found = this.imagePaths.find((p: any) => p.withBoxes === src || p.original === src);
-        if (found && found.original) canonical = found.original;
+      // Use filename as the canonical key for storage operations
+      let canonicalKey = '';
+      if (idx !== -1 && this.imagePaths[idx]) {
+        canonicalKey = this.imagePaths[idx].filename || this.imagePaths[idx].fileName || '';
       }
 
-      // attempt to remove from persistent storage (if present) via canonical API
+      // attempt to remove from persistent storage using filename as key
       //call storage API to delete image (if available), in case of failures.
       let removed = false;
-      try {
-        removed = await (this.imageStorage as any).deleteImage(canonical);
-      } catch (e) {
-        console.warn('[UploadImagePage] persistent remove attempt failed', e);
-        removed = false;
+      if (canonicalKey) {
+        try {
+          removed = await this.imageStorage.deleteImage(canonicalKey);
+        } catch (e) {
+          console.warn('[UploadImagePage] persistent remove attempt failed', e);
+          removed = false;
+        }
       }
 
       // Always remove any matching local in memory references (guard against stale in-memory state)
       //Purpose: remove any matching entries from imagePaths and capturedImages and refresh arrays.
       try {
-        this.imagePaths = this.imagePaths.filter((p: any) => !(p.original === canonical || p.withBoxes === canonical || p.original === src || p.withBoxes === src));
-        this.capturedImages = this.capturedImages.filter(c => !(c === canonical || c === src));
+        this.imagePaths = this.imagePaths.filter((p: any) => {
+          const pKey = p.filename || p.fileName;
+          return !(pKey === canonicalKey || p.original === src || p.withBoxes === src);
+        });
+        this.capturedImages = this.capturedImages.filter(c => c !== src);
         // ensure change detection picks up the new arrays
         this.imagePaths = this.imagePaths.concat([]);
         this.capturedImages = this.capturedImages.concat([]);
@@ -1203,7 +1202,7 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
       } else if (this.imagePaths.length > 0) {
         const first = this.imagePaths[0];
         this.selectedThumbSrc = this.showWithBoxes ? first.withBoxes : first.original;
-        this.selectedImageTitle = first.fileName ?? '';
+        this.selectedImageTitle = first.filename || first.fileName || '';
       } else {
         // nothing left
         this.selectedThumbSrc = null;

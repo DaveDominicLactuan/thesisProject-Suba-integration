@@ -131,7 +131,7 @@ export class ImageStorageService {
 
   /** Add a new image and persist it, handling duplicates */
   async addImage(image: StoredImage, sessionId?: string) {
-    // Auto-generate filename if not provided
+    // Auto-generate filename if not provided (ALWAYS use filename as primary identifier)
     if (!image.filename || image.filename === '') {
       image.filename = this.generateImageFilename(sessionId, image.timestamp);
       console.log(`🔖 Auto-generated filename: ${image.filename}`);
@@ -140,6 +140,11 @@ export class ImageStorageService {
     // Set fileImageName for backward compatibility if not present
     if (!image.fileImageName) {
       image.fileImageName = image.filename;
+    }
+
+    // Ensure sessionId is stored in the image for reference
+    if (sessionId) {
+      image.sessionId = sessionId;
     }
 
     // Check for duplicates based on filename
@@ -203,14 +208,19 @@ export class ImageStorageService {
     return Promise.resolve(this.getAllImages());
   }
 
-  /** Convenience: update or insert an entry by its image key (filename preferred, fallback to original) */
+  /** Convenience: update or insert an entry by its filename (primary key) */
   setEntryForImage(imageKey: string, entry: StoredImage) {
-    const idx = this.images.findIndex(i => i.filename === imageKey || i.original === imageKey);
+    // Ensure the entry has a valid filename
+    if (!entry.filename || entry.filename === '') {
+      entry.filename = this.generateImageFilename(entry.sessionId, entry.timestamp);
+    }
+    
+    const idx = this.images.findIndex(i => i.filename === imageKey);
     if (idx !== -1) this.images[idx] = entry;
     else this.images.unshift(entry);
     this._storage?.set(this.STORAGE_KEY, this.images);
     // update current image subject if needed
-    if (this._currentImage && (this._currentImage.filename === imageKey || this._currentImage.original === imageKey)) {
+    if (this._currentImage && this._currentImage.filename === imageKey) {
       this._currentImage = entry;
       this._currentImage$.next(this._currentImage);
     }
@@ -239,18 +249,23 @@ export class ImageStorageService {
     return si;
   }
 
-  /** Select a StoredImage by its key (filename preferred, fallback to original) and expose via observable */
+  /** Select a StoredImage by its filename (primary key) and expose via observable */
   selectImageByKey(imageKey: string): StoredImage | undefined {
-    // Try filename first, then fall back to original for backward compatibility
-    const found = this.images.find(i => i.filename === imageKey || i.original === imageKey);
+    // Use filename as the primary and only key
+    const found = this.images.find(i => i.filename === imageKey);
     this._currentImage = found ?? null;
     this._currentImage$.next(this._currentImage);
     return found;
   }
 
-  /** @deprecated Use selectImageByKey instead. Kept for backward compatibility. */
+  /** @deprecated Use selectImageByKey with filename instead. Kept for backward compatibility. */
   selectImageByOriginal(original: string): StoredImage | undefined {
-    return this.selectImageByKey(original);
+    // Fallback: try to find by original if filename lookup fails
+    const found = this.images.find(i => i.original === original);
+    if (found && found.filename) {
+      return this.selectImageByKey(found.filename);
+    }
+    return found;
   }
 
   getCurrentImage(): StoredImage | null {
@@ -440,9 +455,14 @@ export class ImageStorageService {
     }
   }
 
-  /** Return a StoredImage entry by its image key (filename preferred, fallback to original or withBoxes) */
+  /** Return a StoredImage entry by its filename (primary key) */
   getEntryForImage(imageKey: string): StoredImage | undefined {
-    return this.images.find(i => i.filename === imageKey || i.original === imageKey || (i.withBoxes && i.withBoxes === imageKey));
+    return this.images.find(i => i.filename === imageKey);
+  }
+
+  /** Helper method to get stable image key - always returns filename */
+  getImageKey(image: StoredImage): string {
+    return image.filename || '';
   }
 
   /** Remove a session only if it has no images; returns true when removed */

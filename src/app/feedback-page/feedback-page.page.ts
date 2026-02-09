@@ -8,6 +8,7 @@ import { CameraPreview, CameraPreviewOptions } from '@awesome-cordova-plugins/ca
 interface DisplayImage {
   original: string;
   withBoxes: string;
+  filename?: string;
   fileName?: string;
   detectionMessage?: string;
   detectionResult?: string;
@@ -207,10 +208,14 @@ private backButtonSub: any; // hardware back handler
     // update form map for this image
     //Ensure a persistant per-image entry in formDataMap (defaults from current UI/prediction)
     //This is used to store selections for later retrieval, saving, or export:
-    // Use filename as primary key, fallback to original for backward compatibility
-    const key = img.fileName || img.filename || img.original;
+    // Use filename as the only primary key
+    const key = img.filename || '';
+    if (!key) {
+      console.warn('[FeedbackPage] onImageClick: image has no filename!');
+      return;
+    }
     this.formDataMap[key] = this.formDataMap[key] ?? {
-      title: img.fileName ?? this.selectedImageTitle,
+      title: img.filename ?? this.selectedImageTitle,
       dropdown1: this.dropdown1,
       dropdown2: this.dropdown2,
       dropdown3: this.dropdown3,
@@ -222,7 +227,7 @@ private backButtonSub: any; // hardware back handler
 
     // debug output for immediate inspection
     console.log('[FeedbackPage] onImageClick debug', {
-      filename: img.fileName,
+      filename: img.filename,
       rawPrediction: img.rawPrediction,
       statusMessage: img.statusMessage,
       selectedPrediction: this.selectedPrediction,
@@ -433,7 +438,8 @@ private backButtonSub: any; // hardware back handler
       return {
       original: img.original,
       withBoxes: img.withBoxes ?? img.original,
-      fileName: img.filename ?? img.fileName ?? (img.original && img.original.split ? img.original.split('/').pop() : ''),
+      filename: img.filename || '',
+      fileName: img.filename || '',
       detectionMessage,
       detectionResult,
       rawPrediction: prediction ? { type: predType, shape: predShape, severity: predSeverity } : undefined,
@@ -849,15 +855,19 @@ addEntry() {
     
     //Prepare metadata and ask for user confirmation
     const matched = this.imagePaths[idx];
-    const original = matched.original;
-    const filename = matched.fileName ?? '(unnamed)';
+    const filename = matched.filename || '(unnamed)';
 
     const confirmMsg = `Delete image "${filename}"? This action cannot be undone.`;
     if (!confirm(confirmMsg)) return;
 
-    //Delete from storage service and warn if nothing removed
+    //Delete from storage service using filename as key
     try {
-      const removed = await (this.imageStorageService as any).deleteImage(original);
+      if (!matched.filename) {
+        console.warn('[FeedbackPage] Image has no filename, cannot delete');
+        return;
+      }
+      
+      const removed = await this.imageStorageService.deleteImage(matched.filename);
       if (!removed) {
         console.warn('[FeedbackPage] deleteSelectedImage: deleteImage reported nothing removed');
       }
@@ -870,7 +880,7 @@ addEntry() {
         this.selectedImage = this.showWithBoxes ? first.withBoxes : first.original;
         this.selectedPrediction = first.rawPrediction ?? {};
         this.selectedStatusMessage = first.statusMessage ?? '';
-        this.selectedImageTitle = first.fileName ?? '';
+        this.selectedImageTitle = first.filename ?? '';
 
         // update dropdowns and detection strings
         if (this.selectedStatusMessage && this.selectedStatusMessage.length > 0) {
@@ -1046,7 +1056,9 @@ addEntry() {
       // mark entry as saved session and persist to service
       entry.statusMessage = entry.statusMessage ?? 'Saved as session';
       if ((this.imageStorageService as any).setEntryForImage) {
-        (this.imageStorageService as any).setEntryForImage(entry.original, entry);
+        // Use filename as key, fallback to original for backward compatibility
+        const imageKey = entry.filename || entry.original;
+        (this.imageStorageService as any).setEntryForImage(imageKey, entry);
       } else if ((this.imageStorageService as any).createAndAdd) {
         await (this.imageStorageService as any).createAndAdd(entry);
       }
@@ -1156,10 +1168,12 @@ addEntry() {
         try {
           const val = input.value && input.value.trim().length > 0 ? input.value.trim() : `Session ${new Date().toLocaleString()}`;
           const svc: any = this.imageStorageService as any;
+          // Use filename as key, fallback to original for backward compatibility
+          const imageKey = entry.filename || entry.original;
           // If a session is already selected (e.g., from Camera page), update it
           if (this.selectedSessionId && typeof svc.addImageToSession === 'function') {
             try {
-              svc.addImageToSession(this.selectedSessionId, entry.original);
+              svc.addImageToSession(this.selectedSessionId, imageKey);
             } catch (e) {
               console.warn('[FeedbackPage] failed to add image to existing session', e);
             }
@@ -1170,7 +1184,7 @@ addEntry() {
           } else {
             // create session via service and set last created name
             if (typeof svc.createSession === 'function') {
-              const s = svc.createSession(val, [entry.original]);
+              const s = svc.createSession(val, [imageKey]);
               if (s && typeof svc.setLastCreatedSession === 'function') {
                 try { svc.setLastCreatedSession(s.id, s.name); } catch (e) { /* ignore */ }
               }

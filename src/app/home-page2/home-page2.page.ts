@@ -201,7 +201,8 @@ private async initialize(): Promise<void> {
       // counts how many imageKeys or images in the sessions are present in allImages
       this.sessions = sessionsRaw.map((sess: any) => {
         const keys = Array.isArray(sess.imageKeys) ? sess.imageKeys : [];
-        const imageCount = keys.reduce((acc: number, k: string) => acc + (allImages.findIndex(ai => ai.original === k) !== -1 ? 1 : 0), 0);
+        // Use filename as the only key for matching
+        const imageCount = keys.reduce((acc: number, k: string) => acc + (allImages.findIndex(ai => ai.filename === k) !== -1 ? 1 : 0), 0);
         return { ...sess, imageCount };
       });
       // if Image Storage Service recorded a last created session or last used/created session,
@@ -292,13 +293,9 @@ private async initialize(): Promise<void> {
      try {
       if (session && session.imageKeys && session.imageKeys.length > 0) {
         const key = session.imageKeys[0];
-        if (this.imageStorage) {
-          // Try new method first, fallback to old one
-          if (typeof (this.imageStorage as any).selectImageByKey === 'function') {
-            (this.imageStorage as any).selectImageByKey(key);
-          } else if (typeof this.imageStorage.selectImageByOriginal === 'function') {
-            this.imageStorage.selectImageByOriginal(key);
-          }
+        if (this.imageStorage && key) {
+          // Use filename as the only key
+          this.imageStorage.selectImageByKey(key);
         }
       }
     } catch (e) { console.warn('goToSession warning', e); }
@@ -651,7 +648,8 @@ private async initialize(): Promise<void> {
             } else {
               stored = [];
             }
-            const keys = Array.isArray(stored) ? stored.slice(0, 6).map((item: any) => item.original) : [];
+            // Use filename as the only key
+            const keys = Array.isArray(stored) ? stored.slice(0, 6).map((item: any) => item.filename || '').filter((k: string) => k) : [];
             const s = (typeof this.imageStorage.createSession === 'function') ? this.imageStorage.createSession('Test Session', keys) : null;
             try { await this.loadSessions(); } catch (e) {}
             alert(s ? ('Test session created: ' + (s as any).id) : 'Test session created (fallback)');
