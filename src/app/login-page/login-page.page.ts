@@ -47,11 +47,19 @@ signupForm: FormGroup;
     this.error = '';
     try {
       //tries login with email and password
+      console.log('[LoginPage.login] ===== LOGIN FLOW START =====');
+      console.log('[LoginPage.login] Email:', this.email);
+      console.log('[LoginPage.login] Auth currentUser BEFORE login:', this.auth3.getCurrentUser()?.uid || 'null');
       await this.auth3.login(this.email, this.password);
       console.log('[LoginPage] Auth login succeeded for', this.email);
+      console.log('[LoginPage.login] Auth currentUser IMMEDIATELY after login (before wait):', this.auth3.getCurrentUser()?.uid || 'null');
+      const authedUser = await this.auth3.waitForAuthUser(15000);
+      console.log('[LoginPage] Auth currentUser after login', authedUser?.uid || null);
+      console.log('[LoginPage.login] After waitForAuthUser - returned user:', authedUser?.uid || 'null', 'email:', authedUser?.email || 'null');
       // After successful login, persist login state and basic user data
       try {
         // Fetch user profile from Firestore using the login credentials of Auth3Service
+        console.log('[LoginPage.login] About to call getUserProfile() - currentUser is:', this.auth3.getCurrentUser()?.uid || 'null');
         const profile = await this.auth3.getUserProfile();
         console.log('[LoginPage] Retrieved user profile from Firestore:', profile);
         const firstName = profile['firstName'] || '';
@@ -81,7 +89,9 @@ signupForm: FormGroup;
       // Mark logged in and navigate to home, allow for when openign app navigate to home-page than landing page
       //  replacing history so back exits
       try { localStorage.setItem('isLoggedIn', 'true'); } catch {}
-      console.log('[LoginPage] navigating to /home-page');
+      console.log('[LoginPage.login] Successfully logged in. currentUser NOW:', this.auth3.getCurrentUser()?.uid || 'null');
+      console.log('[LoginPage.login] About to navigate to /home-page2');
+      console.log('[LoginPage.login] ===== LOGIN FLOW END (navigating) =====');
 
       //only remove login page from history stack in the browser, replaceUrl true does that
       this.router.navigateByUrl('/home-page2', { replaceUrl: true });

@@ -1,6 +1,8 @@
 import { Injectable } from '@angular/core';
 import { Storage } from '@ionic/storage-angular';
 import { BehaviorSubject, Observable } from 'rxjs';
+import { Auth } from '@angular/fire/auth';
+import { onAuthStateChanged } from 'firebase/auth';
 import { Firestore, collection, doc, setDoc, deleteDoc, getDocs, query, where, writeBatch } from '@angular/fire/firestore';
 
 //image object in the session
@@ -50,8 +52,34 @@ export class ImageStorageService {
   // Counter map to track image number per session
   private sessionImageCounters: Map<string, number> = new Map();
 
-  constructor(private storage: Storage, private firestore: Firestore) {
+  constructor(private storage: Storage, private firestore: Firestore, private auth: Auth) {
     this.init();
+  }
+
+  private getCurrentUserId(): string | null {
+    return this.auth.currentUser?.uid ?? null;
+  }
+
+  private async waitForAuthUserId(timeoutMs: number = 8000): Promise<string | null> {
+    const existing = this.getCurrentUserId();
+    if (existing) return existing;
+
+    return new Promise(resolve => {
+      let done = false;
+      const timer = setTimeout(() => {
+        if (done) return;
+        done = true;
+        resolve(null);
+      }, timeoutMs);
+
+      const unsubscribe = onAuthStateChanged(this.auth, user => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        try { unsubscribe(); } catch (e) {}
+        resolve(user?.uid ?? null);
+      });
+    });
   }
 
   /** Initialize Ionic Storage and load existing images */
@@ -161,13 +189,6 @@ export class ImageStorageService {
     this.images.unshift(image);
     await this._storage?.set(this.STORAGE_KEY, this.images);
 
-    // Persist to Firestore 'images' collection
-    try {
-      await this.saveImageToFirestore(image);
-    } catch (e) {
-      console.warn('[ImageStorageService] Failed to save image to Firestore', e);
-    }
-
     // Update map selection if this was selected externally
     if (this._currentImage && this._currentImage.filename === image.filename) {
       this._currentImage = image;
@@ -183,15 +204,133 @@ export class ImageStorageService {
       //The set method of the _storage object is used to save the sessions array.
       //The SESSIONS_KEY constant is used as the key under which the sessions array is stored.
       await this._storage?.set(this.SESSIONS_KEY, this.sessions);
-      
-      // Persist all sessions to Firestore 'sessionsImages' collection
-      try {
-        await this.saveSessionsToFirestore(this.sessions);
-      } catch (e) {
-        console.warn('[ImageStorageService] Failed to save sessions to Firestore', e);
-      }
     } catch (e) {
       console.warn('Failed to persist sessions', e);
+    }
+  }
+
+  /** Persist a single session and its images to Firestore using filename as image doc ID */
+  async saveSessionWithImagesToFirestore(sessionId: string): Promise<void> {
+    const session = this.sessions.find(s => s.id === sessionId);
+    if (!session) {
+      console.warn('[ImageStorageService] saveSessionWithImagesToFirestore: session not found', sessionId);
+      return;
+    }
+
+    const imagesForSession: StoredImage[] = [];
+    for (const key of session.imageKeys || []) {
+      const img = this.images.find(i => i.filename === key || i.original === key || (i.withBoxes && i.withBoxes === key));
+      if (img && img.filename) imagesForSession.push(img);
+    }
+
+    try {
+      const currentUid = await this.waitForAuthUserId();
+      console.log('[ImageStorageService] currentUserId for saveSessionWithImagesToFirestore', currentUid);
+      if (!currentUid) {
+        console.warn('[ImageStorageService] No authenticated user; skipping Firestore write');
+        return;
+      }
+      // CRITICAL: Ensure userId is ALWAYS set to currentUid (never null)
+      session.userId = currentUid;
+
+      console.log('[ImageStorageService] Saving session to Firestore', {
+        sessionId: session.id,
+        sessionName: session.name,
+        imageCount: imagesForSession.length,
+        userId: currentUid
+      });
+      const sessionsCollection = collection(this.firestore, this.FIRESTORE_SESSIONS_COLLECTION);
+      const imagesCollection = collection(this.firestore, this.FIRESTORE_IMAGES_COLLECTION);
+
+      // Remove existing images for this session so Firestore reflects local state
+      const existingQuery = query(imagesCollection, where('sessionId', '==', session.id), where('userId', '==', currentUid));
+      const existingSnapshot = await getDocs(existingQuery);
+      const deleteBatch = writeBatch(this.firestore);
+      existingSnapshot.forEach(docSnapshot => deleteBatch.delete(docSnapshot.ref));
+      await deleteBatch.commit();
+
+      const batch = writeBatch(this.firestore);
+      const sessionRef = doc(sessionsCollection, session.id);
+      batch.set(sessionRef, {
+        id: session.id,
+        name: session.name,
+        imageKeys: session.imageKeys || [],
+        created: session.created,
+        totalBoundingBoxes: session.totalBoundingBoxes || 0,
+        userId: currentUid,
+        sessionId: session.sessionId || null
+      });
+
+      for (const image of imagesForSession) {
+        // CRITICAL: Ensure userId is ALWAYS set to currentUid (never null)
+        image.userId = currentUid;
+        const imageRef = doc(imagesCollection, image.filename);
+        batch.set(imageRef, {
+          timestamp: image.timestamp,
+          filename: image.filename,
+          userId: currentUid,
+          sessionId: session.id,
+          hasPrediction: image.hasPrediction || false,
+          statusMessage: image.statusMessage || '',
+          detectionMessage: image.detectionMessage || '',
+          prediction: image.prediction || null,
+          boxes: image.boxes || []
+        });
+      }
+
+      await batch.commit();
+      console.log(`✅ Session and images saved to Firestore: ${session.id}`);
+    } catch (error) {
+      console.error('[ImageStorageService] Error saving session/images to Firestore:', error);
+      throw error;
+    }
+  }
+
+  /** Save a StoredImage under a user document in Firestore */
+  async saveImageToUser(uid: string, image: StoredImage): Promise<void> {
+    try {
+      const imagesCollection = collection(this.firestore, 'users', uid, 'images');
+      const docId = image.filename || `${image.timestamp}_${Math.random().toString(36).substr(2, 9)}`;
+      const docRef = doc(imagesCollection, docId);
+
+      const firestoreData: any = {
+        timestamp: image.timestamp,
+        filename: image.filename,
+        userId: image.userId || uid,
+        sessionId: image.sessionId || null,
+        hasPrediction: image.hasPrediction || false,
+        statusMessage: image.statusMessage || '',
+        detectionMessage: image.detectionMessage || '',
+        prediction: image.prediction || null,
+        boxes: image.boxes || [],
+      };
+
+      await setDoc(docRef, firestoreData);
+      console.log(`✅ Image saved to user Firestore: ${uid}/${docId}`);
+    } catch (error) {
+      console.error('[ImageStorageService] Error saving image to user Firestore:', error);
+      throw error;
+    }
+  }
+
+  /** Save an ImageSession under a user document in Firestore */
+  async saveSessionToUser(uid: string, session: ImageSession): Promise<void> {
+    try {
+      const sessionsCollection = collection(this.firestore, 'users', uid, 'sessions');
+      const docRef = doc(sessionsCollection, session.id);
+      const firestoreData: any = {
+        id: session.id,
+        name: session.name,
+        imageKeys: session.imageKeys || [],
+        created: session.created,
+        totalBoundingBoxes: session.totalBoundingBoxes || 0,
+        userId: session.userId || uid,
+      };
+      await setDoc(docRef, firestoreData);
+      console.log(`✅ Session saved to user Firestore: ${uid}/${session.id}`);
+    } catch (error) {
+      console.error('[ImageStorageService] Error saving session to user Firestore:', error);
+      throw error;
     }
   }
 
@@ -503,6 +642,14 @@ export class ImageStorageService {
    */
   private async saveImageToFirestore(image: StoredImage): Promise<void> {
     try {
+      const currentUid = await this.waitForAuthUserId();
+      console.log('[ImageStorageService] currentUserId for saveImageToFirestore', currentUid);
+      if (!currentUid) {
+        console.warn('[ImageStorageService] No authenticated user; skipping Firestore image write');
+        return;
+      }
+      // CRITICAL: Always set userId to currentUid (never null)
+      image.userId = currentUid;
       const imagesCollection = collection(this.firestore, this.FIRESTORE_IMAGES_COLLECTION);
       // Use timestamp + random suffix as doc ID to avoid collisions
       const docId = `${image.timestamp}_${Math.random().toString(36).substr(2, 9)}`;
@@ -512,7 +659,7 @@ export class ImageStorageService {
       const firestoreData: any = {
         timestamp: image.timestamp,
         filename: image.filename,
-        userId: image.userId || null,
+        userId: currentUid,
         sessionId: image.sessionId || null,
         hasPrediction: image.hasPrediction || false,
         statusMessage: image.statusMessage || '',
@@ -537,10 +684,18 @@ export class ImageStorageService {
    */
   private async saveSessionsToFirestore(sessions: ImageSession[]): Promise<void> {
     try {
+      const currentUid = await this.waitForAuthUserId();
+      console.log('[ImageStorageService] currentUserId for saveSessionsToFirestore', currentUid);
+      if (!currentUid) {
+        console.warn('[ImageStorageService] No authenticated user; skipping Firestore sessions write');
+        return;
+      }
       const sessionsCollection = collection(this.firestore, this.FIRESTORE_SESSIONS_COLLECTION);
       const batch = writeBatch(this.firestore);
       
       for (const session of sessions) {
+        // CRITICAL: Always set userId to currentUid (never null)
+        session.userId = currentUid;
         const docRef = doc(sessionsCollection, session.id);
         const firestoreData: any = {
           id: session.id,
@@ -548,7 +703,7 @@ export class ImageStorageService {
           imageKeys: session.imageKeys || [],
           created: session.created,
           totalBoundingBoxes: session.totalBoundingBoxes || 0,
-          userId: session.userId || null,
+          userId: currentUid,
         };
         batch.set(docRef, firestoreData);
       }

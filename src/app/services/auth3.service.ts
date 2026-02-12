@@ -31,6 +31,7 @@ async register(email: string, password: string, firstName: string, lastName: str
 
       // Debug: log the uid and payload we will write to Firestore
       const payload = {
+        userID: uid,
         firstName,
         lastName,
         engineeringID,
@@ -93,23 +94,70 @@ async register(email: string, password: string, firstName: string, lastName: str
     return this.auth.currentUser;
   }
 
+  async waitForAuthUser(timeoutMs: number = 8000): Promise<User | null> {
+    const existing = this.getCurrentUser();
+    console.log('[Auth3Service.waitForAuthUser] Called with timeout:', timeoutMs, 'ms. Existing currentUser:', existing?.uid || 'null');
+    
+    if (existing) {
+      console.log('[Auth3Service.waitForAuthUser] User already existing, returning immediately');
+      return existing;
+    }
+
+    return new Promise(resolve => {
+      let done = false;
+      const timer = setTimeout(() => {
+        if (done) return;
+        done = true;
+        console.warn('[Auth3Service.waitForAuthUser] TIMEOUT after', timeoutMs, 'ms; currentUser is null');
+        resolve(this.getCurrentUser());
+      }, timeoutMs);
+
+      console.log('[Auth3Service.waitForAuthUser] Setting up onAuthStateChanged listener...');
+      const unsubscribe = onAuthStateChanged(this.auth, user => {
+        console.log('[Auth3Service.waitForAuthUser] onAuthStateChanged fired with user:', user?.uid || 'null');
+        if (done) {
+          console.log('[Auth3Service.waitForAuthUser] Already done, ignoring this auth change');
+          return;
+        }
+        done = true;
+        clearTimeout(timer);
+        try { unsubscribe(); } catch (e) {}
+        console.log('[Auth3Service.waitForAuthUser] Resolving with user:', user?.uid || 'null');
+        resolve(user ?? null);
+      });
+    });
+  }
+
   // ✅ Get user profile from Firestore (uses native Firebase SDK to avoid injection warnings)
   async getUserProfile() {
+    console.log('[Auth3Service.getUserProfile] Called. getCurrentUser():', this.getCurrentUser()?.uid || 'null');
+    
     //gets the current user uid
-    const user = this.getCurrentUser();
+    let user = this.getCurrentUser();
+    if (!user) {
+      console.log('[Auth3Service.getUserProfile] No currentUser, calling waitForAuthUser(15000)...');
+      user = await this.waitForAuthUser(15000);
+      console.log('[Auth3Service.getUserProfile] After waitForAuthUser, user:', user?.uid || 'null');
+    }
     // if no user logged in, throw error
-    if (!user) throw new Error('No user logged in');
+    if (!user) {
+      console.error('[Auth3Service.getUserProfile] FATAL: No user logged in after all attempts');
+      throw new Error('No user logged in');
+    }
 
     // Fetch user document from Firestore
     try {
+      console.log('[Auth3Service.getUserProfile] Fetching user doc from Firestore for uid:', user.uid);
       const userDoc = await getDoc(doc(this.firestore, 'users', user.uid));
       if (userDoc && userDoc.exists && userDoc.exists()) {
         const data = userDoc.data() as any;
+        console.log('[Auth3Service.getUserProfile] Firestore doc found. Data:', data);
         this.firstName = data['firstName'] || '';
         this.lastName = data['lastName'] || '';
         return data;
       }
       // Fallback if doc missing: return auth-derived defaults
+      console.log('[Auth3Service.getUserProfile] Firestore doc missing, returning auth defaults');
       return {
         firstName: '',
         lastName: '',
@@ -119,7 +167,8 @@ async register(email: string, password: string, firstName: string, lastName: str
       };
     } catch (err) {
       // Handle permission errors gracefully without breaking UI
-      console.warn('[Auth3Service] getUserProfile failed, returning auth fallback', err);
+      console.error('[Auth3Service.getUserProfile] ERROR fetching from Firestore:', err);
+      console.log('[Auth3Service.getUserProfile] Returning auth fallback');
       return {
         firstName: '',
         lastName: '',

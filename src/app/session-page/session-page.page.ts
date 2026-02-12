@@ -21,6 +21,7 @@ export class SessionPagePage implements OnInit, OnDestroy {
   lastName: string | null = null;
   email: string | null = null;
   engineeringID: string | null = null;
+  userID: string | null = null; // Firebase UID - used to filter sessions by user
   sessions: any[] = [];
   lastSessionDisplayName: string | null = null;
   private backButtonSub: any; // hardware back handler
@@ -52,6 +53,9 @@ private async initialize(): Promise<void> {
     }
    // stores current user profile data in profile variables 
     const profile = await this.auth3.getUserProfile();
+    // Get userID from authenticated user (Firebase UID from auth.currentUser)
+    const currentUser = this.auth3.getCurrentUser();
+    this.userID = currentUser?.uid || profile['userID'] || null;
     this.firstName = profile['firstName'];
     this.lastName = profile['lastName'];
     this.engineeringID = profile['engineeringID'] || '';
@@ -61,7 +65,8 @@ private async initialize(): Promise<void> {
     //gets username from firatName and lastName
     this.userName = (this.firstName && this.lastName) ? `${this.firstName} ${this.lastName}` : (this.email || null);
     //prints the current user profile to console
-    console.log('[HomePage2] user profile loaded', {
+    console.log('[SessionPage] user profile loaded', {
+      userID: this.userID,
       firstName: this.firstName,
       lastName: this.lastName,
       email: this.email,
@@ -72,6 +77,7 @@ private async initialize(): Promise<void> {
     // Persist/refresh local user data for downstream use, and for long term offline use
     try {
       localStorage.setItem('userData', JSON.stringify({
+        userID: this.userID || '',
         username: this.userName || '',
         userRole: this.userRole || 'user',
         firstName: this.firstName || '',
@@ -84,6 +90,7 @@ private async initialize(): Promise<void> {
      // Also persist user profile in sessionStorage for current session, short lived and cleared when closed
      try {
        sessionStorage.setItem('userProfile', JSON.stringify({
+         userID: this.userID || '',
          username: this.userName || '',
          userRole: this.userRole || 'user',
          firstName: this.firstName || '',
@@ -100,13 +107,14 @@ private async initialize(): Promise<void> {
       const cached = localStorage.getItem('userData');
       if (cached) {
         const data = JSON.parse(cached);
+        this.userID = data.userID || null;
         this.firstName = data.firstName || null;
         this.lastName = data.lastName || null;
         this.userName = data.username || null;
         this.userRole = data.userRole || 'user';
         this.email = data.email || null;
         this.engineeringID = data.engineeringID || null;
-        console.log('[HomePage2] loaded user profile from cache', data);
+        console.log('[SessionPage] loaded user profile from cache', data);
       }
     } catch {}
   }
@@ -169,12 +177,61 @@ private async initialize(): Promise<void> {
     this.removeBackButtonHandler();
   }
 
-  /** Load sessions from ImageStorageService and compute image counts. */
+  /** Load sessions from ImageStorageService and compute image counts. Filter by current user's ID. */
   async loadSessions() {
     try {
       //Safely read sessions from ImageStorageService, create a copy and stores it.
       const s = (this.imageStorage.getSessions && typeof this.imageStorage.getSessions === 'function') ? this.imageStorage.getSessions() : [];
       const sessionsRaw = Array.isArray(s) ? s.slice() : [];
+
+      // ========== USER ID FILTERING ==========
+      // Get current user ID from Firebase auth, localStorage, or sessionStorage
+      let currentUserID = this.userID;
+      if (!currentUserID) {
+        // Try to get from localStorage
+        try {
+          const userData = localStorage.getItem('userData');
+          if (userData) {
+            const parsed = JSON.parse(userData);
+            currentUserID = parsed.userID || null;
+          }
+        } catch {}
+      }
+      if (!currentUserID) {
+        // Try to get from sessionStorage
+        try {
+          const sessionProfile = sessionStorage.getItem('userProfile');
+          if (sessionProfile) {
+            const parsed = JSON.parse(sessionProfile);
+            currentUserID = parsed.userID || null;
+          }
+        } catch {}
+      }
+      if (!currentUserID) {
+        // Try to get from authenticated Firebase user
+        try {
+          currentUserID = this.auth3.getCurrentUser()?.uid || null;
+        } catch {}
+      }
+
+      console.log('[SessionPage.loadSessions] Current user ID:', currentUserID);
+
+      // Filter sessions to only include those belonging to the current user
+      // Sessions without userId are legacy sessions (show them for backward compatibility)
+      // Sessions with userId must match the current user's ID
+      const filteredSessions = sessionsRaw.filter((sess: any) => {
+        // If session has no userId, include it (backward compatibility with old sessions)
+        if (!sess.userId) {
+          console.log('[SessionPage.loadSessions] Including legacy session (no userId):', sess.id);
+          return true;
+        }
+        // If session has userId, only include if it matches current user
+        const isOwnSession = sess.userId === currentUserID;
+        if (!isOwnSession) {
+          console.log('[SessionPage.loadSessions] Excluding session from different user:', sess.id, 'session userId:', sess.userId, 'current user:', currentUserID);
+        }
+        return isOwnSession;
+      });
 
       // compute image counts by comparing session imageKeys with stored images with 
       // geAllImages or getImages if fails into a arrayt allImages from the imageStorage not in sessions
@@ -198,12 +255,13 @@ private async initialize(): Promise<void> {
         if (!Array.isArray(allImages)) allImages = [];
       }
 
-      // counts how many imageKeys or images in the sessions are present in allImages
-      this.sessions = sessionsRaw.map((sess: any) => {
+      // counts how many imageKeys or images in the filtered sessions are present in allImages
+      this.sessions = filteredSessions.map((sess: any) => {
         const keys = Array.isArray(sess.imageKeys) ? sess.imageKeys : [];
         const imageCount = keys.reduce((acc: number, k: string) => acc + (allImages.findIndex(ai => ai.original === k) !== -1 ? 1 : 0), 0);
         return { ...sess, imageCount };
       });
+      console.log('[SessionPage.loadSessions] Displaying', this.sessions.length, 'sessions for user', currentUserID);
       // if Image Storage Service recorded a last created session or last used/created session,
       //  show its name at top of the summary list
       try {

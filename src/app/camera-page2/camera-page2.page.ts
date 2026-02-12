@@ -451,8 +451,8 @@ export class CameraPage2Page implements AfterViewInit {
         (entry as any).boxes = [];
         (entry as any).detectionMessage = 'Box rendering failed';
       }
-       //store image entry via image storage service
-      await this.imageStorage.addImage(entry);
+      //store image entry via image storage service
+          await this.imageStorage.addImage(entry, this.selectedSessionId || undefined);
       // also add to active session if one exists
       try {
         //add to current session in use and set sessioIsPristine to false, then refresh displayed images
@@ -495,6 +495,7 @@ export class CameraPage2Page implements AfterViewInit {
           try {
             if (this.selectedSessionId && typeof (this.imageStorage.addImageToSession) === 'function') {
               this.imageStorage.addImageToSession(this.selectedSessionId, entry.filename);
+              this.sessionIsPristine = false; // Mark session as no longer pristine
             }
             await this.refreshDisplayedImages();
           } catch (err) {
@@ -1374,6 +1375,9 @@ export class CameraPage2Page implements AfterViewInit {
         if (choice === 'stay' || choice === null) return;
       }
 
+      if (this.selectedSessionId && this.sessionIsPristine === false && typeof (this.imageStorage as any).saveSessionWithImagesToFirestore === 'function') {
+        try { await (this.imageStorage as any).saveSessionWithImagesToFirestore(this.selectedSessionId); } catch (e) { /* ignore */ }
+      }
       this.router.navigate(['/home-page2']);
     } catch (e) {
       console.warn('handleGoHome failed', e);

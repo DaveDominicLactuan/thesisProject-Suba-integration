@@ -6,7 +6,6 @@ import { NavController } from '@ionic/angular';
 // import { HttpClient } from '@angular/common/http';
 import { AngularFirestore } from '@angular/fire/compat/firestore';
 import { Auth3Service } from '../services/auth3.service';
-
 @Component({
   selector: 'app-registration-page',
   templateUrl: './registration-page.page.html',
@@ -147,32 +146,23 @@ async onRegister() {
     const createdUid = userCredential?.user?.uid;
     console.log('[RegistrationPage] Auth registration succeeded for', email, 'uid=', createdUid);
 
-    // If registration succeeds, attempt to write the user's profile to Firestore
+    // Auth3Service.register() already writes the user profile to Firestore
+    // so we skip the redundant write here. Just log success.
     try {
       const uid = userCredential?.user?.uid;
       if (uid) {
-        await this.firestore.collection('users').doc(uid).set({
-          firstName: firstName ?? '',
-          lastName: lastName ?? '',
-          engineeringID: engineeringID ?? '',
-          email: email ?? '',
-          // userID: uid ?? '',
-          role: this.selectedRole ?? 'user',
-          created: new Date(),
-          userID: uid
-        });
-        console.log(`[RegistrationPage] Firestore profile written for uid: ${uid}`);
+        console.log(`[RegistrationPage] Firestore profile written via Auth3Service for uid: ${uid}`);
 
         // Also create a pending account record for administrative review/approval
         try {
           await this.firestore.collection('pendingAccounts').doc(uid).set({
+            userID: uid,
             firstName: firstName ?? '',
             lastName: lastName ?? '',
             engineeringID: engineeringID ?? '',
             email: email ?? '',
             role: this.selectedRole ?? 'user',
-            userID: uid,
-            created: new Date(),
+            createdAt: new Date(),
             status: 'pending',
             approvedAt: null,
             approvedBy: null

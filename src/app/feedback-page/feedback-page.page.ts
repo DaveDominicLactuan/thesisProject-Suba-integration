@@ -922,8 +922,13 @@ addEntry() {
   
   
   /** Navigate back to Home Page, fallback to history.back on failure. */
-  goBack() {
+  async goBack() {
     try {
+      const sessionId = this.routeSessionId || this.selectedSessionId || null;
+      if (sessionId && (this.imageStorageService as any).saveSessionWithImagesToFirestore) {
+        try { await (this.imageStorageService as any).saveSessionWithImagesToFirestore(sessionId); } catch (e) { /* ignore */ }
+      }
+
       // Try to navigate back in app history (preferred) or app level back navigation if from camera , upload or home
       try { this.navCtrl.back(); return; } catch (e) { /* ignore and fallback */ }
 
@@ -965,8 +970,7 @@ addEntry() {
       // and saves it to override the default nav, so it can be removed later
       this.backButtonSub = this.platform.backButton.subscribeWithPriority(100, () => {
         try {
-          //prefer app level back, then browser than router, if all fails navigate to home
-          this.navCtrl.back();
+          this.goBack();
         } catch (e) {
           try { window.history.back(); } catch (err) { this.router.navigateByUrl('/home-page2'); }
         }
@@ -1170,6 +1174,7 @@ addEntry() {
           const svc: any = this.imageStorageService as any;
           // Use filename as key, fallback to original for backward compatibility
           const imageKey = entry.filename || entry.original;
+          let savedSessionId: string | null = null;
           // If a session is already selected (e.g., from Camera page), update it
           if (this.selectedSessionId && typeof svc.addImageToSession === 'function') {
             try {
@@ -1181,6 +1186,7 @@ addEntry() {
             if (typeof svc.updateSessionName === 'function') {
               try { svc.updateSessionName(this.selectedSessionId, val); } catch (e) { /* ignore */ }
             }
+            savedSessionId = this.selectedSessionId;
           } else {
             // create session via service and set last created name
             if (typeof svc.createSession === 'function') {
@@ -1188,7 +1194,15 @@ addEntry() {
               if (s && typeof svc.setLastCreatedSession === 'function') {
                 try { svc.setLastCreatedSession(s.id, s.name); } catch (e) { /* ignore */ }
               }
+              if (s && s.id) {
+                this.selectedSessionId = s.id;
+                savedSessionId = s.id;
+              }
             }
+          }
+
+          if (savedSessionId && typeof svc.saveSessionWithImagesToFirestore === 'function') {
+            try { await svc.saveSessionWithImagesToFirestore(savedSessionId); } catch (e) { /* ignore */ }
           }
 
           try { document.body.removeChild(overlay); } catch (e) {}

@@ -467,6 +467,18 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
         console.warn('[UploadImagePage] Failed to add upload to session or refresh display', e);
       }
       this.imagePaths.unshift({ original: entry.original, withBoxes: (entry as any).withBoxes || entry.original, fileName: entry.filename, rawPrediction: entry.prediction });
+      // Persist entry and current session to user-scoped Firestore if userId is available
+      if (userId) {
+        try {
+          await this.imageStorage.saveImageToUser(userId, entry);
+          if (this.selectedSessionId && typeof (this.imageStorage.getSession) === 'function') {
+            const session = this.imageStorage.getSession(this.selectedSessionId);
+            if (session) await this.imageStorage.saveSessionToUser(userId, session);
+          }
+        } catch (e) {
+          console.warn('[UploadImagePage] Failed to save user-scoped Firestore data', e);
+        }
+      }
       // Increment upload counter for this session
       this.imagesUploadedThisSession += 1;
       // keep counters in sync with persistent storage
@@ -681,6 +693,9 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
         }
       } else {
         // Session has images or no active session, navigate normally
+        if (this.selectedSessionId && this.sessionIsPristine === false && typeof (this.imageStorage as any).saveSessionWithImagesToFirestore === 'function') {
+          try { await (this.imageStorage as any).saveSessionWithImagesToFirestore(this.selectedSessionId); } catch (e) { /* ignore */ }
+        }
         this.router.navigate(['/home-page2']);
       }
     } catch (e) {
@@ -854,6 +869,9 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
     }
 
     try {
+      if (this.selectedSessionId && this.sessionIsPristine === false && typeof (this.imageStorage as any).saveSessionWithImagesToFirestore === 'function') {
+        try { await (this.imageStorage as any).saveSessionWithImagesToFirestore(this.selectedSessionId); } catch (e) { /* ignore */ }
+      }
       this.router.navigateByUrl('/home-page2');
     } catch (e) {
       window.history.back();

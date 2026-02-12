@@ -35,6 +35,8 @@ export class HomePage2Page implements OnInit, OnDestroy {
   }
 
 ngOnInit(): void {
+  console.log('[HomePage2.ngOnInit] ===== PAGE INIT START (ngOnInit called) =====');
+  console.log('[HomePage2.ngOnInit] Auth currentUser on ngOnInit:', this.auth3.getCurrentUser()?.uid || 'null');
   
   //initializes the data needed for the page such as user data, profile and session
   this.initialize();
@@ -43,14 +45,26 @@ ngOnInit(): void {
 /** Perform async initialization tasks (profile + sessions). */
 private async initialize(): Promise<void> {
   try {
+    console.log('[HomePage2.initialize] ===== INITIALIZE START =====');
+    console.log('[HomePage2.initialize] Auth currentUser at initialize start:', this.auth3.getCurrentUser()?.uid || 'null');
+    
     // Ensure Firebase auth state is ready before fetching profile
     // wait for up to 8 seconds for auth from firebase and current user profile from firestore
     if (!this.auth3.getCurrentUser()) {
-      console.log('[HomePage2] waiting for auth state…');
-      await this.waitForUserAuth(8000);
+      console.log('[HomePage2.initialize] getCurrentUser() is null, calling waitForAuthUser(15000)...');
+      const waitResult = await this.auth3.waitForAuthUser(15000);
+      console.log('[HomePage2.initialize] waitForAuthUser completed. Result:', waitResult?.uid || 'null');
+    } else {
+      console.log('[HomePage2.initialize] getCurrentUser() already available:', this.auth3.getCurrentUser()?.uid);
     }
+    
+    console.log('[HomePage2.initialize] Auth currentUser before getUserProfile:', this.auth3.getCurrentUser()?.uid || 'null');
+    console.log('[HomePage2.initialize] About to call getUserProfile()...');
+    
    // stores current user profile data in profile variables 
     const profile = await this.auth3.getUserProfile();
+    console.log('[HomePage2.initialize] getUserProfile succeeded. Profile:', profile);
+    
     this.firstName = profile['firstName'];
     this.lastName = profile['lastName'];
     this.engineeringID = profile['engineeringID'] || '';
@@ -61,7 +75,7 @@ private async initialize(): Promise<void> {
     //gets username from firatName and lastName
     this.userName = (this.firstName && this.lastName) ? `${this.firstName} ${this.lastName}` : (this.email || null);
     //prints the current user profile to console
-    console.log('[HomePage2] user profile loaded', {
+    console.log('[HomePage2.initialize] user profile loaded', {
       firstName: this.firstName,
       lastName: this.lastName,
       email: this.email,
@@ -70,6 +84,7 @@ private async initialize(): Promise<void> {
       userRole: this.userRole,
       userName: this.userName
     });
+    console.log('[HomePage2.initialize] ===== INITIALIZE END (success) =====');
     // Persist/refresh local user data for downstream use, and for long term offline use
     try {
       localStorage.setItem('userData', JSON.stringify({
@@ -97,7 +112,11 @@ private async initialize(): Promise<void> {
        sessionStorage.setItem('isLoggedInSession', 'true');
      } catch {}
   } catch (error) {
-    console.error(error);
+    console.error('[HomePage2.initialize] ERROR in initialize:', error);
+    console.error('[HomePage2.initialize] Error type:', error instanceof Error ? error.message : 'unknown');
+    console.error('[HomePage2.initialize] Full error object:', JSON.stringify(error, null, 2));
+    console.log('[HomePage2.initialize] Auth currentUser during error:', this.auth3.getCurrentUser()?.uid || 'null');
+    
     // Fallback: try to load previously saved user data
     try {
       const cached = localStorage.getItem('userData');
@@ -110,9 +129,10 @@ private async initialize(): Promise<void> {
         this.email = data.email || null;
         this.engineeringID = data.engineeringID || null;
         this.userID = data.userID || null;
-        console.log('[HomePage2] loaded user profile from cache', data);
+        console.log('[HomePage2.initialize] loaded user profile from cache', data);
       }
     } catch {}
+    console.log('[HomePage2.initialize] ===== INITIALIZE END (with error) =====');
   }
 }
 

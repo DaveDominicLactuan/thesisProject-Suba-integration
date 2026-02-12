@@ -21,7 +21,7 @@ import { AngularFireModule } from '@angular/fire/compat';
 import { AngularFirestoreModule } from '@angular/fire/compat/firestore';
 import { environment } from '../environments/environment';
 import { provideFirebaseApp, initializeApp } from '@angular/fire/app';
-import { provideAuth, getAuth } from '@angular/fire/auth';
+import { provideAuth, getAuth, setPersistence, browserLocalPersistence } from '@angular/fire/auth';
 import { provideFirestore, getFirestore } from '@angular/fire/firestore';
 
 import { HttpClientModule } from '@angular/common/http';
@@ -50,7 +50,13 @@ import { IonicStorageModule } from '@ionic/storage-angular';
 
     // ✅ Register Firebase modular services here (Angular 15+)
     provideFirebaseApp(() => initializeApp(environment.firebase)),
-    provideAuth(() => getAuth()),
+    provideAuth(() => {
+      const auth = getAuth();
+      setPersistence(auth, browserLocalPersistence).catch(err => 
+        console.error('[Firebase Auth] Persistence setup failed:', err)
+      );
+      return auth;
+    }),
     provideFirestore(() => getFirestore()),
   ],
   bootstrap: [AppComponent],
