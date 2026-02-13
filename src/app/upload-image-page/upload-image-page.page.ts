@@ -392,8 +392,10 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
         console.warn('Preprocess failed in processDataUrl', err);
       }
       // Prepare storage entry or build StoredImage entry
+      const maxBytes = 1_000_000;
+      const safeOriginal = await this.shrinkDataUrlToBytes(dataUrl, maxBytes);
       const entry: StoredImage = {
-        original: dataUrl,
+        original: safeOriginal,
         timestamp: new Date().toISOString(),
         filename,
         prediction: prediction || undefined,
@@ -433,29 +435,32 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
          // try to create withBoxes image with drawn boxes based on the bouding box data
           try {
             const withBoxesDataUrl = await this.drawBoxesOnImage(dataUrl, boxesToDraw, maskW, maskH);
-            (entry as any).withBoxes = withBoxesDataUrl;
+            const safeWithBoxes = await this.shrinkDataUrlToBytes(withBoxesDataUrl, maxBytes);
+            (entry as any).withBoxes = safeWithBoxes;
             (entry as any).boxes = boxesToDraw;
             (entry as any).detectionMessage = `Rendered ${boxesToDraw.length} aggregated/simplified box(es) from ${rawBoxes.length} prediction box(es)`;
             this.totalBoundingBoxesCreated += boxesToDraw.length;
           } catch (renderErr) {
             console.warn('[UploadImagePage] drawBoxesOnImage failed', renderErr);
-            (entry as any).withBoxes = dataUrl;
+            (entry as any).withBoxes = safeOriginal;
             (entry as any).boxes = [];
             (entry as any).detectionMessage = 'Box rendering failed';
           }
         } else {
-          (entry as any).withBoxes = dataUrl;
+          (entry as any).withBoxes = safeOriginal;
           (entry as any).boxes = [];
           (entry as any).detectionMessage = 'No boxes detected';
         }
       } catch (e) {
         console.warn('[UploadImagePage] Failed to render boxes', e);
-        (entry as any).withBoxes = dataUrl;
+        (entry as any).withBoxes = safeOriginal;
         (entry as any).boxes = [];
         (entry as any).detectionMessage = 'Box rendering failed';
       }
       //store image entry via image storage service
       await this.imageStorage.addImage(entry, this.selectedSessionId || undefined);
+      // Debug: log the full entry after processing and storage
+      console.log('[UploadImagePage] processDataUrl saved entry:', entry);
       // also add to active session if one exists
       try {
         if (this.selectedSessionId && typeof (this.imageStorage.addImageToSession) === 'function') {
@@ -635,6 +640,54 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
     }
 
     return data;
+  }
+
+  // Reduce data URL size to stay under Firestore document limits.
+  private async shrinkDataUrlToBytes(dataUrl: string, maxBytes: number): Promise<string> {
+    try {
+      const estimateBytes = (url: string) => {
+        const commaIdx = url.indexOf(',');
+        if (commaIdx === -1) return url.length;
+        const b64 = url.slice(commaIdx + 1);
+        const padding = (b64.endsWith('==') ? 2 : b64.endsWith('=') ? 1 : 0);
+        return Math.floor((b64.length * 3) / 4) - padding;
+      };
+
+      if (!dataUrl || estimateBytes(dataUrl) <= maxBytes) return dataUrl;
+
+      const img = new Image();
+      img.src = dataUrl;
+      await new Promise(resolve => (img.onload = resolve));
+
+      let scale = 1;
+      let quality = 0.92;
+      const minQuality = 0.5;
+      const scaleStep = 0.85;
+      const maxLoops = 8;
+
+      for (let i = 0; i < maxLoops; i += 1) {
+        const canvas = document.createElement('canvas');
+        const w = Math.max(1, Math.floor((img.naturalWidth || img.width) * scale));
+        const h = Math.max(1, Math.floor((img.naturalHeight || img.height) * scale));
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) break;
+        ctx.drawImage(img, 0, 0, w, h);
+
+        const candidate = canvas.toDataURL('image/jpeg', quality);
+        if (estimateBytes(candidate) <= maxBytes) return candidate;
+
+        if (quality > minQuality) {
+          quality = Math.max(minQuality, quality - 0.12);
+        } else {
+          scale = scale * scaleStep;
+        }
+      }
+    } catch (e) {
+      console.warn('[UploadImagePage] shrinkDataUrlToBytes failed', e);
+    }
+    return dataUrl;
   }
 
   // Small helper to yield to the event loop so UI can repaint (spinner animations)

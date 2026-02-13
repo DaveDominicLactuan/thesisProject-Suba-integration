@@ -270,6 +270,8 @@ export class ImageStorageService {
           filename: image.filename,
           userId: currentUid,
           sessionId: session.id,
+          original: image.original,
+          withBoxes: image.withBoxes || null,
           hasPrediction: image.hasPrediction || false,
           statusMessage: image.statusMessage || '',
           detectionMessage: image.detectionMessage || '',
