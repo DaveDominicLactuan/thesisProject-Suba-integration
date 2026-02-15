@@ -1201,12 +1201,26 @@ addEntry() {
             }
           }
 
+          let firestoreSaved = false;
           if (savedSessionId && typeof svc.saveSessionWithImagesToFirestore === 'function') {
-            try { await svc.saveSessionWithImagesToFirestore(savedSessionId); } catch (e) { /* ignore */ }
+            try {
+              await svc.saveSessionWithImagesToFirestore(savedSessionId);
+              firestoreSaved = true;
+            } catch (e) {
+              /* ignore */
+            }
           }
 
           try { document.body.removeChild(overlay); } catch (e) {}
-          alert('Session saved successfully');
+
+          if (firestoreSaved && savedSessionId) {
+            const firestoreMessage = `✅ Session and images saved to Firestore: ${savedSessionId}`;
+            console.log(firestoreMessage);
+            await this.showFirestoreSavePrompt(firestoreMessage);
+          } else {
+            alert('Session saved successfully');
+          }
+
           this.router.navigate(['/home-page2']);
         } catch (ee) {
           console.warn('Failed to save session via prompt', ee);
@@ -1227,6 +1241,63 @@ addEntry() {
       document.body.appendChild(overlay);
       // focus input
       setTimeout(() => input.focus(), 50);
+    });
+  }
+
+  /** Show a Firestore save confirmation prompt with a close button. */
+  async showFirestoreSavePrompt(message: string): Promise<void> {
+    return new Promise((resolve) => {
+      const overlay = document.createElement('div');
+      overlay.style.position = 'fixed';
+      overlay.style.left = '0';
+      overlay.style.top = '0';
+      overlay.style.width = '100%';
+      overlay.style.height = '100%';
+      overlay.style.background = 'rgba(0,0,0,0.45)';
+      overlay.style.display = 'flex';
+      overlay.style.alignItems = 'center';
+      overlay.style.justifyContent = 'center';
+      overlay.style.zIndex = '9999';
+
+      const box = document.createElement('div');
+      box.style.border = '1px solid transparent';
+      box.style.background = 'linear-gradient(#fff, #fff) padding-box, linear-gradient(to right, #ff512f, #f09819) border-box';
+      box.style.padding = '18px';
+      box.style.borderRadius = '8px';
+      box.style.minWidth = '320px';
+      box.style.boxShadow = '0 6px 30px rgba(0,0,0,0.3)';
+
+      const title = document.createElement('div');
+      title.innerText = 'Session Saved';
+      title.style.fontWeight = '700';
+      title.style.marginBottom = '8px';
+
+      const body = document.createElement('div');
+      body.innerText = message;
+      body.style.marginBottom = '12px';
+      body.style.wordBreak = 'break-word';
+
+      const closeBtn = document.createElement('button');
+      closeBtn.innerText = 'Close';
+      closeBtn.style.padding = '8px 10px';
+      closeBtn.style.width = '110px';
+      closeBtn.style.height = '40px';
+      closeBtn.style.border = 'none';
+      closeBtn.style.background = 'linear-gradient(90deg,#ff512f,#f09819)';
+      closeBtn.style.color = '#fff';
+      closeBtn.style.borderRadius = '6px';
+      closeBtn.style.cursor = 'pointer';
+
+      closeBtn.addEventListener('click', () => {
+        try { document.body.removeChild(overlay); } catch (e) {}
+        resolve();
+      });
+
+      box.appendChild(title);
+      box.appendChild(body);
+      box.appendChild(closeBtn);
+      overlay.appendChild(box);
+      document.body.appendChild(overlay);
     });
   }
 

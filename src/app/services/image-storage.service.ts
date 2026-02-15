@@ -49,6 +49,7 @@ export class ImageStorageService {
   private readonly SESSIONS_KEY = 'stored_image_sessions';
   private readonly FIRESTORE_IMAGES_COLLECTION = 'images';
   private readonly FIRESTORE_SESSIONS_COLLECTION = 'sessionsImages';
+  private readonly FIRESTORE_DOC_MAX_BYTES = 900_000;
   // Counter map to track image number per session
   private sessionImageCounters: Map<string, number> = new Map();
 
@@ -140,6 +141,47 @@ export class ImageStorageService {
     return `img_${dateStr}_${timeStr}_${nextCount}.jpg`;
   }
 
+  /** Get the number of images with predictions in a session (or globally if no sessionId). */
+  getSessionCrackCount(sessionId?: string): number {
+    const hasCrack = (img: StoredImage | undefined) => !!(img && (img.hasPrediction || img.prediction));
+
+    if (!sessionId) {
+      return this.images.filter(i => hasCrack(i)).length;
+    }
+
+    const session = this.sessions.find(s => s.id === sessionId);
+    if (!session || !Array.isArray(session.imageKeys)) return 0;
+
+    let count = 0;
+    for (const key of session.imageKeys) {
+      const img = this.images.find(i => i.filename === key || i.original === key || (i.withBoxes && i.withBoxes === key));
+      if (hasCrack(img)) count += 1;
+    }
+    return count;
+  }
+
+  /**
+   * Generate a session-scoped filename in the form:
+   * img{N}crack{M}MMDDYYYYHHMM.jpg (crack part included only when hasCrack is true)
+   */
+  generateSessionFilename(options: { sessionId?: string; hasCrack?: boolean; timestamp?: string } = {}): string {
+    const date = options.timestamp ? new Date(options.timestamp) : new Date();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    const year = String(date.getFullYear());
+    const hours = String(date.getHours()).padStart(2, '0');
+    const minutes = String(date.getMinutes()).padStart(2, '0');
+
+    const dateStr = `${month}${day}${year}`;
+    const timeStr = `${hours}${minutes}`;
+
+    const sessionId = options.sessionId;
+    const imgIndex = sessionId ? (this.getSessionImageCount(sessionId) + 1) : (this.images.length + 1);
+    const crackPart = options.hasCrack ? `crack${this.getSessionCrackCount(sessionId) + 1}` : '';
+
+    return `img${imgIndex}${crackPart}${dateStr}${timeStr}.jpg`;
+  }
+
   /**
    * Get the next counter value for a session without incrementing it.
    * Useful for preview/planning purposes.
@@ -209,6 +251,56 @@ export class ImageStorageService {
     }
   }
 
+  private estimateDataUrlBytes(url: string): number {
+    const commaIdx = url.indexOf(',');
+    if (commaIdx === -1) return url.length;
+    const b64 = url.slice(commaIdx + 1);
+    const padding = (b64.endsWith('==') ? 2 : b64.endsWith('=') ? 1 : 0);
+    return Math.floor((b64.length * 3) / 4) - padding;
+  }
+
+  private async clampDataUrlToBytes(dataUrl: string | null | undefined, maxBytes: number): Promise<string | null> {
+    if (!dataUrl) return null;
+    if (this.estimateDataUrlBytes(dataUrl) <= maxBytes) return dataUrl;
+    if (typeof document === 'undefined') return null;
+
+    try {
+      const img = new Image();
+      img.src = dataUrl;
+      await new Promise(resolve => (img.onload = resolve));
+
+      let scale = 1;
+      let quality = 0.92;
+      const minQuality = 0.5;
+      const scaleStep = 0.85;
+      const maxLoops = 8;
+
+      for (let i = 0; i < maxLoops; i += 1) {
+        const canvas = document.createElement('canvas');
+        const w = Math.max(1, Math.floor((img.naturalWidth || img.width) * scale));
+        const h = Math.max(1, Math.floor((img.naturalHeight || img.height) * scale));
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) break;
+        ctx.drawImage(img, 0, 0, w, h);
+
+        const candidate = canvas.toDataURL('image/jpeg', quality);
+        if (this.estimateDataUrlBytes(candidate) <= maxBytes) return candidate;
+
+        if (quality > minQuality) {
+          quality = Math.max(minQuality, quality - 0.12);
+        } else {
+          scale = scale * scaleStep;
+        }
+      }
+    } catch (e) {
+      console.warn('[ImageStorageService] clampDataUrlToBytes failed', e);
+    }
+
+    return null;
+  }
+
   /** Persist a single session and its images to Firestore using filename as image doc ID */
   async saveSessionWithImagesToFirestore(sessionId: string): Promise<void> {
     const session = this.sessions.find(s => s.id === sessionId);
@@ -264,14 +356,16 @@ export class ImageStorageService {
       for (const image of imagesForSession) {
         // CRITICAL: Ensure userId is ALWAYS set to currentUid (never null)
         image.userId = currentUid;
+        const safeOriginal = await this.clampDataUrlToBytes(image.original, this.FIRESTORE_DOC_MAX_BYTES);
+        const safeWithBoxes = await this.clampDataUrlToBytes(image.withBoxes, this.FIRESTORE_DOC_MAX_BYTES);
         const imageRef = doc(imagesCollection, image.filename);
         batch.set(imageRef, {
           timestamp: image.timestamp,
           filename: image.filename,
           userId: currentUid,
           sessionId: session.id,
-          original: image.original,
-          withBoxes: image.withBoxes || null,
+          original: safeOriginal,
+          withBoxes: safeWithBoxes,
           hasPrediction: image.hasPrediction || false,
           statusMessage: image.statusMessage || '',
           detectionMessage: image.detectionMessage || '',

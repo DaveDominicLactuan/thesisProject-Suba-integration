@@ -4,7 +4,7 @@ import { FormBuilder, FormGroup, Validators } from '@angular/forms';
 import { AuthService} from '../services/auth.service';
 import { NavController } from '@ionic/angular';
 // import { HttpClient } from '@angular/common/http';
-import { AngularFirestore } from '@angular/fire/compat/firestore';
+import { Firestore, doc, setDoc } from '@angular/fire/firestore';
 import { Auth3Service } from '../services/auth3.service';
 @Component({
   selector: 'app-registration-page',
@@ -47,7 +47,7 @@ regForm!: FormGroup; // our single form
   private formBuilder: FormBuilder,
   private router: Router, private fb: FormBuilder,
   private auth: AuthService, private auth3: Auth3Service,
-  private navCtrl: NavController, private firestore: AngularFirestore
+  private navCtrl: NavController, private firestore: Firestore
 ) {
  
 }
@@ -139,7 +139,8 @@ async onRegister() {
       firstName ?? '',       // First name (use empty string if null)
       lastName ?? '',        // Last name (use empty string if null)
       engineeringID ?? '',   // Engineering ID (use empty string if null)
-      this.selectedRole ?? 'user'  // User role ('engineer' or 'user')
+      this.selectedRole ?? 'user', // User role ('engineer' or 'user')
+      false                  // isAdmin
     );
    
     // Log that the registration call succeeded at the auth layer
@@ -155,21 +156,35 @@ async onRegister() {
 
         // Also create a pending account record for administrative review/approval
         try {
-          await this.firestore.collection('pendingAccounts').doc(uid).set({
+          console.log('[RegistrationPage] Attempting to write pending account record', {
+            uid,
+            email,
+            role: this.selectedRole,
+            hasEngineeringId: !!engineeringID
+          });
+          const pendingPayload = {
             userID: uid,
             firstName: firstName ?? '',
             lastName: lastName ?? '',
             engineeringID: engineeringID ?? '',
             email: email ?? '',
             role: this.selectedRole ?? 'user',
+            ifAdmin: false,
             createdAt: new Date(),
             status: 'pending',
             approvedAt: null,
             approvedBy: null
-          });
+          };
+          console.log('[RegistrationPage] Pending account payload:', pendingPayload);
+          await setDoc(doc(this.firestore, 'pendingAccounts', uid), pendingPayload);
           console.log(`[RegistrationPage] Pending account record written for uid: ${uid}`);
         } catch (pendingErr) {
           console.warn('[RegistrationPage] Failed to write pending account record:', pendingErr);
+          console.warn('[RegistrationPage] Pending account write failed details:', {
+            uid,
+            email,
+            role: this.selectedRole
+          });
         }
       } else {
         console.warn('[RegistrationPage] could not determine uid after register; profile not written');

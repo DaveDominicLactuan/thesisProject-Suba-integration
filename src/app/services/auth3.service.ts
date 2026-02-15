@@ -19,7 +19,15 @@ async login(email: string, password: string) {
   return await signInWithEmailAndPassword(this.auth, email, password);
 }
 
-async register(email: string, password: string, firstName: string, lastName: string, engineeringID: string, role?: string) {
+async register(
+  email: string,
+  password: string,
+  firstName: string,
+  lastName: string,
+  engineeringID: string,
+  role?: string,
+  isAdmin: boolean = false
+) {
   if (!email) {
     throw new Error('Email is required');
   }
@@ -37,6 +45,7 @@ async register(email: string, password: string, firstName: string, lastName: str
         engineeringID,
         email,
         role: role || (engineeringID ? 'engineer' : 'user'),
+        isAdmin,
         createdAt: serverTimestamp()
       };
       console.log('[Auth3Service] createUserWithEmailAndPassword succeeded, uid=', uid);

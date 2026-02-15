@@ -392,12 +392,15 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
         console.warn('Preprocess failed in processDataUrl', err);
       }
       // Prepare storage entry or build StoredImage entry
-      const maxBytes = 1_000_000;
+      const maxBytes = 900_000;
       const safeOriginal = await this.shrinkDataUrlToBytes(dataUrl, maxBytes);
+      const timestamp = new Date().toISOString();
+      const generatedFilename = this.buildSessionFilename(!!prediction, timestamp, filename);
       const entry: StoredImage = {
         original: safeOriginal,
-        timestamp: new Date().toISOString(),
-        filename,
+        timestamp,
+        filename: generatedFilename,
+        fileImageName: filename || undefined,
         prediction: prediction || undefined,
         hasPrediction: !!prediction,
         statusMessage: prediction ? 'Prediction succeeded' : (inferenceCalled ? 'Prediction failed' : 'No prediction'),
@@ -504,13 +507,13 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
         console.warn('[UploadImagePage] processDataUrl overall timeout');
         // Persist fallback entry indicating failure/no-prediction
         try {
-          let storedCount = 0;
-          try { const all = await this.imageStorage.getAllImages(); storedCount = Array.isArray(all) ? all.length : 0; } catch (e) { storedCount = this.photosTaken || 0; }
-          const fallbackFilename = this.generateFilename(storedCount + 1);
+          const timestamp = new Date().toISOString();
+          const fallbackFilename = this.buildSessionFilename(false, timestamp, filename);
           const entry: StoredImage = {
             original: dataUrl,
-            timestamp: new Date().toISOString(),
+            timestamp,
             filename: fallbackFilename,
+            fileImageName: filename || undefined,
             prediction: undefined,
             hasPrediction: false,
             statusMessage: inferenceCalled ? 'Prediction failed' : 'No prediction',
@@ -875,6 +878,18 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
     const mm = String(now.getMinutes()).padStart(2, '0');
     const idx = typeof count === 'number' ? count : this.photosTaken;
     return `P${idx}${hh}${mm}.jpg`;
+  }
+
+  private buildSessionFilename(hasCrack: boolean, timestamp?: string, fallbackName?: string): string {
+    const svc: any = this.imageStorage as any;
+    if (svc && typeof svc.generateSessionFilename === 'function') {
+      return svc.generateSessionFilename({
+        sessionId: this.selectedSessionId || undefined,
+        hasCrack,
+        timestamp
+      });
+    }
+    return fallbackName || this.generateFilename();
   }
 
   ngOnDestroy() {
@@ -1344,18 +1359,7 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
         }
 
         const now = new Date().toISOString();
-
-        // derive filename based on current stored images count so photosTaken reflects storage
-        let storedCount = 0;
-        try {
-          const all = await this.imageStorage.getAllImages();
-          storedCount = Array.isArray(all) ? all.length : 0;
-        } catch (e) {
-          // fallback to local counter if storage call fails
-          storedCount = this.photosTaken || 0;
-        }
-
-        const filename = this.generateFilename(storedCount + 1);
+        const filename = this.buildSessionFilename(!!prediction, now);
 
         const entry: StoredImage = {
           original: dataUrl,
@@ -1391,9 +1395,7 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
           console.warn('[UploadImagePage] takePicture processing timed out');
           // Persist fallback entry indicating timeout
           try {
-            let storedCount = 0;
-            try { const all = await this.imageStorage.getAllImages(); storedCount = Array.isArray(all) ? all.length : 0; } catch (e) { storedCount = this.photosTaken || 0; }
-            const filename = this.generateFilename(storedCount + 1);
+            const filename = this.buildSessionFilename(false, new Date().toISOString());
             const entry: StoredImage = {
               original: dataUrl,
               timestamp: new Date().toISOString(),

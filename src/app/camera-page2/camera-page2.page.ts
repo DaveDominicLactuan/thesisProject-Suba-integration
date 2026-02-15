@@ -211,10 +211,9 @@ export class CameraPage2Page implements AfterViewInit {
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
       const dataUrl = canvas.toDataURL('image/png');
-      const filename = this.generateFilename();
 
       // Delegate processing to processDataUrl
-      await this.processDataUrl(dataUrl, filename);
+      await this.processDataUrl(dataUrl);
     } catch (err) {
       console.error('Failed to take picture:', err);
       alert('Failed to capture/process image. See console for details.');
@@ -323,10 +322,9 @@ export class CameraPage2Page implements AfterViewInit {
       if (photo && photo.base64String) {
         //create dataURL and filename
         const dataUrl = `data:image/jpeg;base64,${photo.base64String}`;
-        const filename = this.generateFilename();
         // reuse existing processing pipeline with a 10s overall timeout
         try {
-          await this.processDataUrl(dataUrl, filename);
+          await this.processDataUrl(dataUrl);
         } catch (e) {
           // processDataUrl handles its own timeout/cleanup, but catch here to avoid unhandled rejections
           console.warn('[CameraPage2] pickImagesMobile: processing failed or timed out', e);
@@ -345,14 +343,14 @@ export class CameraPage2Page implements AfterViewInit {
    * End-to-end pipeline for a provided dataUrl: preprocess → inference → store.
    * Updates session state via ImageStorageService and refreshes thumbnails/counters.
    */
-  async processDataUrl(dataUrl: string, filename: string, bumpCounters: boolean = true) {
+  async processDataUrl(dataUrl: string, originalName?: string, bumpCounters: boolean = true) {
     // mimic upload-image-page behaviour: preprocess, run inference, store
     this.capturedImages.unshift(dataUrl);
     // bump counters early so spinner shows while processing unless caller already did so
     if (bumpCounters) this.photosTaken += 1;
     this.isProcessing = true;
 
-    const maxBytes = 1_000_000;
+    const maxBytes = 900_000;
 
     // Track whether inference was started so if timeout, we can choose the proper status message to store/show
     let inferenceAttempted = false;
@@ -392,10 +390,13 @@ export class CameraPage2Page implements AfterViewInit {
       }
       // Prepare storage entry or build StoredImage entry
       const safeOriginal = await this.shrinkDataUrlToBytes(dataUrl, maxBytes);
+      const timestamp = new Date().toISOString();
+      const generatedFilename = this.buildSessionFilename(!!prediction, timestamp, originalName);
       const entry: StoredImage = {
         original: safeOriginal,
-        timestamp: new Date().toISOString(),
-        filename,
+        timestamp,
+        filename: generatedFilename,
+        fileImageName: originalName || undefined,
         prediction: prediction || undefined,
         hasPrediction: !!prediction,
         statusMessage: prediction ? 'Prediction succeeded' : (inferenceAttempted ? 'Prediction failed' : 'No prediction'),
@@ -487,10 +488,13 @@ export class CameraPage2Page implements AfterViewInit {
         console.warn('[CameraPage2] processDataUrl overall timeout');
         // If we timed out, persist a fallback entry indicating failure/no-prediction
         const safeOriginal = await this.shrinkDataUrlToBytes(dataUrl, maxBytes);
+        const timestamp = new Date().toISOString();
+        const generatedFilename = this.buildSessionFilename(false, timestamp, originalName);
         const entry: StoredImage = {
           original: safeOriginal,
-          timestamp: new Date().toISOString(),
-          filename,
+          timestamp,
+          filename: generatedFilename,
+          fileImageName: originalName || undefined,
           prediction: undefined,
           hasPrediction: false,
           statusMessage: inferenceAttempted ? 'Prediction failed' : 'No prediction',
@@ -611,6 +615,18 @@ export class CameraPage2Page implements AfterViewInit {
     const mm = String(now.getMinutes()).padStart(2, '0');
     const idx = typeof count === 'number' ? count : this.photosTaken;
     return `P${idx}${hh}${mm}.jpg`;
+  }
+
+  private buildSessionFilename(hasCrack: boolean, timestamp?: string, fallbackName?: string): string {
+    const svc: any = this.imageStorage as any;
+    if (svc && typeof svc.generateSessionFilename === 'function') {
+      return svc.generateSessionFilename({
+        sessionId: this.selectedSessionId || undefined,
+        hasCrack,
+        timestamp
+      });
+    }
+    return fallbackName || this.generateFilename();
   }
 
 
