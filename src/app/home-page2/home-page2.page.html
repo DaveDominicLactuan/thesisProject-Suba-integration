@@ -14,7 +14,7 @@
 
 <div class="custom-sidebar" [ngClass]="{'open': isSidebarOpen}" (click)="$event.stopPropagation()">
   <div class="profile-section">
-    <div class="profile-avatar">
+    <div class="profile-avatar" (click)="goToProfilePage()" style="cursor: pointer;">
       <img src="assets/engIcon.png" alt="Profile" />
     </div>
     <div class="profile-info">

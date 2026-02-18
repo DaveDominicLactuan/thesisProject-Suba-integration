@@ -96,6 +96,10 @@ const routes: Routes = [
     path: 'browse-file-page',
     loadChildren: () => import('./browse-file-page/browse-file-page.module').then( m => m.BrowseFilePagePageModule)
   },
+  {
+    path: 'profile-page',
+    loadChildren: () => import('./profile-page/profile-page.module').then( m => m.ProfilePagePageModule)
+  },
 
 
 

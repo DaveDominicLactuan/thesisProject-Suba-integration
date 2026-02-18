@@ -321,6 +321,12 @@ private async initialize(): Promise<void> {
     console.log('pdf 2 page');
   }
 
+  /** Navigate to profile page. */
+  goToProfilePage() {
+    this.router.navigate(['/profile-page']);
+    console.log('Navigating to profile page');
+  }
+
   /** Shared logout flow used by overlay button and menu item. */
   async logout(closeOverlay: boolean = false) {
     try {

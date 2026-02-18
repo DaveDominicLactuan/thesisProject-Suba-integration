@@ -4,6 +4,7 @@ import { BehaviorSubject, Observable } from 'rxjs';
 import { Auth } from '@angular/fire/auth';
 import { onAuthStateChanged } from 'firebase/auth';
 import { Firestore, collection, doc, setDoc, deleteDoc, getDocs, query, where, writeBatch } from '@angular/fire/firestore';
+import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 
 //image object in the session
 export interface StoredImage {
@@ -22,6 +23,10 @@ export interface StoredImage {
   sessionId?: string; // optional link to a session
   userId?: string; // optional link to a user (if multi-user support is added)
   fileImageName?: string; // optional original filename if available
+  storagePath?: string; // Cloud Storage object path for original image
+  storageUrl?: string; // Cloud Storage download URL for original image
+  withBoxesStoragePath?: string; // Cloud Storage object path for withBoxes image
+  withBoxesStorageUrl?: string; // Cloud Storage download URL for withBoxes image
 }
 
 //session
@@ -50,6 +55,7 @@ export class ImageStorageService {
   private readonly FIRESTORE_IMAGES_COLLECTION = 'images';
   private readonly FIRESTORE_SESSIONS_COLLECTION = 'sessionsImages';
   private readonly FIRESTORE_DOC_MAX_BYTES = 900_000;
+  private readonly STORAGE_IMAGES_FOLDER = 'images';
   // Counter map to track image number per session
   private sessionImageCounters: Map<string, number> = new Map();
 
@@ -301,6 +307,40 @@ export class ImageStorageService {
     return null;
   }
 
+  /** Build a filename for the boxed image variant. */
+  buildWithBoxesFilename(filename: string): string {
+    if (!filename) return 'boxed-image.jpg';
+    const dotIdx = filename.lastIndexOf('.');
+    if (dotIdx === -1) return `${filename}_boxes`;
+    return `${filename.slice(0, dotIdx)}_boxes${filename.slice(dotIdx)}`;
+  }
+
+  /** Upload a data URL image to Firebase Storage and return path + download URL. */
+  async uploadImageToFirebaseStorage(dataUrl: string, filename: string, uid?: string): Promise<{ storagePath: string; downloadUrl: string } | null> {
+    if (!dataUrl || !filename) return null;
+
+    try {
+      const userId = uid || (await this.waitForAuthUserId()) || 'anonymous';
+      const storage = getStorage();
+      const storagePath = `${this.STORAGE_IMAGES_FOLDER}/${userId}/${filename}`;
+      const storageRef = ref(storage, storagePath);
+
+      const response = await fetch(dataUrl);
+      const blob = await response.blob();
+      if (!blob || blob.size === 0) return null;
+
+      await uploadBytes(storageRef, blob, {
+        contentType: blob.type || 'image/jpeg'
+      });
+
+      const downloadUrl = await getDownloadURL(storageRef);
+      return { storagePath, downloadUrl };
+    } catch (e) {
+      console.warn('[ImageStorageService] uploadImageToFirebaseStorage failed', e);
+      return null;
+    }
+  }
+
   /** Persist a single session and its images to Firestore using filename as image doc ID */
   async saveSessionWithImagesToFirestore(sessionId: string): Promise<void> {
     const session = this.sessions.find(s => s.id === sessionId);
@@ -366,6 +406,10 @@ export class ImageStorageService {
           sessionId: session.id,
           original: safeOriginal,
           withBoxes: safeWithBoxes,
+          storagePath: image.storagePath || null,
+          storageUrl: image.storageUrl || null,
+          withBoxesStoragePath: image.withBoxesStoragePath || null,
+          withBoxesStorageUrl: image.withBoxesStorageUrl || null,
           hasPrediction: image.hasPrediction || false,
           statusMessage: image.statusMessage || '',
           detectionMessage: image.detectionMessage || '',
@@ -399,6 +443,10 @@ export class ImageStorageService {
         detectionMessage: image.detectionMessage || '',
         prediction: image.prediction || null,
         boxes: image.boxes || [],
+        storagePath: image.storagePath || null,
+        storageUrl: image.storageUrl || null,
+        withBoxesStoragePath: image.withBoxesStoragePath || null,
+        withBoxesStorageUrl: image.withBoxesStorageUrl || null,
       };
 
       await setDoc(docRef, firestoreData);
@@ -762,6 +810,10 @@ export class ImageStorageService {
         detectionMessage: image.detectionMessage || '',
         prediction: image.prediction || null,
         boxes: image.boxes || [],
+        storagePath: image.storagePath || null,
+        storageUrl: image.storageUrl || null,
+        withBoxesStoragePath: image.withBoxesStoragePath || null,
+        withBoxesStorageUrl: image.withBoxesStorageUrl || null,
         // Note: Omitting 'original' and 'withBoxes' Base64 strings to avoid Firestore doc size limits
         // If needed, store references to Cloud Storage instead
       };

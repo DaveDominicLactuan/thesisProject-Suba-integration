@@ -10,24 +10,32 @@ import { App } from '@capacitor/app';
 import { jsPDF } from 'jspdf';
 
 @Component({
-  selector: 'app-home-page2',
-  templateUrl: './home-page2.page.html',
-  styleUrls: ['./home-page2.page.scss'],
+  selector: 'app-profile-page',
+  templateUrl: './profile-page.page.html',
+  styleUrls: ['./profile-page.page.scss'],
   standalone: false
 })
-export class HomePage2Page implements OnInit, OnDestroy {
+export class ProfilePagePage implements OnInit, OnDestroy {
   userName: string | null = null;
   firstName: string | null = null;
   lastName: string | null = null;
   email: string | null = null;
   engineeringID: string | null = null;
-  userID: string | null = null;
+  userID: string | null = null; // Firebase UID - used to filter sessions by user
   sessions: any[] = [];
   lastSessionDisplayName: string | null = null;
   private backButtonSub: any; // hardware back handler
   isLoggedIn: boolean = false;
   userRole: string | null = null;
   isSidebarOpen: boolean = false;
+  isSortOverlayOpen: boolean = false;
+  currentSort: string = 'time-newest'; // default sorting
+  
+  // Profile edit properties
+  phoneNumber: string | null = null;
+  password: string | null = null;
+  profilePicture: string | null = null;
+  isEditing: boolean = false; // Track edit mode state
 
   /** Inject auth, router, and image storage services for navigation and data. */
   constructor(private formBuilder: FormBuilder, private router: Router, private authService: AuthService, private navCtrl: NavController, private auth3: Auth3Service, private imageStorage: ImageStorageService, private platform: Platform) {
@@ -35,8 +43,8 @@ export class HomePage2Page implements OnInit, OnDestroy {
   }
 
 ngOnInit(): void {
-  console.log('[HomePage2.ngOnInit] ===== PAGE INIT START (ngOnInit called) =====');
-  console.log('[HomePage2.ngOnInit] Auth currentUser on ngOnInit:', this.auth3.getCurrentUser()?.uid || 'null');
+  console.log('[ProfilePage.ngOnInit] ===== PAGE INIT START (ngOnInit called) =====');
+  console.log('[ProfilePage.ngOnInit] Auth currentUser on ngOnInit:', this.auth3.getCurrentUser()?.uid || 'null');
   
   //initializes the data needed for the page such as user data, profile and session
   this.initialize();
@@ -45,37 +53,39 @@ ngOnInit(): void {
 /** Perform async initialization tasks (profile + sessions). */
 private async initialize(): Promise<void> {
   try {
-    console.log('[HomePage2.initialize] ===== INITIALIZE START =====');
-    console.log('[HomePage2.initialize] Auth currentUser at initialize start:', this.auth3.getCurrentUser()?.uid || 'null');
+    console.log('[ProfilePage.initialize] ===== INITIALIZE START =====');
+    console.log('[ProfilePage.initialize] Auth currentUser at initialize start:', this.auth3.getCurrentUser()?.uid || 'null');
     
     // Ensure Firebase auth state is ready before fetching profile
     // wait for up to 8 seconds for auth from firebase and current user profile from firestore
     if (!this.auth3.getCurrentUser()) {
-      console.log('[HomePage2.initialize] getCurrentUser() is null, calling waitForAuthUser(15000)...');
+      console.log('[ProfilePage.initialize] getCurrentUser() is null, calling waitForAuthUser(15000)...');
       const waitResult = await this.auth3.waitForAuthUser(15000);
-      console.log('[HomePage2.initialize] waitForAuthUser completed. Result:', waitResult?.uid || 'null');
+      console.log('[ProfilePage.initialize] waitForAuthUser completed. Result:', waitResult?.uid || 'null');
     } else {
-      console.log('[HomePage2.initialize] getCurrentUser() already available:', this.auth3.getCurrentUser()?.uid);
+      console.log('[ProfilePage.initialize] getCurrentUser() already available:', this.auth3.getCurrentUser()?.uid);
     }
     
-    console.log('[HomePage2.initialize] Auth currentUser before getUserProfile:', this.auth3.getCurrentUser()?.uid || 'null');
-    console.log('[HomePage2.initialize] About to call getUserProfile()...');
+    console.log('[ProfilePage.initialize] Auth currentUser before getUserProfile:', this.auth3.getCurrentUser()?.uid || 'null');
+    console.log('[ProfilePage.initialize] About to call getUserProfile()...');
     
    // stores current user profile data in profile variables 
     const profile = await this.auth3.getUserProfile();
-    console.log('[HomePage2.initialize] getUserProfile succeeded. Profile:', profile);
+    console.log('[ProfilePage.initialize] getUserProfile succeeded. Profile:', profile);
     
+    // Get userID from authenticated user (Firebase UID from auth.currentUser)
+    const currentUser = this.auth3.getCurrentUser();
+    this.userID = currentUser?.uid || profile['userID'] || null;
     this.firstName = profile['firstName'];
     this.lastName = profile['lastName'];
     this.engineeringID = profile['engineeringID'] || '';
     this.email = profile['email'] || '';
-    this.userID = profile['userID'] || '';
     // Read role from Firestore profile (authoritative source)
     this.userRole = profile['role'] || (this.engineeringID ? 'engineer' : 'user');
     //gets username from firatName and lastName
     this.userName = (this.firstName && this.lastName) ? `${this.firstName} ${this.lastName}` : (this.email || null);
     //prints the current user profile to console
-    console.log('[HomePage2.initialize] user profile loaded', {
+    console.log('[ProfilePage.initialize] user profile loaded', {
       firstName: this.firstName,
       lastName: this.lastName,
       email: this.email,
@@ -84,7 +94,7 @@ private async initialize(): Promise<void> {
       userRole: this.userRole,
       userName: this.userName
     });
-    console.log('[HomePage2.initialize] ===== INITIALIZE END (success) =====');
+    console.log('[ProfilePage.initialize] ===== INITIALIZE END (success) =====');
     // Persist/refresh local user data for downstream use, and for long term offline use
     try {
       localStorage.setItem('userData', JSON.stringify({
@@ -112,10 +122,10 @@ private async initialize(): Promise<void> {
        sessionStorage.setItem('isLoggedInSession', 'true');
      } catch {}
   } catch (error) {
-    console.error('[HomePage2.initialize] ERROR in initialize:', error);
-    console.error('[HomePage2.initialize] Error type:', error instanceof Error ? error.message : 'unknown');
-    console.error('[HomePage2.initialize] Full error object:', JSON.stringify(error, null, 2));
-    console.log('[HomePage2.initialize] Auth currentUser during error:', this.auth3.getCurrentUser()?.uid || 'null');
+    console.error('[ProfilePage.initialize] ERROR in initialize:', error);
+    console.error('[ProfilePage.initialize] Error type:', error instanceof Error ? error.message : 'unknown');
+    console.error('[ProfilePage.initialize] Full error object:', JSON.stringify(error, null, 2));
+    console.log('[ProfilePage.initialize] Auth currentUser during error:', this.auth3.getCurrentUser()?.uid || 'null');
     
     // Fallback: try to load previously saved user data
     try {
@@ -129,10 +139,10 @@ private async initialize(): Promise<void> {
         this.email = data.email || null;
         this.engineeringID = data.engineeringID || null;
         this.userID = data.userID || null;
-        console.log('[HomePage2.initialize] loaded user profile from cache', data);
+        console.log('[ProfilePage.initialize] loaded user profile from cache', data);
       }
     } catch {}
-    console.log('[HomePage2.initialize] ===== INITIALIZE END (with error) =====');
+    console.log('[ProfilePage.initialize] ===== INITIALIZE END (with error) =====');
   }
 }
 
@@ -174,12 +184,16 @@ private async initialize(): Promise<void> {
   // Called by Ionic when page becomes active — refresh and loads sessions/counts/
   /** Ionic hook: refresh sessions each time page becomes active. */
   ionViewWillEnter() {
+    // Ensure any existing back button handlers are cleared before entering
+    this.removeBackButtonHandler();
     this.loadSessions();
   }
 
   /** Register hardware back handler only while this view is active, 
    * allowing for hardware back button navigation */
   ionViewDidEnter() {
+    // Double-check removal of any lingering handlers before registering new one
+    this.removeBackButtonHandler();
     this.registerBackButtonHandler();
   }
 
@@ -189,12 +203,61 @@ private async initialize(): Promise<void> {
     this.removeBackButtonHandler();
   }
 
-  /** Load sessions from ImageStorageService and compute image counts. */
+  /** Load sessions from ImageStorageService and compute image counts. Filter by current user's ID. */
   async loadSessions() {
     try {
       //Safely read sessions from ImageStorageService, create a copy and stores it.
       const s = (this.imageStorage.getSessions && typeof this.imageStorage.getSessions === 'function') ? this.imageStorage.getSessions() : [];
       const sessionsRaw = Array.isArray(s) ? s.slice() : [];
+
+      // ========== USER ID FILTERING ==========
+      // Get current user ID from Firebase auth, localStorage, or sessionStorage
+      let currentUserID = this.userID;
+      if (!currentUserID) {
+        // Try to get from localStorage
+        try {
+          const userData = localStorage.getItem('userData');
+          if (userData) {
+            const parsed = JSON.parse(userData);
+            currentUserID = parsed.userID || null;
+          }
+        } catch {}
+      }
+      if (!currentUserID) {
+        // Try to get from sessionStorage
+        try {
+          const sessionProfile = sessionStorage.getItem('userProfile');
+          if (sessionProfile) {
+            const parsed = JSON.parse(sessionProfile);
+            currentUserID = parsed.userID || null;
+          }
+        } catch {}
+      }
+      if (!currentUserID) {
+        // Try to get from authenticated Firebase user
+        try {
+          currentUserID = this.auth3.getCurrentUser()?.uid || null;
+        } catch {}
+      }
+
+      console.log('[ProfilePage.loadSessions] Current user ID:', currentUserID);
+
+      // Filter sessions to only include those belonging to the current user
+      // Sessions without userId are legacy sessions (show them for backward compatibility)
+      // Sessions with userId must match the current user's ID
+      const filteredSessions = sessionsRaw.filter((sess: any) => {
+        // If session has no userId, include it (backward compatibility with old sessions)
+        if (!sess.userId) {
+          console.log('[ProfilePage.loadSessions] Including legacy session (no userId):', sess.id);
+          return true;
+        }
+        // If session has userId, only include if it matches current user
+        const isOwnSession = sess.userId === currentUserID;
+        if (!isOwnSession) {
+          console.log('[ProfilePage.loadSessions] Excluding session from different user:', sess.id, 'session userId:', sess.userId, 'current user:', currentUserID);
+        }
+        return isOwnSession;
+      });
 
       // compute image counts by comparing session imageKeys with stored images with 
       // geAllImages or getImages if fails into a arrayt allImages from the imageStorage not in sessions
@@ -218,13 +281,13 @@ private async initialize(): Promise<void> {
         if (!Array.isArray(allImages)) allImages = [];
       }
 
-      // counts how many imageKeys or images in the sessions are present in allImages
-      this.sessions = sessionsRaw.map((sess: any) => {
+      // counts how many imageKeys or images in the filtered sessions are present in allImages
+      this.sessions = filteredSessions.map((sess: any) => {
         const keys = Array.isArray(sess.imageKeys) ? sess.imageKeys : [];
-        // Use filename as the only key for matching
-        const imageCount = keys.reduce((acc: number, k: string) => acc + (allImages.findIndex(ai => ai.filename === k) !== -1 ? 1 : 0), 0);
+        const imageCount = keys.reduce((acc: number, k: string) => acc + (allImages.findIndex(ai => ai.original === k) !== -1 ? 1 : 0), 0);
         return { ...sess, imageCount };
       });
+      console.log('[ProfilePage.loadSessions] Displaying', this.sessions.length, 'sessions for user', currentUserID);
       // if Image Storage Service recorded a last created session or last used/created session,
       //  show its name at top of the summary list
       try {
@@ -247,16 +310,16 @@ private async initialize(): Promise<void> {
   }
 
   // Additional methods can be added here
-
-  /** Navigate to legacy camera page route. */
-  goToHomePage() {
-    this.router.navigate(['/home-page2']);
-    console.log('camera page');
-  }
   
   /** Navigate to enhanced camera page with sessions support. */
   goToCameraPage2() {
     this.router.navigate(['/camera-page2']);
+    console.log('camera page');
+  }
+
+  /** Navigate to enhanced camera page with sessions support. */
+  goToHomePage() {
+    this.router.navigate(['/home-page2']);
     console.log('camera page');
   }
 
@@ -319,9 +382,8 @@ private async initialize(): Promise<void> {
      try {
       if (session && session.imageKeys && session.imageKeys.length > 0) {
         const key = session.imageKeys[0];
-        if (this.imageStorage && key) {
-          // Use filename as the only key
-          this.imageStorage.selectImageByKey(key);
+        if (this.imageStorage && typeof this.imageStorage.selectImageByOriginal === 'function') {
+          this.imageStorage.selectImageByOriginal(key);
         }
       }
     } catch (e) { console.warn('goToSession warning', e); }
@@ -375,7 +437,7 @@ private async initialize(): Promise<void> {
     this.router.navigate(['/upload-image-page']);
     console.log('pdf 3 page');
   }
-  
+
 
 
   /**
@@ -674,8 +736,7 @@ private async initialize(): Promise<void> {
             } else {
               stored = [];
             }
-            // Use filename as the only key
-            const keys = Array.isArray(stored) ? stored.slice(0, 6).map((item: any) => item.filename || '').filter((k: string) => k) : [];
+            const keys = Array.isArray(stored) ? stored.slice(0, 6).map((item: any) => item.original) : [];
             const s = (typeof this.imageStorage.createSession === 'function') ? this.imageStorage.createSession('Test Session', keys) : null;
             try { await this.loadSessions(); } catch (e) {}
             alert(s ? ('Test session created: ' + (s as any).id) : 'Test session created (fallback)');
@@ -761,24 +822,40 @@ private async initialize(): Promise<void> {
     // No local back subscription: page-level handler will close the overlay when present
   }
 
-  /** Register a one-page-only back button that exits the app from home. 
-   * and if test-overlay is currently append close the overlay before exit app logic from home */
+  /** Register back button handler for closing overlays and navigating back. */
   private registerBackButtonHandler() {
     try {
       this.removeBackButtonHandler();
       // priority 10: high enough to intercept overlay/back behavior on this page
       this.backButtonSub = this.platform.backButton.subscribeWithPriority(10, () => {
         try {
+          // Check for test overlay first
           const overlay = document.getElementById('test-overlay');
           if (overlay) {
             try { this.removeTestOverlay(); } catch (e) {}
             return;
           }
-        } catch (e) {}
-        try { App.exitApp(); } catch (e) { console.warn('App.exitApp failed', e); }
+          
+          // Check for sort overlay
+          if (this.isSortOverlayOpen) {
+            this.closeSortOverlay();
+            return;
+          }
+          
+          // Check for sidebar
+          if (this.isSidebarOpen) {
+            this.closeSidebar();
+            return;
+          }
+          
+          // No overlays open - navigate back to previous page
+          this.navCtrl.back();
+        } catch (e) {
+          console.warn('[ProfilePage] back button handler error', e);
+        }
       });
     } catch (e) {
-      console.warn('[HomePage2] registerBackButtonHandler failed', e);
+      console.warn('[ProfilePage] registerBackButtonHandler failed', e);
     }
   }
 
@@ -790,8 +867,7 @@ private async initialize(): Promise<void> {
     } catch {}
   }
 
-  /** Remove the home-page back handler so other pages can handle back navigation normally, 
-   * without exit app logic and behavior */
+  /** Remove the session page back handler so other pages can handle back navigation normally. */
   private removeBackButtonHandler() {
     try {
       if (this.backButtonSub && typeof this.backButtonSub.remove === 'function') {
@@ -814,5 +890,95 @@ private async initialize(): Promise<void> {
 
   closeSidebar() {
     this.isSidebarOpen = false;
+  }
+
+  /** Show the sort overlay */
+  showSortOverlay() {
+    this.isSortOverlayOpen = true;
+  }
+
+  /** Close the sort overlay */
+  closeSortOverlay() {
+    this.isSortOverlayOpen = false;
+  }
+
+  /** Sort sessions based on selected criteria */
+  sortSessions(sortType: string) {
+    this.currentSort = sortType;
+    
+    switch (sortType) {
+      case 'time-newest':
+        this.sessions.sort((a, b) => {
+          const dateA = new Date(a.created).getTime();
+          const dateB = new Date(b.created).getTime();
+          return dateB - dateA; // newest first
+        });
+        break;
+      
+      case 'time-oldest':
+        this.sessions.sort((a, b) => {
+          const dateA = new Date(a.created).getTime();
+          const dateB = new Date(b.created).getTime();
+          return dateA - dateB; // oldest first
+        });
+        break;
+      
+      case 'images-most':
+        this.sessions.sort((a, b) => {
+          const countA = a.imageKeys?.length || 0;
+          const countB = b.imageKeys?.length || 0;
+          return countB - countA; // most images first
+        });
+        break;
+      
+      case 'images-least':
+        this.sessions.sort((a, b) => {
+          const countA = a.imageKeys?.length || 0;
+          const countB = b.imageKeys?.length || 0;
+          return countA - countB; // least images first
+        });
+        break;
+    }
+    
+    // Close overlay after sorting
+    this.closeSortOverlay();
+  }
+
+  /** Handle edit profile button click */
+  onEditProfile() {
+    console.log('Edit profile clicked');
+    this.isEditing = true;
+    console.log('Edit mode enabled - button hidden');
+  }
+
+  /** Handle update profile button click */
+  async onUpdateProfile() {
+    try {
+      console.log('Updating profile with data:', {
+        userName: this.userName,
+        email: this.email,
+        phoneNumber: this.phoneNumber,
+        password: this.password,
+        firstName: this.firstName,
+        lastName: this.lastName
+      });
+
+      // Log password change simulation
+      if (this.password) {
+        console.log('[Password Change Simulation] New password set:', '*'.repeat(this.password.length));
+      }
+
+      // Here you would typically call a service to update the user profile
+      // Example: await this.auth3.updateUserProfile({...});
+      
+      alert('Profile updated successfully!');
+      
+      // Exit edit mode and show the edit button again
+      this.isEditing = false;
+      console.log('Edit mode disabled - button shown');
+    } catch (error) {
+      console.error('Failed to update profile:', error);
+      alert('Failed to update profile. Please try again.');
+    }
   }
 }
