@@ -2,8 +2,9 @@ import { Component, OnInit, OnDestroy } from '@angular/core';
 import { Router } from '@angular/router';
 import { FormBuilder, FormGroup, Validators } from '@angular/forms';
 import { AuthService } from '../services/auth.service';
-import { NavController, Platform } from '@ionic/angular';
-import { User } from 'firebase/auth';
+import { NavController, Platform, ToastController } from '@ionic/angular';
+import { User, reauthenticateWithCredential, EmailAuthProvider, updatePassword } from 'firebase/auth';
+import { Auth } from '@angular/fire/auth';
 import { Auth3Service } from '../services/auth3.service';
 import { ImageStorageService } from '../services/image-storage.service';
 import { App } from '@capacitor/app';
@@ -36,9 +37,27 @@ export class ProfilePagePage implements OnInit, OnDestroy {
   password: string | null = null;
   profilePicture: string | null = null;
   isEditing: boolean = false; // Track edit mode state
+  
+  // Password change properties
+  currentPassword: string = '';
+  newPassword: string = '';
+  confirmNewPassword: string = '';
+  isPasswordChangeModalOpen: boolean = false;
+  isPasswordChanging: boolean = false;
+  passwordChangeError: string = '';
 
   /** Inject auth, router, and image storage services for navigation and data. */
-  constructor(private formBuilder: FormBuilder, private router: Router, private authService: AuthService, private navCtrl: NavController, private auth3: Auth3Service, private imageStorage: ImageStorageService, private platform: Platform) {
+  constructor(
+    private formBuilder: FormBuilder,
+    private router: Router,
+    private authService: AuthService,
+    private navCtrl: NavController,
+    private auth3: Auth3Service,
+    private imageStorage: ImageStorageService,
+    private platform: Platform,
+    private toastController: ToastController,
+    private firebaseAuth: Auth
+  ) {
 
   }
 
@@ -949,6 +968,121 @@ private async initialize(): Promise<void> {
     console.log('Edit profile clicked');
     this.isEditing = true;
     console.log('Edit mode enabled - button hidden');
+  }
+
+  /** Handle change password click - open the Ionic modal */
+  onChangePassword() {
+    console.log('[Password Change] User initiated password change');
+    this.resetPasswordForm();
+    this.passwordChangeError = '';
+    this.isPasswordChangeModalOpen = true;
+  }
+
+  /** Close the password change modal */
+  closePasswordModal() {
+    this.isPasswordChangeModalOpen = false;
+    this.resetPasswordForm();
+    this.passwordChangeError = '';
+  }
+
+  /** Reset password form fields */
+  private resetPasswordForm() {
+    this.currentPassword = '';
+    this.newPassword = '';
+    this.confirmNewPassword = '';
+    this.passwordChangeError = '';
+  }
+
+  /** Validate password change form */
+  private validatePasswordForm(): string | null {
+    if (!this.currentPassword || !this.newPassword || !this.confirmNewPassword) {
+      return 'Please fill in all fields';
+    }
+
+    if (this.newPassword !== this.confirmNewPassword) {
+      return 'New passwords do not match';
+    }
+
+    if (this.newPassword.length < 6) {
+      return 'New password must be at least 6 characters';
+    }
+
+    if (this.currentPassword === this.newPassword) {
+      return 'New password must be different from current password';
+    }
+
+    return null;
+  }
+
+  /** Handle password change submission with Firebase */
+  async onSubmitPasswordChange() {
+    console.log('[Password Change] Submit button clicked');
+
+    // Validate form
+    const validationError = this.validatePasswordForm();
+    if (validationError) {
+      this.passwordChangeError = validationError;
+      console.log('[Password Change] Validation failed:', validationError);
+      return;
+    }
+
+    this.isPasswordChanging = true;
+    this.passwordChangeError = '';
+
+    try {
+      const user = this.firebaseAuth.currentUser;
+      if (!user) {
+        throw new Error('No user logged in');
+      }
+
+      console.log('[Password Change] User authenticated as:', user.email);
+      console.log('[Password Change] Attempting re-authentication...');
+
+      // Step 1: Re-authenticate user
+      const credential = EmailAuthProvider.credential(user.email!, this.currentPassword);
+      await reauthenticateWithCredential(user, credential);
+      console.log('[Password Change] Re-authentication successful');
+
+      // Step 2: Update password
+      await updatePassword(user, this.newPassword);
+      console.log('[Password Change] Password updated successfully');
+
+      // Show success message
+      await this.showToast('Password changed successfully!', 'success');
+      this.closePasswordModal();
+    } catch (error: any) {
+      console.error('[Password Change] Error:', error);
+      let errorMessage = 'An error occurred. Please try again.';
+
+      // Handle specific Firebase errors
+      if (error.code === 'auth/wrong-password') {
+        errorMessage = 'Current password is incorrect';
+      } else if (error.code === 'auth/weak-password') {
+        errorMessage = 'New password is too weak. Use at least 6 characters.';
+      } else if (error.code === 'auth/requires-recent-login') {
+        errorMessage = 'Your session has expired. Please log in again.';
+      } else if (error.code === 'auth/user-not-found') {
+        errorMessage = 'User account not found';
+      } else if (error.message) {
+        errorMessage = error.message;
+      }
+
+      this.passwordChangeError = errorMessage;
+      await this.showToast(errorMessage, 'danger');
+    } finally {
+      this.isPasswordChanging = false;
+    }
+  }
+
+  /** Show toast notification */
+  private async showToast(message: string, color: string = 'success') {
+    const toast = await this.toastController.create({
+      message,
+      duration: 3000,
+      position: 'top',
+      color
+    });
+    await toast.present();
   }
 
   /** Handle update profile button click */

@@ -389,7 +389,7 @@ export class CameraPage2Page implements AfterViewInit {
         console.warn('Inference failed during upload processing', e);
       }
       // Prepare storage entry or build StoredImage entry
-      const safeOriginal = await this.shrinkDataUrlToBytes(dataUrl, maxBytes);
+      const safeOriginal = await this.shrinkDataUrlToBytes(dataUrl, maxBytes, 4000);
       const timestamp = new Date().toISOString();
       const generatedFilename = this.buildSessionFilename(!!prediction, timestamp, originalName);
       const entry: StoredImage = {
@@ -434,7 +434,7 @@ export class CameraPage2Page implements AfterViewInit {
          // try to create withBoxes image with drawn boxes based on the bouding box data
           try {
             const withBoxesDataUrl = await this.drawBoxesOnImage(dataUrl, boxesToDraw, maskW, maskH);
-            const safeWithBoxes = await this.shrinkDataUrlToBytes(withBoxesDataUrl, maxBytes);
+            const safeWithBoxes = await this.shrinkDataUrlToBytes(withBoxesDataUrl, maxBytes, 4000);
             (entry as any).withBoxes = safeWithBoxes;
             (entry as any).boxes = boxesToDraw;
             (entry as any).detectionMessage = `Rendered ${boxesToDraw.length} aggregated/simplified box(es) from ${rawBoxes.length} prediction box(es)`;
@@ -513,7 +513,7 @@ export class CameraPage2Page implements AfterViewInit {
       if (err && err.message === 'processing-timeout') {
         console.warn('[CameraPage2] processDataUrl overall timeout');
         // If we timed out, persist a fallback entry indicating failure/no-prediction
-        const safeOriginal = await this.shrinkDataUrlToBytes(dataUrl, maxBytes);
+        const safeOriginal = await this.shrinkDataUrlToBytes(dataUrl, maxBytes, 4000);
         const timestamp = new Date().toISOString();
         const generatedFilename = this.buildSessionFilename(false, timestamp, originalName);
         const entry: StoredImage = {
@@ -595,7 +595,7 @@ export class CameraPage2Page implements AfterViewInit {
   }
 
   // Reduce data URL size to stay under Firestore document limits.
-  private async shrinkDataUrlToBytes(dataUrl: string, maxBytes: number): Promise<string> {
+  private async shrinkDataUrlToBytes(dataUrl: string, maxBytes: number, timeoutMs: number = 4000): Promise<string> {
     try {
       const estimateBytes = (url: string) => {
         const commaIdx = url.indexOf(',');
@@ -608,8 +608,20 @@ export class CameraPage2Page implements AfterViewInit {
       if (!dataUrl || estimateBytes(dataUrl) <= maxBytes) return dataUrl;
 
       const img = new Image();
+      const loadStart = Date.now();
       img.src = dataUrl;
-      await new Promise(resolve => (img.onload = resolve));
+      const loadResult = await Promise.race([
+        new Promise<'loaded' | 'error'>(resolve => {
+          img.onload = () => resolve('loaded');
+          img.onerror = () => resolve('error');
+        }),
+        new Promise<'timeout'>(resolve => setTimeout(() => resolve('timeout'), timeoutMs))
+      ]);
+
+      if (loadResult !== 'loaded') {
+        console.warn('[CameraPage2] shrinkDataUrlToBytes image load failed or timed out:', loadResult);
+        return dataUrl;
+      }
 
       let scale = 1;
       let quality = 0.92;
@@ -618,6 +630,10 @@ export class CameraPage2Page implements AfterViewInit {
       const maxLoops = 8;
 
       for (let i = 0; i < maxLoops; i += 1) {
+        if (Date.now() - loadStart > timeoutMs) {
+          console.warn('[CameraPage2] shrinkDataUrlToBytes timeout while resizing');
+          return dataUrl;
+        }
         const canvas = document.createElement('canvas');
         const w = Math.max(1, Math.floor((img.naturalWidth || img.width) * scale));
         const h = Math.max(1, Math.floor((img.naturalHeight || img.height) * scale));

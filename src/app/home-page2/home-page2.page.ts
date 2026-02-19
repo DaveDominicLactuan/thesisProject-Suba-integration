@@ -84,6 +84,11 @@ private async initialize(): Promise<void> {
       userRole: this.userRole,
       userName: this.userName
     });
+
+    // ✅ Sync user's sessions and images from Firestore to local storage
+    console.log('[HomePage2.initialize] Syncing user data from Firestore...');
+    await this.syncUserDataFromFirestore(this.userID || '');
+
     console.log('[HomePage2.initialize] ===== INITIALIZE END (success) =====');
     // Persist/refresh local user data for downstream use, and for long term offline use
     try {
@@ -243,6 +248,105 @@ private async initialize(): Promise<void> {
     } catch (e) {
       console.warn('Failed to load sessions', e);
       this.sessions = [];
+    }
+  }
+
+  /**
+   * Sync user's sessions and images from Firestore to local ImageStorageService.
+   * This enables cross-device data access by loading the user's sessions and images
+   * from Firestore on page init and populating the local storage.
+   */
+  private async syncUserDataFromFirestore(userId: string): Promise<void> {
+    if (!userId) {
+      console.warn('[HomePage2.syncUserDataFromFirestore] No userId provided, skipping sync');
+      return;
+    }
+
+    try {
+      console.log('[HomePage2.syncUserDataFromFirestore] Starting sync for userId:', userId);
+
+      // Fetch user sessions from Firestore
+      const firebaseSessions = await this.auth3.getUserSessions(userId);
+      console.log('[HomePage2.syncUserDataFromFirestore] Fetched', firebaseSessions.length, 'sessions from Firestore');
+      console.log('[HomePage2.syncUserDataFromFirestore] Raw Firestore sessions:', firebaseSessions);
+      try {
+        console.log('[HomePage2.syncUserDataFromFirestore] Raw Firestore sessions JSON:', JSON.stringify(firebaseSessions, null, 2));
+      } catch (jsonErr) {
+        console.warn('[HomePage2.syncUserDataFromFirestore] Failed to stringify sessions:', jsonErr);
+      }
+
+      // Fetch user images from Firestore
+      const firestoreImages = await this.auth3.getUserImages(userId);
+      console.log('[HomePage2.syncUserDataFromFirestore] Fetched', firestoreImages.length, 'images from Firestore');
+      console.log('[HomePage2.syncUserDataFromFirestore] Raw Firestore images:', firestoreImages);
+      try {
+        console.log('[HomePage2.syncUserDataFromFirestore] Raw Firestore images JSON:', JSON.stringify(firestoreImages, null, 2));
+      } catch (jsonErr) {
+        console.warn('[HomePage2.syncUserDataFromFirestore] Failed to stringify images:', jsonErr);
+      }
+
+      // Convert Firestore sessions to ImageSession format and add to ImageStorageService
+      for (const fsSession of firebaseSessions) {
+        const session = {
+          id: fsSession.id || fsSession.sessionId || `s-${Date.now()}`,
+          name: fsSession.name || 'Untitled Session',
+          imageKeys: Array.isArray(fsSession.imageKeys) ? fsSession.imageKeys : [],
+          created: fsSession.created || new Date().toISOString()
+        };
+        console.log('[HomePage2.syncUserDataFromFirestore] Mapped session object:', session);
+        
+        // Check if session already exists locally to avoid duplicates
+        const existingSession = this.imageStorage.getSession(session.id);
+        if (!existingSession) {
+          console.log('[HomePage2.syncUserDataFromFirestore] Adding session:', session.id, session.name);
+          // Manually add to sessions (by creating and not clearing if exists)
+          (this.imageStorage as any).sessions = (this.imageStorage as any).sessions || [];
+          (this.imageStorage as any).sessions.unshift(session);
+          try { (this.imageStorage as any).persistSessions(); } catch (e) { /* ignore */ }
+        } else {
+          console.log('[HomePage2.syncUserDataFromFirestore] Session already exists locally:', session.id);
+        }
+      }
+
+      // Convert Firestore images to StoredImage format and add to ImageStorageService
+      for (const fsImage of firestoreImages) {
+        // Map Firestore image fields to StoredImage interface
+        const storedImage = {
+          original: fsImage.original || '',
+          withBoxes: fsImage.withBoxes || fsImage.original || '',
+          boxes: Array.isArray(fsImage.boxes) ? fsImage.boxes : [],
+          faceDetected: !!fsImage.faceDetected,
+          faceData: Array.isArray(fsImage.faceData) ? fsImage.faceData : [],
+          timestamp: fsImage.timestamp || new Date().toISOString(),
+          detectionMessage: fsImage.detectionMessage || '',
+          filename: fsImage.filename || '',
+          statusMessage: fsImage.statusMessage || '',
+          hasPrediction: !!fsImage.hasPrediction,
+          prediction: fsImage.prediction || undefined
+        };
+        console.log('[HomePage2.syncUserDataFromFirestore] Mapped image object:', {
+          filename: storedImage.filename,
+          originalPreview: storedImage.original ? `${String(storedImage.original).slice(0, 40)}...` : '',
+          withBoxesPreview: storedImage.withBoxes ? `${String(storedImage.withBoxes).slice(0, 40)}...` : '',
+          boxesCount: Array.isArray(storedImage.boxes) ? storedImage.boxes.length : 0,
+          faceDetected: storedImage.faceDetected,
+          timestamp: storedImage.timestamp
+        });
+
+        // Check if image already exists locally to avoid duplicates
+        const existingImage = this.imageStorage.getEntryForImage(storedImage.original);
+        if (!existingImage && storedImage.original) {
+          console.log('[HomePage2.syncUserDataFromFirestore] Adding image:', storedImage.filename || 'unnamed');
+          await this.imageStorage.addImage(storedImage);
+        } else if (existingImage) {
+          console.log('[HomePage2.syncUserDataFromFirestore] Image already exists locally:', storedImage.filename || 'unnamed');
+        }
+      }
+
+      console.log('[HomePage2.syncUserDataFromFirestore] Sync completed successfully');
+    } catch (error) {
+      console.error('[HomePage2.syncUserDataFromFirestore] ERROR during sync:', error);
+      // Continue gracefully if sync fails - app can still work with local data
     }
   }
 

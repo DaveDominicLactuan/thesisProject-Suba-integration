@@ -1,6 +1,6 @@
 import { Injectable } from '@angular/core';
 import { Auth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut } from '@angular/fire/auth';
-import { Firestore, setDoc, serverTimestamp, doc, getDoc } from '@angular/fire/firestore';
+import { Firestore, setDoc, serverTimestamp, doc, getDoc, collection, query, where, getDocs } from '@angular/fire/firestore';
 import { onAuthStateChanged, User } from 'firebase/auth';
 
 
@@ -185,6 +185,60 @@ async register(
         email: user.email || '',
         role: 'user'
       };
+    }
+  }
+
+  /**
+   * Fetch all sessions for a specific user from Firestore 'sessionsImages' collection.
+   * Returns an array of session documents that match the given userId.
+   */
+  async getUserSessions(userId: string): Promise<any[]> {
+    try {
+      console.log('[Auth3Service.getUserSessions] Fetching sessions for userId:', userId);
+      const q = query(collection(this.firestore, 'sessionsImages'), where('userId', '==', userId));
+      const querySnapshot = await getDocs(q);
+      const sessions: any[] = [];
+      querySnapshot.forEach((doc) => {
+        sessions.push({ id: doc.id, ...doc.data() });
+      });
+      console.log('[Auth3Service.getUserSessions] Fetched', sessions.length, 'sessions for userId:', userId);
+      console.log('[Auth3Service.getUserSessions] Sessions payload:', sessions);
+      try {
+        console.log('[Auth3Service.getUserSessions] Sessions payload JSON:', JSON.stringify(sessions, null, 2));
+      } catch (jsonErr) {
+        console.warn('[Auth3Service.getUserSessions] Failed to stringify sessions payload:', jsonErr);
+      }
+      return sessions;
+    } catch (err) {
+      console.error('[Auth3Service.getUserSessions] ERROR fetching sessions:', err);
+      return [];
+    }
+  }
+
+  /**
+   * Fetch all images for a specific user from Firestore 'images' collection.
+   * Returns an array of image documents that match the given userId.
+   */
+  async getUserImages(userId: string): Promise<any[]> {
+    try {
+      console.log('[Auth3Service.getUserImages] Fetching images for userId:', userId);
+      const q = query(collection(this.firestore, 'images'), where('userId', '==', userId));
+      const querySnapshot = await getDocs(q);
+      const images: any[] = [];
+      querySnapshot.forEach((doc) => {
+        images.push({ id: doc.id, ...doc.data() });
+      });
+      console.log('[Auth3Service.getUserImages] Fetched', images.length, 'images for userId:', userId);
+      console.log('[Auth3Service.getUserImages] Images payload:', images);
+      try {
+        console.log('[Auth3Service.getUserImages] Images payload JSON:', JSON.stringify(images, null, 2));
+      } catch (jsonErr) {
+        console.warn('[Auth3Service.getUserImages] Failed to stringify images payload:', jsonErr);
+      }
+      return images;
+    } catch (err) {
+      console.error('[Auth3Service.getUserImages] ERROR fetching images:', err);
+      return [];
     }
   }
 

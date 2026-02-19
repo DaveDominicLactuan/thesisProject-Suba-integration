@@ -393,7 +393,7 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
       }
       // Prepare storage entry or build StoredImage entry
       const maxBytes = 900_000;
-      const safeOriginal = await this.shrinkDataUrlToBytes(dataUrl, maxBytes);
+      const safeOriginal = await this.shrinkDataUrlToBytes(dataUrl, maxBytes, 4000);
       const timestamp = new Date().toISOString();
       const generatedFilename = this.buildSessionFilename(!!prediction, timestamp, filename);
       const entry: StoredImage = {
@@ -438,7 +438,7 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
          // try to create withBoxes image with drawn boxes based on the bouding box data
           try {
             const withBoxesDataUrl = await this.drawBoxesOnImage(dataUrl, boxesToDraw, maskW, maskH);
-            const safeWithBoxes = await this.shrinkDataUrlToBytes(withBoxesDataUrl, maxBytes);
+            const safeWithBoxes = await this.shrinkDataUrlToBytes(withBoxesDataUrl, maxBytes, 4000);
             (entry as any).withBoxes = safeWithBoxes;
             (entry as any).boxes = boxesToDraw;
             (entry as any).detectionMessage = `Rendered ${boxesToDraw.length} aggregated/simplified box(es) from ${rawBoxes.length} prediction box(es)`;
@@ -683,7 +683,7 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
   }
 
   // Reduce data URL size to stay under Firestore document limits.
-  private async shrinkDataUrlToBytes(dataUrl: string, maxBytes: number): Promise<string> {
+  private async shrinkDataUrlToBytes(dataUrl: string, maxBytes: number, timeoutMs: number = 4000): Promise<string> {
     try {
       const estimateBytes = (url: string) => {
         const commaIdx = url.indexOf(',');
@@ -696,8 +696,20 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
       if (!dataUrl || estimateBytes(dataUrl) <= maxBytes) return dataUrl;
 
       const img = new Image();
+      const loadStart = Date.now();
       img.src = dataUrl;
-      await new Promise(resolve => (img.onload = resolve));
+      const loadResult = await Promise.race([
+        new Promise<'loaded' | 'error'>(resolve => {
+          img.onload = () => resolve('loaded');
+          img.onerror = () => resolve('error');
+        }),
+        new Promise<'timeout'>(resolve => setTimeout(() => resolve('timeout'), timeoutMs))
+      ]);
+
+      if (loadResult !== 'loaded') {
+        console.warn('[UploadImagePage] shrinkDataUrlToBytes image load failed or timed out:', loadResult);
+        return dataUrl;
+      }
 
       let scale = 1;
       let quality = 0.92;
@@ -706,6 +718,10 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
       const maxLoops = 8;
 
       for (let i = 0; i < maxLoops; i += 1) {
+        if (Date.now() - loadStart > timeoutMs) {
+          console.warn('[UploadImagePage] shrinkDataUrlToBytes timeout while resizing');
+          return dataUrl;
+        }
         const canvas = document.createElement('canvas');
         const w = Math.max(1, Math.floor((img.naturalWidth || img.width) * scale));
         const h = Math.max(1, Math.floor((img.naturalHeight || img.height) * scale));

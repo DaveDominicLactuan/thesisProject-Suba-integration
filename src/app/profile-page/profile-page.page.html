@@ -135,11 +135,97 @@
         name="password"
         placeholder="Enter password"
       />
+      <div class="change-password-text" (click)="onChangePassword()">Change Password</div>
     </div>
 
     <button type="button" class="update-btn" (click)="onUpdateProfile()">Update</button>
   </form>
 </div>
+
+<!-- Password Change Modal -->
+<ion-modal [isOpen]="isPasswordChangeModalOpen" (ionModalDidDismiss)="closePasswordModal()">
+  <ng-template>
+    <ion-header>
+      <ion-toolbar>
+        <ion-title>Change Password</ion-title>
+        <ion-buttons slot="end">
+          <ion-button (click)="closePasswordModal()">
+            <ion-icon name="close"></ion-icon>
+          </ion-button>
+        </ion-buttons>
+      </ion-toolbar>
+    </ion-header>
+
+    <ion-content class="ion-padding">
+      <!-- Error Message Display -->
+      <div *ngIf="passwordChangeError" class="password-error-message">
+        <ion-icon name="alert-circle-outline"></ion-icon>
+        <span>{{ passwordChangeError }}</span>
+      </div>
+
+      <form class="password-form">
+        <!-- Current Password Input -->
+        <div class="form-group">
+          <label class="form-label">Current Password</label>
+          <ion-input
+            type="password"
+            [(ngModel)]="currentPassword"
+            name="currentPassword"
+            placeholder="Enter current password"
+            class="password-input"
+          ></ion-input>
+        </div>
+
+        <!-- New Password Input -->
+        <div class="form-group">
+          <label class="form-label">New Password</label>
+          <ion-input
+            type="password"
+            [(ngModel)]="newPassword"
+            name="newPassword"
+            placeholder="Enter new password"
+            class="password-input"
+          ></ion-input>
+        </div>
+
+        <!-- Confirm New Password Input -->
+        <div class="form-group">
+          <label class="form-label">Re-enter New Password</label>
+          <ion-input
+            type="password"
+            [(ngModel)]="confirmNewPassword"
+            name="confirmNewPassword"
+            placeholder="Re-enter new password"
+            class="password-input"
+          ></ion-input>
+        </div>
+
+        <!-- Button Container -->
+        <div class="password-button-container">
+          <ion-button
+            (click)="onSubmitPasswordChange()"
+            [disabled]="isPasswordChanging"
+            expand="block"
+            class="change-password-btn"
+          >
+            <ion-spinner *ngIf="isPasswordChanging" name="crescent"></ion-spinner>
+            <span *ngIf="!isPasswordChanging">Change Password</span>
+          </ion-button>
+
+          <ion-button
+            (click)="closePasswordModal()"
+            [disabled]="isPasswordChanging"
+            expand="block"
+            fill="outline"
+            class="cancel-btn"
+          >
+            Cancel
+          </ion-button>
+        </div>
+      </form>
+    </ion-content>
+  </ng-template>
+</ion-modal>
 
 <ion-content id="main-content" class="home-page" (click)="closeSidebar()">
  
