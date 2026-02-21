@@ -784,6 +784,38 @@ ion-menu ion-item:hover {
   color: black;
 }
 
+.menu-item .sync-status-pill {
+  margin-left: auto;
+  font-size: 0.72rem;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  line-height: 1.3;
+}
+
+.menu-item .sync-status-pill.idle {
+  color: #666;
+  background: #f2f2f2;
+}
+
+.menu-item .sync-status-pill.syncing {
+  color: #8a5a00;
+  background: #fff3d6;
+  border-color: #ffe1a3;
+}
+
+.menu-item .sync-status-pill.completed {
+  color: #166534;
+  background: #dcfce7;
+  border-color: #86efac;
+}
+
+.menu-item .sync-status-pill.error {
+  color: #991b1b;
+  background: #fee2e2;
+  border-color: #fecaca;
+}
+
 .menu-btn {
   display: flex;
   align-items: center;

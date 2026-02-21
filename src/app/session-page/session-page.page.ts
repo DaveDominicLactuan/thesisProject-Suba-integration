@@ -30,6 +30,8 @@ export class SessionPagePage implements OnInit, OnDestroy {
   isSidebarOpen: boolean = false;
   isSortOverlayOpen: boolean = false;
   currentSort: string = 'time-newest'; // default sorting
+  syncStatusText: string = 'Not synced';
+  syncStatusState: 'idle' | 'syncing' | 'completed' | 'error' = 'idle';
 
   /** Inject auth, router, and image storage services for navigation and data. */
   constructor(private formBuilder: FormBuilder, private router: Router, private authService: AuthService, private navCtrl: NavController, private auth3: Auth3Service, private imageStorage: ImageStorageService, private platform: Platform) {
@@ -74,6 +76,13 @@ private async initialize(): Promise<void> {
       userRole: this.userRole,
       userName: this.userName
     });
+
+    // Read shared sync status produced by HomePage2 background sync
+    const resolvedUserId = this.userID || this.auth3.getCurrentUser()?.uid || '';
+    this.userID = resolvedUserId || this.userID;
+    this.loadPersistedSyncStatus(resolvedUserId);
+    console.log('[SessionPage.initialize] Loaded sync status for user:', resolvedUserId || 'none');
+
     // Persist/refresh local user data for downstream use, and for long term offline use
     try {
       localStorage.setItem('userData', JSON.stringify({
@@ -161,6 +170,36 @@ private async initialize(): Promise<void> {
     // Ensure any existing back button handlers are cleared before entering
     this.removeBackButtonHandler();
     this.loadSessions();
+    const uid = this.userID || this.auth3.getCurrentUser()?.uid || '';
+    if (uid) this.loadPersistedSyncStatus(uid);
+  }
+
+  private getSyncStatusStorageKey(userId: string): string {
+    return `user_sync_status_${userId}`;
+  }
+
+  private getSyncBootstrapDoneKey(userId: string): string {
+    return `user_sync_bootstrap_done_${userId}`;
+  }
+
+  private clearSyncStateForUser(userId: string): void {
+    if (!userId) return;
+    try { localStorage.removeItem(this.getSyncStatusStorageKey(userId)); } catch {}
+    try { sessionStorage.removeItem(this.getSyncBootstrapDoneKey(userId)); } catch {}
+  }
+
+  private loadPersistedSyncStatus(userId: string): void {
+    if (!userId) return;
+    try {
+      const raw = localStorage.getItem(this.getSyncStatusStorageKey(userId));
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      this.syncStatusState = parsed?.state || 'idle';
+      this.syncStatusText = parsed?.text || 'Not synced';
+    } catch {
+      this.syncStatusState = 'idle';
+      this.syncStatusText = 'Not synced';
+    }
   }
 
   /** Register hardware back handler only while this view is active, 
@@ -258,7 +297,7 @@ private async initialize(): Promise<void> {
       // counts how many imageKeys or images in the filtered sessions are present in allImages
       this.sessions = filteredSessions.map((sess: any) => {
         const keys = Array.isArray(sess.imageKeys) ? sess.imageKeys : [];
-        const imageCount = keys.reduce((acc: number, k: string) => acc + (allImages.findIndex(ai => ai.original === k) !== -1 ? 1 : 0), 0);
+        const imageCount = keys.reduce((acc: number, k: string) => acc + (allImages.findIndex(ai => ai.filename === k) !== -1 ? 1 : 0), 0);
         return { ...sess, imageCount };
       });
       console.log('[SessionPage.loadSessions] Displaying', this.sessions.length, 'sessions for user', currentUserID);
@@ -280,6 +319,82 @@ private async initialize(): Promise<void> {
     } catch (e) {
       console.warn('Failed to load sessions', e);
       this.sessions = [];
+    }
+  }
+
+  /**
+   * Sync user's sessions and images from Firestore to local ImageStorageService.
+   * Runs in background and deduplicates local writes.
+   */
+  private async syncUserDataFromFirestore(userId: string): Promise<void> {
+    if (!userId) {
+      console.warn('[SessionPage.syncUserDataFromFirestore] No userId provided, skipping sync');
+      return;
+    }
+
+    try {
+      console.log('[SessionPage.syncUserDataFromFirestore] Starting sync for userId:', userId);
+
+      // Fetch user sessions from Firestore
+      const firebaseSessions = await this.auth3.getUserSessions(userId);
+      console.log('[SessionPage.syncUserDataFromFirestore] Fetched', firebaseSessions.length, 'sessions from Firestore');
+
+      // Fetch user images from Firestore
+      const firestoreImages = await this.auth3.getUserImages(userId);
+      console.log('[SessionPage.syncUserDataFromFirestore] Fetched', firestoreImages.length, 'images from Firestore');
+
+      let sessionsAdded = 0;
+      let imagesAdded = 0;
+
+      for (const fsSession of firebaseSessions) {
+        const session = {
+          id: fsSession.id || fsSession.sessionId || `s-${Date.now()}`,
+          name: fsSession.name || 'Untitled Session',
+          imageKeys: Array.isArray(fsSession.imageKeys) ? fsSession.imageKeys : [],
+          created: fsSession.created || new Date().toISOString(),
+          userId: userId
+        };
+
+        const added = this.imageStorage.addSessionIfNotExists(session as any);
+        if (added) {
+          sessionsAdded += 1;
+          console.log('[SessionPage.syncUserDataFromFirestore] Added session to local storage:', session.id);
+        }
+      }
+
+      for (const fsImage of firestoreImages) {
+        const storedImage = {
+          original: fsImage.original || '',
+          withBoxes: fsImage.withBoxes || fsImage.original || '',
+          boxes: Array.isArray(fsImage.boxes) ? fsImage.boxes : [],
+          faceDetected: !!fsImage.faceDetected,
+          faceData: Array.isArray(fsImage.faceData) ? fsImage.faceData : [],
+          timestamp: fsImage.timestamp || new Date().toISOString(),
+          detectionMessage: fsImage.detectionMessage || '',
+          filename: fsImage.filename || fsImage.id || '',
+          statusMessage: fsImage.statusMessage || '',
+          hasPrediction: !!fsImage.hasPrediction,
+          prediction: fsImage.prediction || undefined,
+          userId: userId,
+          sessionId: fsImage.sessionId || undefined
+        };
+
+        const added = await this.imageStorage.addImageIfNotExists(storedImage as any, storedImage.sessionId);
+        if (added) {
+          imagesAdded += 1;
+          console.log('[SessionPage.syncUserDataFromFirestore] Added image to local storage:', storedImage.filename || 'unnamed');
+        }
+      }
+
+      console.log('[SessionPage.syncUserDataFromFirestore] Sync completed successfully', {
+        sessionsFetched: firebaseSessions.length,
+        sessionsAdded,
+        imagesFetched: firestoreImages.length,
+        imagesAdded
+      });
+    } catch (error) {
+      console.error('[SessionPage.syncUserDataFromFirestore] ERROR during sync:', error);
+      throw error;
     }
   }
 
@@ -329,6 +444,10 @@ private async initialize(): Promise<void> {
 
   /** Shared logout flow used by overlay button and menu item. */
   async logout(closeOverlay: boolean = false) {
+    const currentUid = this.userID || this.auth3.getCurrentUser()?.uid || '';
+    if (currentUid) this.clearSyncStateForUser(currentUid);
+    this.syncStatusState = 'idle';
+    this.syncStatusText = 'Not synced';
     try {
       await this.auth3.logout();
     } catch {}

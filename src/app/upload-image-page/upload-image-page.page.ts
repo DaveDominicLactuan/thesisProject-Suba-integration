@@ -460,32 +460,6 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
         (entry as any).boxes = [];
         (entry as any).detectionMessage = 'Box rendering failed';
       }
-      // Upload original image to Firebase Storage and link it to Firestore by filename
-      try {
-        if (typeof (this.imageStorage as any).uploadImageToFirebaseStorage === 'function') {
-          const uploadResult = await this.imageStorage.uploadImageToFirebaseStorage(safeOriginal, generatedFilename, userId);
-          if (uploadResult) {
-            (entry as any).storagePath = uploadResult.storagePath;
-            (entry as any).storageUrl = uploadResult.downloadUrl;
-          }
-        }
-      } catch (e) {
-        console.warn('[UploadImagePage] Failed to upload image to Firebase Storage', e);
-      }
-      // Upload boxed image variant (if available) and link it to Firestore
-      try {
-        const withBoxesDataUrl = (entry as any).withBoxes as string | undefined;
-        if (withBoxesDataUrl && typeof (this.imageStorage as any).uploadImageToFirebaseStorage === 'function') {
-          const withBoxesFilename = this.imageStorage.buildWithBoxesFilename(generatedFilename);
-          const uploadResult = await this.imageStorage.uploadImageToFirebaseStorage(withBoxesDataUrl, withBoxesFilename, userId);
-          if (uploadResult) {
-            (entry as any).withBoxesStoragePath = uploadResult.storagePath;
-            (entry as any).withBoxesStorageUrl = uploadResult.downloadUrl;
-          }
-        }
-      } catch (e) {
-        console.warn('[UploadImagePage] Failed to upload boxed image to Firebase Storage', e);
-      }
       //store image entry via image storage service
       await this.imageStorage.addImage(entry, this.selectedSessionId || undefined);
       // Debug: log the full entry after processing and storage
@@ -546,17 +520,6 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
             userId: userId,
             sessionId: this.selectedSessionId || undefined
           };
-          try {
-            if (typeof (this.imageStorage as any).uploadImageToFirebaseStorage === 'function') {
-              const uploadResult = await this.imageStorage.uploadImageToFirebaseStorage(dataUrl, fallbackFilename, userId);
-              if (uploadResult) {
-                (entry as any).storagePath = uploadResult.storagePath;
-                (entry as any).storageUrl = uploadResult.downloadUrl;
-              }
-            }
-          } catch (e) {
-            console.warn('[UploadImagePage] Failed to upload fallback image to Firebase Storage', e);
-          }
           await this.imageStorage.addImage(entry, this.selectedSessionId || undefined);
           try {
             if (this.selectedSessionId && typeof (this.imageStorage.addImageToSession) === 'function') {

@@ -4,7 +4,6 @@ import { BehaviorSubject, Observable } from 'rxjs';
 import { Auth } from '@angular/fire/auth';
 import { onAuthStateChanged } from 'firebase/auth';
 import { Firestore, collection, doc, setDoc, deleteDoc, getDocs, query, where, writeBatch } from '@angular/fire/firestore';
-import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 
 //image object in the session
 export interface StoredImage {
@@ -55,7 +54,6 @@ export class ImageStorageService {
   private readonly FIRESTORE_IMAGES_COLLECTION = 'images';
   private readonly FIRESTORE_SESSIONS_COLLECTION = 'sessionsImages';
   private readonly FIRESTORE_DOC_MAX_BYTES = 900_000;
-  private readonly STORAGE_IMAGES_FOLDER = 'images';
   // Counter map to track image number per session
   private sessionImageCounters: Map<string, number> = new Map();
 
@@ -257,6 +255,41 @@ export class ImageStorageService {
     }
   }
 
+  /** Add a session from remote source if it does not already exist locally. */
+  addSessionIfNotExists(session: Partial<ImageSession>): boolean {
+    if (!session || !session.id) return false;
+
+    const exists = this.sessions.some(s => s.id === session.id);
+    if (exists) return false;
+
+    const normalized: ImageSession = {
+      id: session.id,
+      name: session.name || 'Untitled Session',
+      imageKeys: Array.isArray(session.imageKeys) ? session.imageKeys.filter(k => !!k) : [],
+      created: session.created || new Date().toISOString(),
+      totalBoundingBoxes: session.totalBoundingBoxes || 0,
+      userId: session.userId,
+      sessionId: session.sessionId
+    };
+
+    this.sessions.unshift(normalized);
+    this.sessionImageCounters.set(normalized.id, normalized.imageKeys.length);
+    this.persistSessions();
+    return true;
+  }
+
+  /** Add an image from remote source if it does not already exist locally. */
+  async addImageIfNotExists(image: StoredImage, sessionId?: string): Promise<boolean> {
+    if (!image) return false;
+
+    const duplicateByFilename = !!image.filename && this.images.some(i => i.filename === image.filename);
+    const duplicateByOriginal = !!image.original && this.images.some(i => i.original === image.original);
+    if (duplicateByFilename || duplicateByOriginal) return false;
+
+    await this.addImage(image, sessionId);
+    return true;
+  }
+
   private estimateDataUrlBytes(url: string): number {
     const commaIdx = url.indexOf(',');
     if (commaIdx === -1) return url.length;
@@ -313,32 +346,6 @@ export class ImageStorageService {
     const dotIdx = filename.lastIndexOf('.');
     if (dotIdx === -1) return `${filename}_boxes`;
     return `${filename.slice(0, dotIdx)}_boxes${filename.slice(dotIdx)}`;
-  }
-
-  /** Upload a data URL image to Firebase Storage and return path + download URL. */
-  async uploadImageToFirebaseStorage(dataUrl: string, filename: string, uid?: string): Promise<{ storagePath: string; downloadUrl: string } | null> {
-    if (!dataUrl || !filename) return null;
-
-    try {
-      const userId = uid || (await this.waitForAuthUserId()) || 'anonymous';
-      const storage = getStorage();
-      const storagePath = `${this.STORAGE_IMAGES_FOLDER}/${userId}/${filename}`;
-      const storageRef = ref(storage, storagePath);
-
-      const response = await fetch(dataUrl);
-      const blob = await response.blob();
-      if (!blob || blob.size === 0) return null;
-
-      await uploadBytes(storageRef, blob, {
-        contentType: blob.type || 'image/jpeg'
-      });
-
-      const downloadUrl = await getDownloadURL(storageRef);
-      return { storagePath, downloadUrl };
-    } catch (e) {
-      console.warn('[ImageStorageService] uploadImageToFirebaseStorage failed', e);
-      return null;
-    }
   }
 
   /** Persist a single session and its images to Firestore using filename as image doc ID */
@@ -406,10 +413,6 @@ export class ImageStorageService {
           sessionId: session.id,
           original: safeOriginal,
           withBoxes: safeWithBoxes,
-          storagePath: image.storagePath || null,
-          storageUrl: image.storageUrl || null,
-          withBoxesStoragePath: image.withBoxesStoragePath || null,
-          withBoxesStorageUrl: image.withBoxesStorageUrl || null,
           hasPrediction: image.hasPrediction || false,
           statusMessage: image.statusMessage || '',
           detectionMessage: image.detectionMessage || '',
@@ -443,10 +446,6 @@ export class ImageStorageService {
         detectionMessage: image.detectionMessage || '',
         prediction: image.prediction || null,
         boxes: image.boxes || [],
-        storagePath: image.storagePath || null,
-        storageUrl: image.storageUrl || null,
-        withBoxesStoragePath: image.withBoxesStoragePath || null,
-        withBoxesStorageUrl: image.withBoxesStorageUrl || null,
       };
 
       await setDoc(docRef, firestoreData);
@@ -810,12 +809,7 @@ export class ImageStorageService {
         detectionMessage: image.detectionMessage || '',
         prediction: image.prediction || null,
         boxes: image.boxes || [],
-        storagePath: image.storagePath || null,
-        storageUrl: image.storageUrl || null,
-        withBoxesStoragePath: image.withBoxesStoragePath || null,
-        withBoxesStorageUrl: image.withBoxesStorageUrl || null,
         // Note: Omitting 'original' and 'withBoxes' Base64 strings to avoid Firestore doc size limits
-        // If needed, store references to Cloud Storage instead
       };
       
       await setDoc(docRef, firestoreData);

@@ -16,6 +16,7 @@ import { jsPDF } from 'jspdf';
   standalone: false
 })
 export class HomePage2Page implements OnInit, OnDestroy {
+  private static userSyncTasks: Map<string, Promise<void>> = new Map();
   userName: string | null = null;
   firstName: string | null = null;
   lastName: string | null = null;
@@ -28,6 +29,8 @@ export class HomePage2Page implements OnInit, OnDestroy {
   isLoggedIn: boolean = false;
   userRole: string | null = null;
   isSidebarOpen: boolean = false;
+  syncStatusText: string = 'Not synced';
+  syncStatusState: 'idle' | 'syncing' | 'completed' | 'error' = 'idle';
 
   /** Inject auth, router, and image storage services for navigation and data. */
   constructor(private formBuilder: FormBuilder, private router: Router, private authService: AuthService, private navCtrl: NavController, private auth3: Auth3Service, private imageStorage: ImageStorageService, private platform: Platform) {
@@ -85,9 +88,12 @@ private async initialize(): Promise<void> {
       userName: this.userName
     });
 
-    // ✅ Sync user's sessions and images from Firestore to local storage
-    console.log('[HomePage2.initialize] Syncing user data from Firestore...');
-    await this.syncUserDataFromFirestore(this.userID || '');
+    // ✅ Start background sync user's sessions/images from Firestore to local storage
+    const resolvedUserId = this.userID || this.auth3.getCurrentUser()?.uid || '';
+    this.userID = resolvedUserId || this.userID;
+    this.loadPersistedSyncStatus(resolvedUserId);
+    console.log('[HomePage2.initialize] Starting initial background sync check for user:', resolvedUserId || 'none');
+    this.startUserSyncInBackground(resolvedUserId, true);
 
     console.log('[HomePage2.initialize] ===== INITIALIZE END (success) =====');
     // Persist/refresh local user data for downstream use, and for long term offline use
@@ -180,6 +186,108 @@ private async initialize(): Promise<void> {
   /** Ionic hook: refresh sessions each time page becomes active. */
   ionViewWillEnter() {
     this.loadSessions();
+    const uid = this.userID || this.auth3.getCurrentUser()?.uid || '';
+    if (uid) this.loadPersistedSyncStatus(uid);
+  }
+
+  private getSyncStatusStorageKey(userId: string): string {
+    return `user_sync_status_${userId}`;
+  }
+
+  private getSyncBootstrapDoneKey(userId: string): string {
+    return `user_sync_bootstrap_done_${userId}`;
+  }
+
+  private hasBootstrapSyncCompleted(userId: string): boolean {
+    if (!userId) return false;
+    try {
+      return sessionStorage.getItem(this.getSyncBootstrapDoneKey(userId)) === 'true';
+    } catch {
+      return false;
+    }
+  }
+
+  private markBootstrapSyncCompleted(userId: string): void {
+    if (!userId) return;
+    try {
+      sessionStorage.setItem(this.getSyncBootstrapDoneKey(userId), 'true');
+    } catch {}
+  }
+
+  private clearSyncStateForUser(userId: string): void {
+    if (!userId) return;
+    try { localStorage.removeItem(this.getSyncStatusStorageKey(userId)); } catch {}
+    try { sessionStorage.removeItem(this.getSyncBootstrapDoneKey(userId)); } catch {}
+  }
+
+  private loadPersistedSyncStatus(userId: string): void {
+    if (!userId) return;
+    try {
+      const raw = localStorage.getItem(this.getSyncStatusStorageKey(userId));
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      this.syncStatusState = parsed?.state || 'idle';
+      this.syncStatusText = parsed?.text || 'Not synced';
+    } catch {
+      this.syncStatusState = 'idle';
+      this.syncStatusText = 'Not synced';
+    }
+  }
+
+  private setSyncStatus(state: 'idle' | 'syncing' | 'completed' | 'error', text: string, userId?: string): void {
+    this.syncStatusState = state;
+    this.syncStatusText = text;
+    if (!userId) return;
+    try {
+      localStorage.setItem(this.getSyncStatusStorageKey(userId), JSON.stringify({
+        state,
+        text,
+        updatedAt: new Date().toISOString()
+      }));
+    } catch {}
+  }
+
+  private startUserSyncInBackground(userId: string, onlyIfFirstSync: boolean = false): void {
+    if (!userId) {
+      this.setSyncStatus('error', 'No user for sync');
+      return;
+    }
+
+    if (onlyIfFirstSync && this.hasBootstrapSyncCompleted(userId)) {
+      this.setSyncStatus('completed', 'Sync complete', userId);
+      return;
+    }
+
+    const existingTask = HomePage2Page.userSyncTasks.get(userId);
+    if (existingTask) {
+      this.setSyncStatus('syncing', 'Syncing...', userId);
+      existingTask
+        .then(async () => {
+          this.setSyncStatus('completed', 'Sync complete', userId);
+          await this.loadSessions();
+        })
+        .catch(() => {
+          this.setSyncStatus('error', 'Sync failed', userId);
+        });
+      return;
+    }
+
+    this.setSyncStatus('syncing', 'Syncing...', userId);
+    const task = this.syncUserDataFromFirestore(userId)
+      .then(async () => {
+        this.setSyncStatus('completed', 'Sync complete', userId);
+        this.markBootstrapSyncCompleted(userId);
+        await this.loadSessions();
+      })
+      .catch((err) => {
+        console.error('[HomePage2.startUserSyncInBackground] sync task failed:', err);
+        this.setSyncStatus('error', 'Sync failed', userId);
+      })
+      .finally(() => {
+        HomePage2Page.userSyncTasks.delete(userId);
+      });
+
+    HomePage2Page.userSyncTasks.set(userId, task);
   }
 
   /** Register hardware back handler only while this view is active, 
@@ -285,24 +393,24 @@ private async initialize(): Promise<void> {
         console.warn('[HomePage2.syncUserDataFromFirestore] Failed to stringify images:', jsonErr);
       }
 
+      let sessionsAdded = 0;
+      let imagesAdded = 0;
+
       // Convert Firestore sessions to ImageSession format and add to ImageStorageService
       for (const fsSession of firebaseSessions) {
         const session = {
           id: fsSession.id || fsSession.sessionId || `s-${Date.now()}`,
           name: fsSession.name || 'Untitled Session',
           imageKeys: Array.isArray(fsSession.imageKeys) ? fsSession.imageKeys : [],
-          created: fsSession.created || new Date().toISOString()
+          created: fsSession.created || new Date().toISOString(),
+          userId: userId
         };
         console.log('[HomePage2.syncUserDataFromFirestore] Mapped session object:', session);
-        
-        // Check if session already exists locally to avoid duplicates
-        const existingSession = this.imageStorage.getSession(session.id);
-        if (!existingSession) {
-          console.log('[HomePage2.syncUserDataFromFirestore] Adding session:', session.id, session.name);
-          // Manually add to sessions (by creating and not clearing if exists)
-          (this.imageStorage as any).sessions = (this.imageStorage as any).sessions || [];
-          (this.imageStorage as any).sessions.unshift(session);
-          try { (this.imageStorage as any).persistSessions(); } catch (e) { /* ignore */ }
+
+        const added = this.imageStorage.addSessionIfNotExists(session as any);
+        if (added) {
+          sessionsAdded += 1;
+          console.log('[HomePage2.syncUserDataFromFirestore] Added session to local storage:', session.id);
         } else {
           console.log('[HomePage2.syncUserDataFromFirestore] Session already exists locally:', session.id);
         }
@@ -319,10 +427,12 @@ private async initialize(): Promise<void> {
           faceData: Array.isArray(fsImage.faceData) ? fsImage.faceData : [],
           timestamp: fsImage.timestamp || new Date().toISOString(),
           detectionMessage: fsImage.detectionMessage || '',
-          filename: fsImage.filename || '',
+          filename: fsImage.filename || fsImage.id || '',
           statusMessage: fsImage.statusMessage || '',
           hasPrediction: !!fsImage.hasPrediction,
-          prediction: fsImage.prediction || undefined
+          prediction: fsImage.prediction || undefined,
+          userId: userId,
+          sessionId: fsImage.sessionId || undefined
         };
         console.log('[HomePage2.syncUserDataFromFirestore] Mapped image object:', {
           filename: storedImage.filename,
@@ -333,20 +443,26 @@ private async initialize(): Promise<void> {
           timestamp: storedImage.timestamp
         });
 
-        // Check if image already exists locally to avoid duplicates
-        const existingImage = this.imageStorage.getEntryForImage(storedImage.original);
-        if (!existingImage && storedImage.original) {
-          console.log('[HomePage2.syncUserDataFromFirestore] Adding image:', storedImage.filename || 'unnamed');
-          await this.imageStorage.addImage(storedImage);
-        } else if (existingImage) {
+        // Check/store image in local storage while skipping duplicates
+        const added = await this.imageStorage.addImageIfNotExists(storedImage as any, storedImage.sessionId);
+        if (added) {
+          imagesAdded += 1;
+          console.log('[HomePage2.syncUserDataFromFirestore] Added image to local storage:', storedImage.filename || 'unnamed');
+        } else {
           console.log('[HomePage2.syncUserDataFromFirestore] Image already exists locally:', storedImage.filename || 'unnamed');
         }
       }
 
-      console.log('[HomePage2.syncUserDataFromFirestore] Sync completed successfully');
+      console.log('[HomePage2.syncUserDataFromFirestore] Sync completed successfully', {
+        sessionsFetched: firebaseSessions.length,
+        sessionsAdded,
+        imagesFetched: firestoreImages.length,
+        imagesAdded
+      });
     } catch (error) {
       console.error('[HomePage2.syncUserDataFromFirestore] ERROR during sync:', error);
       // Continue gracefully if sync fails - app can still work with local data
+      throw error;
     }
   }
 
@@ -396,6 +512,10 @@ private async initialize(): Promise<void> {
 
   /** Shared logout flow used by overlay button and menu item. */
   async logout(closeOverlay: boolean = false) {
+    const currentUid = this.userID || this.auth3.getCurrentUser()?.uid || '';
+    if (currentUid) this.clearSyncStateForUser(currentUid);
+    this.syncStatusState = 'idle';
+    this.syncStatusText = 'Not synced';
     try {
       await this.auth3.logout();
     } catch {}

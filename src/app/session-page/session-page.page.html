@@ -43,6 +43,7 @@
       <li class="menu-item" (click)="goSessionPage()">
         <ion-icon name="bookmark-outline"></ion-icon>
         <span>Show Current Sessions</span>
+        <span class="sync-status-pill" [ngClass]="syncStatusState">{{ syncStatusText }}</span>
       </li>
     </div>
     <hr class="menu-divider" />
