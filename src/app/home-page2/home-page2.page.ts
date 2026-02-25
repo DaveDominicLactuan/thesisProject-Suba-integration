@@ -504,6 +504,11 @@ private async initialize(): Promise<void> {
     console.log('pdf 2 page');
   }
 
+  goNetworkPage() {
+    this.router.navigate(['/network-page']);
+    console.log('network page');
+  }
+
   /** Navigate to profile page. */
   goToProfilePage() {
     this.router.navigate(['/profile-page']);

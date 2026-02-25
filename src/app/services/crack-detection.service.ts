@@ -1,6 +1,5 @@
 import { Injectable } from '@angular/core';
 import { BoundingBox } from '../image-storage.service';
-import { Capacitor } from '@capacitor/core';
 // We'll dynamically import onnxruntime-web at runtime so we can set wasmPaths
 // before the library attempts to load helper modules. This avoids module
 // specifier resolution errors in browsers and mobile WebViews.
@@ -9,6 +8,23 @@ let ort: any = null;
 const TYPE_CLASSES = ['branching', 'diagonal', 'horizontal', 'map/web', 'vertical'];
 const SHAPE_CLASSES = ['branching', 'curved', 'mapped/network', 'straight'];
 const SEVERITY_CLASSES = ['hairline', 'minor', 'moderate', 'severe'];
+
+export type BoxPrediction = BoundingBox & {
+  type: string;
+  shape: string;
+  severity: string;
+  prediction: {
+    type: string;
+    shape: string;
+    severity: string;
+  };
+};
+
+export type InferenceResult = {
+  boxes: BoxPrediction[];
+  maskWidth?: number;
+  maskHeight?: number;
+};
 
 
 @Injectable({
@@ -64,83 +80,153 @@ export class CrackDetectionService {
     }
   }
 
-  /** Run inference on a Float32Array image tensor [1,3,128,128] */
-  async runInference(inputTensor: Float32Array) {
-    try {
-      await this.init();
+  async runInference(
+    imageTensor: Float32Array,
+    imageWidth: number,
+    imageHeight: number
+  ): Promise<InferenceResult> {
+    await this.init();
 
-      const tensor = new ort.Tensor('float32', inputTensor, [1, 3, 128, 128]);
-      const feeds: Record<string, any> = { input: tensor };
+    const channels = 3;
+    const spatialSize = imageTensor.length / channels;
+    if (!Number.isFinite(spatialSize) || !Number.isInteger(spatialSize) || spatialSize <= 0) {
+      throw new Error(`[CrackDetectionService] Invalid tensor length: ${imageTensor.length}`);
+    }
 
-      const results = await this.session.run(feeds);
+    let tensorW = imageWidth;
+    let tensorH = imageHeight;
+    const providedShapeMatches =
+      Number.isFinite(tensorW) && Number.isFinite(tensorH) && tensorW > 0 && tensorH > 0 && (tensorW * tensorH === spatialSize);
 
-      console.log(
-        '[ORT OUTPUTS]',
-        Object.entries(results).map(([name, t]: any) => ({
-          name,
-          dims: t.dims,
-          length: t.data?.length
-        }))
+    if (!providedShapeMatches) {
+      const side = Math.round(Math.sqrt(spatialSize));
+      if (side * side === spatialSize) {
+        tensorW = side;
+        tensorH = side;
+      } else {
+        tensorW = spatialSize;
+        tensorH = 1;
+      }
+
+      console.warn(
+        `[CrackDetectionService] Tensor shape mismatch: got ${imageWidth}x${imageHeight} for data length ${imageTensor.length}. Using ${tensorW}x${tensorH}.`
+      );
+    }
+
+    const baseTensor = new ort.Tensor('float32', imageTensor, [1, 3, tensorH, tensorW]);
+    const results = await this.session.run({ input: baseTensor });
+
+    console.log(
+      '[ORT OUTPUTS]',
+      Object.entries(results).map(([name, t]: any) => ({
+        name,
+        dims: t.dims,
+        length: t.data?.length
+      }))
+    );
+
+    const mask = results['mask'] || results['masks'] || results['pred_mask'];
+    if (!mask || !mask.data) {
+      throw new Error('[CrackDetectionService] Model did not output a usable mask tensor');
+    }
+
+    const maskDims = Array.isArray(mask.dims) ? (mask.dims as number[]) : [];
+    let maskW = maskDims.length >= 2 ? Number(maskDims[maskDims.length - 1]) : tensorW;
+    let maskH = maskDims.length >= 2 ? Number(maskDims[maskDims.length - 2]) : tensorH;
+
+    if (!Number.isFinite(maskW) || maskW <= 0 || !Number.isFinite(maskH) || maskH <= 0) {
+      const dataLength = Array.isArray(mask.data) ? mask.data.length : (mask.data?.length || 0);
+      const side = Math.round(Math.sqrt(dataLength));
+      if (side * side === dataLength && side > 0) {
+        maskW = side;
+        maskH = side;
+      } else {
+        maskW = tensorW;
+        maskH = tensorH;
+      }
+    }
+
+    const boxes = this.maskToBBoxes(mask.data, maskW, maskH, 0.5, 10);
+    const predictions: BoxPrediction[] = [];
+
+    for (const box of boxes) {
+      const cropBox: BoundingBox = {
+        x: Math.round((box.x / maskW) * tensorW),
+        y: Math.round((box.y / maskH) * tensorH),
+        w: Math.max(1, Math.round((box.w / maskW) * tensorW)),
+        h: Math.max(1, Math.round((box.h / maskH) * tensorH))
+      };
+
+      const cropTensor = this.cropAndResize(
+        imageTensor,
+        tensorW,
+        tensorH,
+        cropBox,
+        128,
+        128
       );
 
-      return this.mapResults(results);
-    } catch (err) {
-      console.warn('[CrackDetectionService] runInference failed — returning fallback prediction:', err);
-      // Return a harmless fallback so UI flow and storage still work on device when model fails
-      return {
-        severity: 'minor',
-        shape: 'straight',
-        type: 'horizontal'
-      };
-    }
-  }
+      const cropOrtTensor = new ort.Tensor('float32', cropTensor, [1, 3, 128, 128]);
+      const cropResults = await this.session.run({ input: cropOrtTensor });
 
-  /** Convert raw ONNX output to class labels */
-  private mapResults(results: Record<string, any>) {
-    console.log("🧪 Raw results:", results);
-    const out: any = {
-      severity: SEVERITY_CLASSES[this.argmax(results['severity'].data as Float32Array)],
-      shape: SHAPE_CLASSES[this.argmax(results['shape'].data as Float32Array)],
-      type: TYPE_CLASSES[this.argmax(results['type'].data as Float32Array)]
+      const type = TYPE_CLASSES[this.argmax(cropResults['type']?.data as Float32Array | number[])];
+      const shape = SHAPE_CLASSES[this.argmax(cropResults['shape']?.data as Float32Array | number[])];
+      const severity = SEVERITY_CLASSES[this.argmax(cropResults['severity']?.data as Float32Array | number[])];
+
+      predictions.push({
+        x: box.x,
+        y: box.y,
+        w: box.w,
+        h: box.h,
+        type,
+        shape,
+        severity,
+        prediction: { type, shape, severity }
+      });
+    }
+
+    return {
+      boxes: predictions,
+      maskWidth: maskW,
+      maskHeight: maskH
     };
-
-    // If model produces a mask output (common name: 'mask'), extract bounding boxes
-    try {
-      const maskOutput = results['mask'] || results['masks'] || results['pred_mask'];
-      if (maskOutput && maskOutput.data) {
-        const data = maskOutput.data as Float32Array | number[];
-        const dims = Array.isArray(maskOutput.dims) ? maskOutput.dims as number[] : [];
-        // Infer H, W from dims (take last two dims)
-        let maskH = 0, maskW = 0;
-        if (dims.length >= 2) {
-          maskW = dims[dims.length - 1];
-          maskH = dims[dims.length - 2];
-        } else if ((data as any).length) {
-          const n = (data as any).length;
-          const side = Math.round(Math.sqrt(n));
-          if (side * side === n) { maskW = maskH = side; }
-        }
-
-        // Call maskToBBoxes with flat data and inferred dims
-        const boxes = this.maskToBBoxes(data as any, maskW || undefined, maskH || undefined, 0.5, 10);
-        out.boxes = boxes;
-        if (maskW && maskH) {
-          out.maskWidth = maskW;
-          out.maskHeight = maskH;
-        }
-      }
-    } catch (e) {
-      // ignore mask processing errors
-      console.warn('[CrackDetectionService] mask processing failed', e);
-    }
-
-    return out;
   }
 
   /** Safe argmax for Float32Array or number[] */
   private argmax(arr: Float32Array | number[]): number {
+    if (!arr || (arr as any).length === 0) return 0;
     const nums = Array.from(arr); // avoid TS reduce error
     return nums.reduce((maxIdx, val, i) => val > nums[maxIdx] ? i : maxIdx, 0);
+  }
+
+  private cropAndResize(
+    input: Float32Array,
+    width: number,
+    height: number,
+    box: BoundingBox,
+    outW: number,
+    outH: number
+  ): Float32Array {
+    const output = new Float32Array(3 * outW * outH);
+
+    for (let channel = 0; channel < 3; channel++) {
+      for (let outY = 0; outY < outH; outY++) {
+        for (let outX = 0; outX < outW; outX++) {
+          const srcX = Math.floor(box.x + (outX / outW) * box.w);
+          const srcY = Math.floor(box.y + (outY / outH) * box.h);
+
+          const clampedX = Math.max(0, Math.min(width - 1, srcX));
+          const clampedY = Math.max(0, Math.min(height - 1, srcY));
+
+          const srcIdx = channel * width * height + clampedY * width + clampedX;
+          const dstIdx = channel * outW * outH + outY * outW + outX;
+
+          output[dstIdx] = input[srcIdx];
+        }
+      }
+    }
+
+    return output;
   }
 
   /**

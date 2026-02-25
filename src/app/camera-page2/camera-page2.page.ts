@@ -378,7 +378,7 @@ export class CameraPage2Page implements AfterViewInit {
         try {
           inferenceAttempted = true;
           prediction = await Promise.race([
-            this.crackDetectionService.runInference(tensor),
+            this.crackDetectionService.runInference(tensor, 128, 128),
             new Promise((_, rej) => setTimeout(() => rej(new Error('inference-timeout')), inferenceTimeoutMs))
           ]);
         } catch (infErr) {
@@ -392,14 +392,15 @@ export class CameraPage2Page implements AfterViewInit {
       const safeOriginal = await this.shrinkDataUrlToBytes(dataUrl, maxBytes, 4000);
       const timestamp = new Date().toISOString();
       const generatedFilename = this.buildSessionFilename(!!prediction, timestamp, originalName);
+      const hasPrediction = !!(prediction && Array.isArray((prediction as any).boxes) && (prediction as any).boxes.length > 0);
       const entry: StoredImage = {
         original: safeOriginal,
         timestamp,
         filename: generatedFilename,
         fileImageName: originalName || undefined,
         prediction: prediction || undefined,
-        hasPrediction: !!prediction,
-        statusMessage: prediction ? 'Prediction succeeded' : (inferenceAttempted ? 'Prediction failed' : 'No prediction'),
+        hasPrediction,
+        statusMessage: hasPrediction ? 'Prediction succeeded' : (inferenceAttempted ? 'Prediction failed' : 'No prediction'),
         userId: userId,
         sessionId: this.selectedSessionId || undefined
       };

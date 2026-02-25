@@ -104,6 +104,13 @@
     <div *ngIf="regForm.errors?.['mismatch'] && submitted" class="field-error">Passwords do not match.</div>
 
     <button class="signup-btn" type="submit" [disabled]="regForm.invalid || !selectedRole">SIGN UP</button>
+    <button
+      class="notice-test-btn"
+      type="button"
+      (click)="openNoticePrompt()"
+    >
+      TEST NOTICE PROMPT
+    </button>
   </ng-container>
 </form>
 
@@ -111,4 +118,14 @@
   </div>
 
 
+</div>
+
+<div class="notice-overlay" *ngIf="showNoticePrompt">
+  <div class="notice-dialog" role="dialog" aria-modal="true" aria-labelledby="notice-title">
+    <div class="notice-header" id="notice-title">{{ noticeTitle }}</div>
+    <div class="notice-body">
+      <p *ngFor="let line of noticeMessageLines">{{ line }}</p>
+    </div>
+    <button class="notice-confirm-btn" type="button" (click)="closeNoticePrompt()">Confirm</button>
+  </div>
 </div>

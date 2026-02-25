@@ -383,8 +383,8 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
         const tensor = await this.preprocessImage(dataUrl);
         // run the service to call the model to get back end data
         try {
-          prediction = await this.crackDetectionService.runInference(tensor);
-          inferenceSucceeded = !!prediction;
+          prediction = await this.crackDetectionService.runInference(tensor, 128, 128);
+          inferenceSucceeded = !!(prediction && Array.isArray((prediction as any).boxes) && (prediction as any).boxes.length > 0);
         } catch (infErr) {
           console.warn('Inference error in processDataUrl', infErr);
         }
@@ -396,14 +396,15 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
       const safeOriginal = await this.shrinkDataUrlToBytes(dataUrl, maxBytes, 4000);
       const timestamp = new Date().toISOString();
       const generatedFilename = this.buildSessionFilename(!!prediction, timestamp, filename);
+      const hasPrediction = !!(prediction && Array.isArray((prediction as any).boxes) && (prediction as any).boxes.length > 0);
       const entry: StoredImage = {
         original: safeOriginal,
         timestamp,
         filename: generatedFilename,
         fileImageName: filename || undefined,
         prediction: prediction || undefined,
-        hasPrediction: !!prediction,
-        statusMessage: prediction ? 'Prediction succeeded' : (inferenceCalled ? 'Prediction failed' : 'No prediction'),
+        hasPrediction,
+        statusMessage: hasPrediction ? 'Prediction succeeded' : (inferenceCalled ? 'Prediction failed' : 'No prediction'),
         userId: userId,
         sessionId: this.selectedSessionId || undefined
       };
@@ -1368,8 +1369,8 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
         let prediction = null;
         try {
           inferenceCalled = true;
-          prediction = await this.crackDetectionService.runInference(imageTensor);
-          inferenceSucceeded = !!prediction;
+          prediction = await this.crackDetectionService.runInference(imageTensor, 128, 128);
+          inferenceSucceeded = !!(prediction && Array.isArray((prediction as any).boxes) && (prediction as any).boxes.length > 0);
         } catch (e) {
           console.error('Inference error', e);
         }
@@ -1381,9 +1382,13 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
           original: dataUrl,
           timestamp: now,
           filename,
-          prediction: prediction || undefined,
-          hasPrediction: !!prediction,
-          statusMessage: prediction ? 'Prediction succeeded' : (inferenceCalled ? 'Prediction failed' : 'No prediction')
+          prediction: inferenceSucceeded && prediction ? { 
+            type: (prediction as any).type || 'crack',
+            shape: (prediction as any).shape || 'unknown',
+            severity: (prediction as any).severity || 'unknown'
+          } : undefined,
+          hasPrediction: inferenceSucceeded,
+          statusMessage: inferenceSucceeded ? 'Prediction succeeded' : (inferenceCalled ? 'Prediction failed' : 'No prediction')
         };
         await this.imageStorage.addImage(entry, this.selectedSessionId || undefined);
         // also add to active session if one exists
@@ -1399,7 +1404,7 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
         // synchronize counters from storage so UI reflects actual stored count
         await this.updatePhotoCounts();
         this.savedImage = entry;
-        this.lastPrediction = prediction;
+        this.lastPrediction = inferenceSucceeded ? (prediction as any).boxes[0]?.prediction ?? null : null;
         return entry;
       };
 

@@ -12,10 +12,6 @@ const routes: Routes = [
     pathMatch: 'full'
   },
   {
-    path: 'camera-page',
-    loadChildren: () => import('./camera-page/camera-page.module').then( m => m.CameraPagePageModule)
-  },
-  {
     path: 'home-page',
     loadChildren: () => import('./home-page/home-page.module').then( m => m.HomePagePageModule)
   },
@@ -36,32 +32,8 @@ const routes: Routes = [
     loadChildren: () => import('./feedback-page/feedback-page.module').then( m => m.FeedbackPagePageModule)
   },
   {
-    path: 'pdf-page',
-    loadChildren: () => import('./pdf-page/pdf-page.module').then( m => m.PdfPagePageModule)
-  },
-  {
-    path: 'pdf-page-test',
-    loadChildren: () => import('./pdf-page-test/pdf-page-test.module').then( m => m.PdfPageTestPageModule)
-  },
-  {
-    path: 'pdf-page-test02',
-    loadChildren: () => import('./pdf-page-test02/pdf-page-test02.module').then( m => m.PdfPageTest02PageModule)
-  },
-  {
     path: 'pdf-page-test03',
     loadChildren: () => import('./pdf-page-test03/pdf-page-test03.module').then( m => m.PdfPageTest03PageModule)
-  },
-  {
-    path: 'pdf-viewer-page',
-    loadChildren: () => import('./pdf-viewer-page/pdf-viewer-page.module').then(m => m.PdfViewerPageModule)
-  },
-  {
-    path: 'pdf-preview-page',
-    loadChildren: () => import('./pdf-preview-page/pdf-preview-page.module').then(m => m.PdfPreviewPageModule)
-  },
-  {
-    path: 'pdf-generator-page',
-    loadChildren: () => import('./pdf-generator-page/pdf-generator-page.module').then(m => m.PdfGeneratorPageModule)
   },
   {
 
@@ -74,21 +46,14 @@ const routes: Routes = [
 
   },
   {
-    path: 'feedback-page2',
-    loadChildren: () => import('./feedback-page2/feedback-page2.module').then( m => m.FeedbackPage2PageModule)
-  },
-  {
     path: 'session-page',
     loadChildren: () => import('./session-page/session-page.module').then( m => m.SessionPagePageModule)
   },
   {
-    path: 'results-page',
-    loadChildren: () => import('./results-page/results-page.module').then( m => m.ResultsPageModule)
-  },
-  {
     path: 'results-dashboard',
     loadChildren: () => import('./results-dashboard/results-dashboard.module').then(m => m.ResultsDashboardModule)
-  },  {
+  },
+  {
     path: 'home-page2',
     loadChildren: () => import('./home-page2/home-page2.module').then( m => m.HomePage2PageModule)
   },
@@ -99,7 +64,15 @@ const routes: Routes = [
   {
     path: 'profile-page',
     loadChildren: () => import('./profile-page/profile-page.module').then( m => m.ProfilePagePageModule)
+  },  {
+    path: 'network-page',
+    loadChildren: () => import('./network-page/network-page.module').then( m => m.NetworkPagePageModule)
   },
+  {
+    path: 'network-page',
+    loadChildren: () => import('./network-page/network-page.module').then( m => m.NetworkPagePageModule)
+  },
+
 
 
 

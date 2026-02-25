@@ -45,6 +45,11 @@
         <span>Show Current Sessions</span>
         <span class="sync-status-pill" [ngClass]="syncStatusState">{{ syncStatusText }}</span>
       </li>
+      <li class="menu-item" (click)="goNetworkPage()">
+        <ion-icon name="wifi-outline"></ion-icon>
+        <span>Network Page</span>
+        <span class="sync-status-pill" [ngClass]="syncStatusState">{{ syncStatusText }}</span>
+      </li>
     </div>
     <hr class="menu-divider" />
     <div class="menu-section">     

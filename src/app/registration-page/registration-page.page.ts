@@ -39,6 +39,10 @@ regForm!: FormGroup; // our single form
   submitted: boolean = false;
   registrationError: string | null = null;
   registrationSuccess: string | null = null;
+  showNoticePrompt: boolean = false;
+  noticeTitle: string = 'Notice';
+  noticeMessageLines: string[] = [];
+  private pendingRedirect: string | null = null;
 
 // signupForm: FormGroup;
 
@@ -193,20 +197,54 @@ async onRegister() {
       console.warn('[RegistrationPage] Firestore write failed:', fireErr);
     }
 
-    // If registration succeeds, set success message and navigate to login
-    this.registrationSuccess = 'Account created successfully. You can now sign in.';
     console.log('[RegistrationPage] account created', { email, firstName, lastName, engineeringID, role: this.selectedRole });
-    // Give the success message a brief moment before redirecting to login
-    // this.router.navigate(['/landing-page'])
+
+    if (this.selectedRole === 'engineer') {
+      this.openNoticePrompt([
+        'Your request for an account as engineer is sent and processing will take 3 - 5 days.',
+        'Once confirmation is completed,',
+        'credentials will be sent to the email used in registration.'
+      ]);
+      this.pendingRedirect = '/landing-page';
+      return;
+    }
+
+    // If registration succeeds, set success message and navigate to landing page
+    this.registrationSuccess = 'Account created successfully. You can now sign in.';
     setTimeout(() => {
-      // this.router.navigateByUrl('/login', { replaceUrl: true });
-      this.router.navigate(['/landing-page'])
+      this.router.navigate(['/landing-page']);
     }, 400);
   } catch (err: any) {
     // If registration fails, extract the error message from the exception
     this.registrationError = err?.message || 'Registration failed';
     // Show the error message in an alert dialog
     alert(this.registrationError);
+  }
+}
+
+openNoticePrompt(messageLines?: string[], title?: string) {
+  if (title) {
+    this.noticeTitle = title;
+  }
+
+  this.noticeMessageLines = messageLines?.length
+    ? messageLines
+    : [
+        'Your request for an account as engineer is sent and processing will take 3 - 5 days.',
+        'Once confirmation is completed,',
+        'credentials will be sent to the email used in registration.'
+      ];
+
+  this.showNoticePrompt = true;
+}
+
+closeNoticePrompt() {
+  this.showNoticePrompt = false;
+
+  if (this.pendingRedirect) {
+    const redirectTo = this.pendingRedirect;
+    this.pendingRedirect = null;
+    this.router.navigate([redirectTo]);
   }
 }
 
