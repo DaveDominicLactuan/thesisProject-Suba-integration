@@ -33,12 +33,6 @@ export class ChatPagePage implements OnInit, OnDestroy {
   // UI: toggles between preview list and active chat conversation
   isChatOpen: boolean = false;
   activeChat: any = null;
-  isSearchOpen: boolean = false;
-  searchResults: any[] = [
-    { id: '1', name: 'Alison Gilchrist', preview: 'Do you like this imgur picture?', time: '2:14 PM', avatar: 'assets/engIcon.png' },
-    { id: '2', name: 'Ben Holt', preview: 'File: Imgur_proposal.pdf', time: 'Yesterday', avatar: 'assets/engIcon.png' },
-    { id: '3', name: 'Imgur memes', preview: 'https://imgur.com/t/funny/ncl25Tb', time: '12/22/20', avatar: 'assets/engIcon.png' }
-  ];
 
   /** Inject auth, router, and image storage services for navigation and data. */
   constructor(private formBuilder: FormBuilder, private router: Router, private authService: AuthService, private navCtrl: NavController, private auth3: Auth3Service, private imageStorage: ImageStorageService, private platform: Platform) {
@@ -1029,9 +1023,5 @@ private async initialize(): Promise<void> {
   openNewChat() {
     this.router.navigate(['/camera-page2']);
   }
-
-  closeSearch() {
-  this.isSearchOpen = false;
-}
 }
 
