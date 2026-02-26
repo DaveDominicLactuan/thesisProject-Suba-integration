@@ -242,12 +242,42 @@
         <div class="msg-avatar"><img src="assets/engIcon.png"/></div>
         <div class="msg-bubble">woohoooo 🔥</div>
       </div>
-    </div>
 
-    <div class="conv-input">
+       <div class="conv-input">
       <button class="attach">📎</button>
       <input type="text" placeholder="Type a message" />
       <button class="send">➤</button>
+    </div>
+    
+    </div>
+
+    <!-- <div class="conv-input">
+      <button class="attach">📎</button>
+      <input type="text" placeholder="Type a message" />
+      <button class="send">➤</button>
+    </div> -->
+  </ng-container>
+
+  <!-- Search view (shown after interacting with the search bar) -->
+  <ng-container *ngIf="isSearchOpen">
+    <div class="search-header">
+      <button class="back-btn" (click)="closeSearch()">Back</button>
+      <div class="search-title">Search Results</div>
+    </div>
+
+    <div class="search-results">
+      <div class="search-item" *ngFor="let result of searchResults" (click)="openChat(result)">
+        <div class="search-avatar">
+          <img [src]="result.avatar" alt="Avatar" />
+        </div>
+        <div class="search-info">
+          <div class="search-name">{{ result.name }}</div>
+          <div class="search-preview">{{ result.preview }}</div>
+        </div>
+        <div class="search-meta">
+          <span class="search-time">{{ result.time }}</span>
+        </div>
+      </div>
     </div>
   </ng-container>
 

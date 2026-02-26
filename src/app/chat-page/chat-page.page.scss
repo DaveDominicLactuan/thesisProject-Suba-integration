@@ -272,7 +272,7 @@
 .message.sent .msg-bubble { background: #6b46ff; color:#fff; border-bottom-right-radius:4px; }
 .message.sent .msg-avatar img { width:36px; height:36px; }
 
-.conv-input { position: sticky; bottom: 0; display:flex; gap:8px; align-items:center; padding:10px; background:#fff; border-top:1px solid #eee; }
+.conv-input { position: relative; bottom: -7.3%; display:flex; gap:8px; align-items:center; padding:10px; background:#fff; border-top:1px solid #eee; }
 .conv-input input { flex:1; padding:10px 12px; border-radius:20px; border:1px solid #eee; }
 .conv-input .send { background:#6b46ff; color:#fff; border:none; padding:10px 12px; border-radius:18px; }
 .conv-input .attach { background:none; border:none; font-size:18px; }
@@ -493,3 +493,75 @@ ion-menu ion-item:hover {
 
 .menu-btn { display: flex; align-items: center; justify-content: center; cursor: pointer; padding: 10px; background-color: #f0f0f0; border-radius: 8px; transition: background-color 0.3s; }
 .menu-btn:hover { background-color: #e0e0e0; }
+
+.search-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px;
+  background-color: #f8f9fa;
+  border-bottom: 1px solid #ddd;
+}
+
+.search-header .back-btn {
+  background: none;
+  border: none;
+  font-size: 1rem;
+  color: #6b46ff;
+  cursor: pointer;
+}
+
+.search-title {
+  font-size: 1.2rem;
+  font-weight: bold;
+  color: #333;
+}
+
+.search-results {
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.search-item {
+  display: flex;
+  align-items: center;
+  padding: 10px;
+  border: 1px solid #eee;
+  border-radius: 8px;
+  background: #fff;
+  cursor: pointer;
+  transition: background-color 0.3s;
+}
+
+.search-item:hover {
+  background-color: #f9f9f9;
+}
+
+.search-avatar img {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  margin-right: 10px;
+}
+
+.search-info {
+  flex: 1;
+}
+
+.search-name {
+  font-weight: bold;
+  font-size: 1rem;
+  color: #333;
+}
+
+.search-preview {
+  font-size: 0.9rem;
+  color: #666;
+}
+
+.search-meta {
+  font-size: 0.8rem;
+  color: #999;
+}
