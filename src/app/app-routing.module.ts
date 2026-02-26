@@ -100,6 +100,10 @@ const routes: Routes = [
     path: 'profile-page',
     loadChildren: () => import('./profile-page/profile-page.module').then( m => m.ProfilePagePageModule)
   },
+  {
+    path: 'chat-page',
+    loadChildren: () => import('./chat-page/chat-page.module').then( m => m.ChatPagePageModule)
+  },
 
 
 

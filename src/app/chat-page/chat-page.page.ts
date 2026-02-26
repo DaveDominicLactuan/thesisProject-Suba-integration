@@ -8,14 +8,13 @@ import { Auth3Service } from '../services/auth3.service';
 import { ImageStorageService } from '../services/image-storage.service';
 import { App } from '@capacitor/app';
 import { jsPDF } from 'jspdf';
-
 @Component({
-  selector: 'app-home-page2',
-  templateUrl: './home-page2.page.html',
-  styleUrls: ['./home-page2.page.scss'],
+  selector: 'app-chat-page',
+  templateUrl: './chat-page.page.html',
+  styleUrls: ['./chat-page.page.scss'],
   standalone: false
 })
-export class HomePage2Page implements OnInit, OnDestroy {
+export class ChatPagePage implements OnInit, OnDestroy {
   private static userSyncTasks: Map<string, Promise<void>> = new Map();
   userName: string | null = null;
   firstName: string | null = null;
@@ -31,6 +30,9 @@ export class HomePage2Page implements OnInit, OnDestroy {
   isSidebarOpen: boolean = false;
   syncStatusText: string = 'Not synced';
   syncStatusState: 'idle' | 'syncing' | 'completed' | 'error' = 'idle';
+  // UI: toggles between preview list and active chat conversation
+  isChatOpen: boolean = false;
+  activeChat: any = null;
 
   /** Inject auth, router, and image storage services for navigation and data. */
   constructor(private formBuilder: FormBuilder, private router: Router, private authService: AuthService, private navCtrl: NavController, private auth3: Auth3Service, private imageStorage: ImageStorageService, private platform: Platform) {
@@ -93,7 +95,6 @@ private async initialize(): Promise<void> {
     this.userID = resolvedUserId || this.userID;
     this.loadPersistedSyncStatus(resolvedUserId);
     console.log('[HomePage2.initialize] Starting initial background sync check for user:', resolvedUserId || 'none');
-    this.startUserSyncInBackground(resolvedUserId, true);
 
     console.log('[HomePage2.initialize] ===== INITIALIZE END (success) =====');
     // Persist/refresh local user data for downstream use, and for long term offline use
@@ -247,48 +248,7 @@ private async initialize(): Promise<void> {
     } catch {}
   }
 
-  private startUserSyncInBackground(userId: string, onlyIfFirstSync: boolean = false): void {
-    if (!userId) {
-      this.setSyncStatus('error', 'No user for sync');
-      return;
-    }
-
-    if (onlyIfFirstSync && this.hasBootstrapSyncCompleted(userId)) {
-      this.setSyncStatus('completed', 'Sync complete', userId);
-      return;
-    }
-
-    const existingTask = HomePage2Page.userSyncTasks.get(userId);
-    if (existingTask) {
-      this.setSyncStatus('syncing', 'Syncing...', userId);
-      existingTask
-        .then(async () => {
-          this.setSyncStatus('completed', 'Sync complete', userId);
-          await this.loadSessions();
-        })
-        .catch(() => {
-          this.setSyncStatus('error', 'Sync failed', userId);
-        });
-      return;
-    }
-
-    this.setSyncStatus('syncing', 'Syncing...', userId);
-    const task = this.syncUserDataFromFirestore(userId)
-      .then(async () => {
-        this.setSyncStatus('completed', 'Sync complete', userId);
-        this.markBootstrapSyncCompleted(userId);
-        await this.loadSessions();
-      })
-      .catch((err) => {
-        console.error('[HomePage2.startUserSyncInBackground] sync task failed:', err);
-        this.setSyncStatus('error', 'Sync failed', userId);
-      })
-      .finally(() => {
-        HomePage2Page.userSyncTasks.delete(userId);
-      });
-
-    HomePage2Page.userSyncTasks.set(userId, task);
-  }
+ 
 
   /** Register hardware back handler only while this view is active, 
    * allowing for hardware back button navigation */
@@ -501,13 +461,12 @@ private async initialize(): Promise<void> {
   /** Navigate to sessions list page. */
   goSessionPage() {
     this.router.navigate(['/session-page']);
-    console.log('session page');
+    console.log('pdf 2 page');
   }
 
-  /** Navigate to sessions list page. */
-  gochatPage() {
-    this.router.navigate(['/chat-page']);
-    console.log('chat page');
+  goNetworkPage() {
+    this.router.navigate(['/network-page2']);
+    console.log('network page 2');
   }
 
   /** Navigate to profile page. */
@@ -1045,4 +1004,24 @@ private async initialize(): Promise<void> {
   closeSidebar() {
     this.isSidebarOpen = false;
   }
+
+  /** Open the conversation view for a selected chat */
+  openChat(chat: any) {
+    this.activeChat = chat || { name: 'Chat' };
+    this.isChatOpen = true;
+    // optional: lock page scroll or add class
+    try { document.body.classList.add('chat-open'); } catch {}
+  }
+
+  /** Close the conversation view and return to the chat list preview */
+  closeChat() {
+    this.isChatOpen = false;
+    this.activeChat = null;
+    try { document.body.classList.remove('chat-open'); } catch {}
+  }
+
+  openNewChat() {
+    this.router.navigate(['/camera-page2']);
+  }
 }
+
