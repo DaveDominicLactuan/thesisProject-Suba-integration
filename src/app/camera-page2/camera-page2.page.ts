@@ -1462,8 +1462,8 @@ export class CameraPage2Page implements AfterViewInit {
         if (choice === 'stay' || choice === null) return;
       }
 
-      if (this.selectedSessionId && this.sessionIsPristine === false && typeof (this.imageStorage as any).saveSessionWithImagesToFirestore === 'function') {
-        try { await (this.imageStorage as any).saveSessionWithImagesToFirestore(this.selectedSessionId); } catch (e) { /* ignore */ }
+      if (this.selectedSessionId && this.sessionIsPristine === false && typeof (this.imageStorage as any).promptAndSaveSession === 'function') {
+        try { await (this.imageStorage as any).promptAndSaveSession(this.selectedSessionId); } catch (e) { /* ignore */ }
       }
       this.router.navigate(['/home-page2']);
     } catch (e) {

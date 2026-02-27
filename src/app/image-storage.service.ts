@@ -1,5 +1,7 @@
 import { Injectable } from '@angular/core';
 import { BehaviorSubject, Observable } from 'rxjs';
+import { Firestore, doc, setDoc } from '@angular/fire/firestore';
+import { serverTimestamp } from 'firebase/firestore';
 
 
 export interface BoundingBox {
@@ -67,7 +69,7 @@ export class ImageStorageService {
       return Promise.resolve();
     }
 
-    constructor() {
+    constructor(private firestore: Firestore) {
       // attempt to load persisted sessions and last session info
       try {
         const raw = localStorage.getItem(this.SESSIONS_KEY);
@@ -91,6 +93,142 @@ export class ImageStorageService {
         // ignore
       }
     }
+
+  /**
+   * Persist a session and its images to Firestore under `sessionsImages` and `images`.
+   * Adds metadata such as createdBy and client info.
+   */
+  async saveSessionWithImagesToFirestore(sessionId: string, opts?: { createdBy?: string }): Promise<void> {
+    if (!this.firestore) {
+      throw new Error('Firestore not available in ImageStorageService');
+    }
+    const s = this.getSession(sessionId);
+    if (!s) throw new Error('Session not found: ' + sessionId);
+    try {
+      const createdBy = opts?.createdBy ?? this.getUserIdFromLocalStorage();
+      const clientInfo = {
+        ua: typeof navigator !== 'undefined' ? navigator.userAgent : 'unknown',
+        platform: typeof navigator !== 'undefined' ? (navigator.platform || 'unknown') : 'unknown'
+      };
+
+      // write session document
+      const sessionRef = doc(this.firestore, 'sessionsImages', sessionId);
+      await setDoc(sessionRef, {
+        name: s.name,
+        imageKeys: s.imageKeys,
+        createdAt: serverTimestamp(),
+        localId: s.id,
+        createdBy: createdBy || null,
+        clientInfo
+      });
+
+      // write images documents (one per imageKey)
+      for (const key of s.imageKeys) {
+        const entry = this.getEntryForImage(key) || this.storedImages.find(si => si.original === key || si.filename === key);
+        if (!entry) continue;
+        const safeId = `${sessionId}_${(entry.filename || key).toString().slice(0, 50).replace(/[^a-zA-Z0-9_-]/g, '_')}`;
+        const imgRef = doc(this.firestore, 'images', safeId);
+        await setDoc(imgRef, {
+          sessionId,
+          imageKey: key,
+          original: entry.original,
+          withBoxes: entry.withBoxes,
+          filename: entry.filename,
+          timestamp: entry.timestamp,
+          detectionMessage: entry.detectionMessage,
+          prediction: entry.prediction ?? null,
+          createdAt: serverTimestamp(),
+          createdBy: createdBy || null
+        });
+      }
+    } catch (err) {
+      console.error('[ImageStorageService] saveSessionWithImagesToFirestore failed', err);
+      throw err;
+    }
+  }
+
+  /**
+   * Prompt the user for a session name and save the session (local + Firestore).
+   * Returns true if saved to Firestore, false if cancelled or failed.
+   */
+  async promptAndSaveSession(sessionId?: string): Promise<boolean> {
+    try {
+      // determine entry to save and default name
+      const svc: any = this as any;
+      let sid = sessionId ?? this.getLastCreatedSessionId();
+      if (!sid) {
+        // create a quick session from existing storedImages if none
+        const defaultKeys = this.storedImages.length ? [this.storedImages[0].original] : [];
+        const s = this.createSession(`Session ${new Date().toLocaleString()}`, defaultKeys);
+        sid = s.id;
+        if (typeof svc.setLastCreatedSession === 'function') svc.setLastCreatedSession(s.id, s.name);
+      }
+
+      // Show overlay prompt
+      const name = await this.showSaveSessionPromptInline(sid);
+      if (!name) return false; // user cancelled
+
+      // update session name if present
+      const s = this.getSession(sid!);
+      if (s) s.name = name;
+      try { this.persistSessions(); } catch {}
+
+      // attempt Firestore save
+      try {
+        const userId = this.getUserIdFromLocalStorage();
+        const createdBy = userId !== null ? userId : undefined;
+        await this.saveSessionWithImagesToFirestore(sid!, { createdBy });
+        await this.showFirestoreSavePromptInline(`✅ Session and images saved to Firestore: ${sid}`);
+        return true;
+      } catch (e) {
+        console.warn('[ImageStorageService] Firestore save failed', e);
+        alert('Session saved locally but failed to save to Firestore. See console for details.');
+        return false;
+      }
+    } catch (err) {
+      console.warn('[ImageStorageService] promptAndSaveSession failed', err);
+      return false;
+    }
+  }
+
+  private getUserIdFromLocalStorage(): string | null {
+    try {
+      const raw = localStorage.getItem('userData');
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      return parsed?.userID ?? parsed?.uid ?? parsed?.id ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  private showSaveSessionPromptInline(sessionId: string): Promise<string | null> {
+    return new Promise(resolve => {
+      const overlay = document.createElement('div');
+      overlay.style.position = 'fixed'; overlay.style.left = '0'; overlay.style.top = '0'; overlay.style.width = '100%'; overlay.style.height = '100%'; overlay.style.background = 'rgba(0,0,0,0.45)'; overlay.style.display = 'flex'; overlay.style.alignItems = 'center'; overlay.style.justifyContent = 'center'; overlay.style.zIndex = '9999';
+      const box = document.createElement('div');
+      box.style.border = '1px solid transparent'; box.style.background = 'linear-gradient(#fff, #fff) padding-box, linear-gradient(to right, #ff512f, #f09819) border-box'; box.style.padding = '18px'; box.style.borderRadius = '8px'; box.style.minWidth = '300px'; box.style.boxShadow = '0 6px 30px rgba(0,0,0,0.3)';
+      const title = document.createElement('div'); title.innerText = 'Save Session'; title.style.fontWeight = '700'; title.style.marginBottom = '8px';
+      const input = document.createElement('input'); input.type = 'text'; input.placeholder = `Session ${new Date().toLocaleString()}`; input.style.width = '100%'; input.style.padding = '8px'; input.style.marginBottom = '12px'; input.style.border = '1px solid #ccc'; input.style.borderRadius = '4px';
+      const btnRow = document.createElement('div'); btnRow.style.display = 'flex'; btnRow.style.justifyContent = 'flex-end'; btnRow.style.gap = '8px';
+      const cancelBtn = document.createElement('button'); cancelBtn.innerText = 'Cancel'; cancelBtn.style.padding = '8px 10px'; cancelBtn.style.width = '110px'; cancelBtn.style.height = '40px'; cancelBtn.style.border = 'none'; cancelBtn.style.background = 'linear-gradient(90deg,#ff512f,#f09819)'; cancelBtn.style.color = '#fff'; cancelBtn.style.borderRadius = '6px'; cancelBtn.style.cursor = 'pointer';
+      const saveBtn = document.createElement('button'); saveBtn.innerText = 'Save'; saveBtn.style.padding = '8px 10px'; saveBtn.style.width = '110px'; saveBtn.style.height = '40px'; saveBtn.style.border = 'none'; saveBtn.style.background = 'linear-gradient(90deg,#ff512f,#f09819)'; saveBtn.style.color = '#fff'; saveBtn.style.borderRadius = '6px'; saveBtn.style.cursor = 'pointer';
+      cancelBtn.addEventListener('click', () => { try { document.body.removeChild(overlay); } catch {} resolve(null); });
+      saveBtn.addEventListener('click', () => { const val = input.value && input.value.trim().length > 0 ? input.value.trim() : `Session ${new Date().toLocaleString()}`; try { document.body.removeChild(overlay); } catch {} resolve(val); });
+      btnRow.appendChild(cancelBtn); btnRow.appendChild(saveBtn); box.appendChild(title); box.appendChild(input); box.appendChild(btnRow); overlay.appendChild(box); document.body.appendChild(overlay); setTimeout(() => input.focus(), 50);
+    });
+  }
+
+  private showFirestoreSavePromptInline(message: string): Promise<void> {
+    return new Promise((resolve) => {
+      const overlay = document.createElement('div'); overlay.style.position = 'fixed'; overlay.style.left = '0'; overlay.style.top = '0'; overlay.style.width = '100%'; overlay.style.height = '100%'; overlay.style.background = 'rgba(0,0,0,0.45)'; overlay.style.display = 'flex'; overlay.style.alignItems = 'center'; overlay.style.justifyContent = 'center'; overlay.style.zIndex = '9999';
+      const box = document.createElement('div'); box.style.border = '1px solid transparent'; box.style.background = 'linear-gradient(#fff, #fff) padding-box, linear-gradient(to right, #ff512f, #f09819) border-box'; box.style.padding = '18px'; box.style.borderRadius = '8px'; box.style.minWidth = '320px'; box.style.boxShadow = '0 6px 30px rgba(0,0,0,0.3)';
+      const title = document.createElement('div'); title.innerText = 'Session Saved'; title.style.fontWeight = '700'; title.style.marginBottom = '8px';
+      const body = document.createElement('div'); body.innerText = message; body.style.marginBottom = '12px'; body.style.wordBreak = 'break-word';
+      const closeBtn = document.createElement('button'); closeBtn.innerText = 'Close'; closeBtn.style.padding = '8px 10px'; closeBtn.style.width = '110px'; closeBtn.style.height = '40px'; closeBtn.style.border = 'none'; closeBtn.style.background = 'linear-gradient(90deg,#ff512f,#f09819)'; closeBtn.style.color = '#fff'; closeBtn.style.borderRadius = '6px'; closeBtn.style.cursor = 'pointer'; closeBtn.addEventListener('click', () => { try { document.body.removeChild(overlay); } catch (e) {} resolve(); });
+      box.appendChild(title); box.appendChild(body); box.appendChild(closeBtn); overlay.appendChild(box); document.body.appendChild(overlay);
+    });
+  }
   
     // ✅ Get all stored images (sync)
     getImages(): StoredImage[] {

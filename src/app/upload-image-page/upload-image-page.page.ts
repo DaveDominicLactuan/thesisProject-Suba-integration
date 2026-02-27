@@ -765,8 +765,8 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
         }
       } else {
         // Session has images or no active session, navigate normally
-        if (this.selectedSessionId && this.sessionIsPristine === false && typeof (this.imageStorage as any).saveSessionWithImagesToFirestore === 'function') {
-          try { await (this.imageStorage as any).saveSessionWithImagesToFirestore(this.selectedSessionId); } catch (e) { /* ignore */ }
+        if (this.selectedSessionId && this.sessionIsPristine === false && typeof (this.imageStorage as any).promptAndSaveSession === 'function') {
+          try { await (this.imageStorage as any).promptAndSaveSession(this.selectedSessionId); } catch (e) { /* ignore */ }
         }
         this.router.navigate(['/home-page2']);
       }
