@@ -7,6 +7,9 @@ import { User } from 'firebase/auth';
 import { Auth3Service } from '../services/auth3.service';
 import { Firestore, collection, query, where, getDocs } from '@angular/fire/firestore';
 import { ImageStorageService } from '../services/image-storage.service';
+import { ChatService, Message } from '../services/chat.service';
+import { PresenceService } from '../services/presence.service';
+import { Subscription } from 'rxjs';
 import { App } from '@capacitor/app';
 @Component({
   selector: 'app-chat-page',
@@ -34,8 +37,15 @@ export class ChatPagePage implements OnInit, OnDestroy {
   // UI: toggles between preview list and active chat conversation
   isChatOpen: boolean = false;
   activeChat: any = null;
+  // current chat id and messages
+  currentChatId: string | null = null;
+  messages: Message[] = [];
+  messageText: string = '';
+  private messagesSub?: Subscription;
   isSearching = false;
   searchQuery = '';
+  // active bottom navigation tab: 'person' | 'people' | 'location' | 'settings'
+  activeTab: 'person' | 'people' | 'location' | 'settings' = 'people';
 
   // Placeholder search conversation results (simulate as in pasted image)
   searchConversationResults = [
@@ -85,7 +95,7 @@ export class ChatPagePage implements OnInit, OnDestroy {
   ];
 
   /** Inject auth, router, and image storage services for navigation and data. */
-  constructor(private formBuilder: FormBuilder, private router: Router, private authService: AuthService, private navCtrl: NavController, private auth3: Auth3Service, private imageStorage: ImageStorageService, private platform: Platform, private firestore: Firestore) {
+  constructor(private formBuilder: FormBuilder, private router: Router, private authService: AuthService, private navCtrl: NavController, public auth3: Auth3Service, private imageStorage: ImageStorageService, private platform: Platform, private firestore: Firestore, private chatService: ChatService, private presenceService: PresenceService) {
 
   }
 
@@ -99,7 +109,19 @@ ngOnInit(): void {
 
 /** Perform async initialization tasks (profile + sessions). */
 private async initialize(): Promise<void> {
-  
+  try {
+    // Load profile (if available) and ensure userID
+    const profile = await this.auth3.getUserProfile().catch(() => null);
+    this.firstName = profile?.firstName || this.firstName;
+    this.lastName = profile?.lastName || this.lastName;
+    this.email = profile?.email || this.email;
+    this.userID = this.auth3.getCurrentUser()?.uid || this.userID || (profile && (profile.userID || profile.uid));
+
+    // Start presence service (RTDB -> Firestore sync)
+    try { this.presenceService.start(); } catch (e) { console.warn('PresenceService.start failed', e); }
+  } catch (err) {
+    console.warn('[ChatPage] initialize error', err);
+  }
 }
 
 
@@ -157,18 +179,57 @@ private async initialize(): Promise<void> {
     }
   }
 
-  /** Handle selecting an engineer from search results: log and add to chat list */
-  selectEngineer(user: any) {
+  /** Handle selecting an engineer from search results: create chat and subscribe messages */
+  async selectEngineer(user: any) {
     console.log('[ChatPage] Engineer selected:', user);
-    // ensure we don't duplicate in chats list
+    const currentUid = this.auth3.getCurrentUser()?.uid || this.userID || '';
+    if (!currentUid) {
+      console.warn('[ChatPage] No current user; cannot create chat');
+      return;
+    }
+
+    // ensure we don't duplicate in chats list (UI list)
     const exists = this.chats.find(c => c.id === user.id || c.name === user.name);
     if (!exists) {
       this.chats.unshift({ id: user.id, name: user.firstName ? `${user.firstName} ${user.lastName}` : user.name || user.email, avatar: user.photoURL || null, lastMessage: '', time: '', addedFromSearch: true });
     }
-    // open conversation view for selected user
-    this.openChat({ id: user.id, name: user.firstName ? `${user.firstName} ${user.lastName}` : user.name || user.email, avatar: user.photoURL || null });
-    // also log current chats for debugging
-    console.log('[ChatPage] Current chats:', this.chats);
+
+    // ensure chat document exists and get deterministic chatId
+    const chat = await this.chatService.createOrEnsureChat(currentUid, user.id);
+    this.currentChatId = chat.chatId;
+
+    // open conversation view
+    this.activeChat = { id: user.id, name: user.firstName ? `${user.firstName} ${user.lastName}` : user.name || user.email, avatar: user.photoURL || null, chatId: chat.chatId };
+    this.isChatOpen = true;
+
+    // unsubscribe previous
+    try { this.messagesSub?.unsubscribe(); } catch {}
+
+    // subscribe to messages and mark unread incoming messages as read
+    this.messagesSub = this.chatService.getMessages(chat.chatId).subscribe(async (msgs) => {
+      this.messages = msgs || [];
+      const unread = this.messages.filter(m => !m.isRead && m.senderId !== currentUid && m.id);
+      for (const m of unread) {
+        try { await this.chatService.markMessageAsRead(chat.chatId, m.id!); } catch (e) { console.warn('markMessageAsRead failed', e); }
+      }
+    });
+
+    console.log('[ChatPage] Opened chat', chat.chatId);
+  }
+
+  /** Send a message in the current chat */
+  async sendMessage() {
+    if (!this.currentChatId) return;
+    const senderId = this.auth3.getCurrentUser()?.uid || this.userID || '';
+    if (!senderId) return;
+    const text = (this.messageText || '').trim();
+    if (!text) return;
+    try {
+      await this.chatService.sendMessage(this.currentChatId, { senderId, text });
+      this.messageText = '';
+    } catch (e) {
+      console.error('sendMessage failed', e);
+    }
   }
   
   /** Return initials for a display name to use in avatar fallback. */
@@ -340,8 +401,25 @@ private async initialize(): Promise<void> {
     this.router.navigate(['/camera-page2']);
   }
 
+  /** Switch bottom navigation tab and update view state. */
+  setNav(tab: 'person' | 'people' | 'location' | 'settings') {
+    this.activeTab = tab;
+    // ensure the main chat preview is shown when selecting person or people
+    if (tab === 'person' || tab === 'people') {
+      this.isChatOpen = false;
+      this.isSearching = false;
+    }
+    // selecting location will show the Map view (ensure no chat overlay is open)
+    if (tab === 'location') {
+      this.isChatOpen = false;
+      this.isSearching = false;
+    }
+  }
+
   ngOnDestroy(): void {
-    
+    try { this.messagesSub?.unsubscribe(); } catch {}
+    this.messagesSub = undefined;
+    // optional: set offline on destroy if desired
   }
 }
 

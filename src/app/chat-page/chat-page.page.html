@@ -225,81 +225,21 @@
     </div>
 
     <div class="conversation">
-      <div class="message received">
-        <div class="msg-avatar"><img src="assets/engIcon.png"/></div>
-        <div class="msg-bubble">omg, this is amazing</div>
-      </div>
-
-      <div class="message received">
-        <div class="msg-avatar"><img src="assets/engIcon.png"/></div>
-        <div class="msg-bubble">perfect! ✅</div>
-      </div>
-
-      <div class="message received">
-        <div class="msg-avatar"><img src="assets/engIcon.png"/></div>
-        <div class="msg-bubble">Wow, this is really epic</div>
-      </div>
-
-      <div class="message sent">
-        <div class="msg-bubble">How are you?</div>
-        <div class="msg-avatar"><img src="assets/engIcon.png"/></div>
-      </div>
-
-      <div class="message received">
-        <div class="msg-avatar"><img src="assets/engIcon.png"/></div>
-        <div class="msg-bubble">just ideas for next time</div>
-      </div>
-
-      <div class="message received">
-        <div class="msg-avatar"><img src="assets/engIcon.png"/></div>
-        <div class="msg-bubble">I'll be there in 2 mins ⏱️</div>
-      </div>
-
-      <div class="message sent">
-        <div class="msg-bubble">woohoooo</div>
-        <div class="msg-avatar"><img src="assets/engIcon.png"/></div>
-      </div>
-
-      <div class="message sent">
-        <div class="msg-bubble">Haha oh man</div>
-        <div class="msg-avatar"><img src="assets/engIcon.png"/></div>
-      </div>
-
-      <div class="message sent">
-        <div class="msg-bubble">Haha that's terrifying 😂</div>
-        <div class="msg-avatar"><img src="assets/engIcon.png"/></div>
-      </div>
-
-      <div class="message received">
-        <div class="msg-avatar"><img src="assets/engIcon.png"/></div>
-        <div class="msg-bubble">aww</div>
-      </div>
-
-      <div class="message received">
-        <div class="msg-avatar"><img src="assets/engIcon.png"/></div>
-        <div class="msg-bubble">omg, this is amazing</div>
-      </div>
-
-      <div class="message received">
-        <div class="msg-avatar"><img src="assets/engIcon.png"/></div>
-        <div class="msg-bubble">woohoooo 🔥</div>
-      </div>
-
-      <div class="message received">
-        <div class="msg-avatar"><img src="assets/engIcon.png"/></div>
-        <div class="msg-bubble">woohoooo 🔥</div>
-      </div>
-
-      <div class="message received">
-        <div class="msg-avatar"><img src="assets/engIcon.png"/></div>
-        <div class="msg-bubble">woohoooo 🔥</div>
+      <div *ngFor="let m of messages" class="message" [ngClass]="{ 'sent': (m.senderId === (auth3.getCurrentUser()?.uid || userID)), 'received': (m.senderId !== (auth3.getCurrentUser()?.uid || userID)) }">
+        <div *ngIf="m.senderId !== (auth3.getCurrentUser()?.uid || userID)" class="msg-avatar"><img [src]="activeChat?.avatar || 'assets/engIcon.png'"/></div>
+        <div class="msg-bubble">{{ m.text }}</div>
+        <div *ngIf="m.senderId === (auth3.getCurrentUser()?.uid || userID)" class="msg-avatar"><img src="assets/engIcon.png"/></div>
+        <div class="msg-meta" *ngIf="m.senderId === (auth3.getCurrentUser()?.uid || userID)">
+          <ion-icon name="checkmark-done" *ngIf="m.isRead"></ion-icon>
+          <ion-icon name="checkmark" *ngIf="!m.isRead"></ion-icon>
+        </div>
       </div>
 
       <div class="conv-input">
-      <button class="attach">📎</button>
-      <input type="text" placeholder="Type a message" />
-      <button class="send">➤</button>
-    </div> 
+        <button class="attach">📎</button>
+        <input type="text" placeholder="Type a message" [(ngModel)]="messageText" name="messageInput" (keyup.enter)="sendMessage()" />
+        <button class="send" (click)="sendMessage()">➤</button>
+      </div>
     </div>
 
     <!-- <div class="conv-input">
@@ -312,17 +252,23 @@
   <!-- legacy search-results removed (search-conv-view used instead) -->
 
   <!-- Bottom navigation -->
+  <ng-container *ngIf="activeTab === 'location' && !isChatOpen">
+    <div class="map-view">
+      <div class="map-placeholder">Map View</div>
+    </div>
+  </ng-container>
+
   <div class="bottom-nav">
-    <button class="nav-btn">
+    <button class="nav-btn" (click)="setNav('person')" [class.active]="activeTab === 'person'">
       <ion-icon name="person-outline"></ion-icon>
     </button>
-    <button class="nav-btn active">
+    <button class="nav-btn" (click)="setNav('people')" [class.active]="activeTab === 'people'">
       <ion-icon name="people-outline"></ion-icon>
     </button>
-    <button class="nav-btn">
+    <button class="nav-btn" (click)="setNav('location')" [class.active]="activeTab === 'location'">
       <ion-icon name="location-outline"></ion-icon>
     </button>
-    <button class="nav-btn">
+    <button class="nav-btn" (click)="setNav('settings')" [class.active]="activeTab === 'settings'">
       <ion-icon name="settings-outline"></ion-icon>
     </button>
   </div>

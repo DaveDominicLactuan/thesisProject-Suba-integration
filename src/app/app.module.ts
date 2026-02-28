@@ -6,7 +6,7 @@ import { IonicModule, IonicRouteStrategy } from '@ionic/angular';
 
 import { AppComponent } from './app.component';
 import { AppRoutingModule } from './app-routing.module';
-import { ReactiveFormsModule } from '@angular/forms';
+import { ReactiveFormsModule, FormsModule } from '@angular/forms';
 // import { HttpClientModule } from '@angular/common/http';
 
 // Cordova plugins
@@ -34,6 +34,7 @@ import { IonicStorageModule } from '@ionic/storage-angular';
     IonicModule.forRoot(),
     AppRoutingModule,
     ReactiveFormsModule,
+    FormsModule,
     AngularFireModule.initializeApp(environment.firebase), // ✅ Firebase init for NgModules
     AngularFirestoreModule, // ✅ Firestore module
     HttpClientModule, // Uncomment if you need HTTP client

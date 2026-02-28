@@ -688,3 +688,26 @@ ion-menu ion-item:hover {
   font-size: 0.85rem;
   color: #888;
 }
+
+/* Map view placeholder */
+.map-view {
+	height: calc(100vh - 56px);
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	background: #fff;
+	padding-bottom: 56px; /* leave space for bottom-nav */
+}
+.map-placeholder {
+	width: 90%;
+	max-width: 640px;
+	height: 320px;
+	border: 2px dashed #e0e0e0;
+	border-radius: 12px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	color: #999;
+	font-weight: 600;
+	background: #fafafa;
+}
