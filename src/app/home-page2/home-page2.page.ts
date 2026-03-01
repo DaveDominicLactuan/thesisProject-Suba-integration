@@ -8,6 +8,7 @@ import { Auth3Service } from '../services/auth3.service';
 import { ImageStorageService } from '../services/image-storage.service';
 import { App } from '@capacitor/app';
 import { jsPDF } from 'jspdf';
+import * as L from 'leaflet';
 
 @Component({
   selector: 'app-home-page2',
@@ -188,6 +189,57 @@ private async initialize(): Promise<void> {
     this.loadSessions();
     const uid = this.userID || this.auth3.getCurrentUser()?.uid || '';
     if (uid) this.loadPersistedSyncStatus(uid);
+    this.requestLocationAccessOnEnter();
+  }
+
+  /**
+   * Ask for geolocation permission when entering the page if not granted yet.
+   * Uses Permissions API when available; falls back to requesting directly.
+   */
+  private async requestLocationAccessOnEnter(): Promise<void> {
+    try {
+      if (!('geolocation' in navigator)) return;
+
+      const navAny = navigator as Navigator & {
+        permissions?: {
+          query: (descriptor: PermissionDescriptor) => Promise<PermissionStatus>;
+        };
+      };
+
+      if (navAny.permissions && typeof navAny.permissions.query === 'function') {
+        const status = await navAny.permissions.query({ name: 'geolocation' as PermissionName });
+
+        if (status.state === 'granted') return;
+        if (status.state === 'denied') {
+          console.warn('[HomePage2.requestLocationAccessOnEnter] Geolocation permission is denied. Enable it from device/browser settings.');
+          return;
+        }
+      }
+
+      await this.promptForLocationAccess();
+    } catch (error) {
+      // Fallback path (e.g., permissions API unavailable in some WebViews)
+      try {
+        await this.promptForLocationAccess();
+      } catch (innerError) {
+        console.warn('[HomePage2.requestLocationAccessOnEnter] Location permission prompt failed:', innerError || error);
+      }
+    }
+  }
+
+  /** Trigger a geolocation request to let the OS/browser show permission prompt. */
+  private async promptForLocationAccess(): Promise<void> {
+    await new Promise<void>((resolve, reject) => {
+      navigator.geolocation.getCurrentPosition(
+        () => resolve(),
+        (err) => reject(err),
+        {
+          enableHighAccuracy: false,
+          timeout: 10000,
+          maximumAge: 60000
+        }
+      );
+    });
   }
 
   private getSyncStatusStorageKey(userId: string): string {
@@ -635,6 +687,43 @@ private async initialize(): Promise<void> {
   }
 
   /**
+   * Get current device/browser location and print it to console.
+   */
+  async getCurrentLocation(): Promise<void> {
+    try {
+      if (!('geolocation' in navigator)) {
+        console.warn('[HomePage2.getCurrentLocation] Geolocation is not supported on this device/browser.');
+        return;
+      }
+
+      const position = await new Promise<GeolocationPosition>((resolve, reject) => {
+        navigator.geolocation.getCurrentPosition(
+          (pos) => resolve(pos),
+          (err) => reject(err),
+          {
+            enableHighAccuracy: true,
+            timeout: 15000,
+            maximumAge: 0
+          }
+        );
+      });
+
+      console.log('[HomePage2.getCurrentLocation] Current location:', {
+        latitude: position.coords.latitude,
+        longitude: position.coords.longitude,
+        accuracy: position.coords.accuracy,
+        timestamp: new Date(position.timestamp).toISOString()
+      });
+    } catch (error) {
+      const geoError = error as GeolocationPositionError;
+      console.error('[HomePage2.getCurrentLocation] Failed to get location:', {
+        code: geoError?.code,
+        message: geoError?.message || 'Unknown geolocation error'
+      });
+    }
+  }
+
+  /**
    * Append a simple overlay/modal to the page with a button that sends a notification.
    * The overlay is self-cleaning after the button is pressed or the backdrop is clicked.
    */
@@ -1045,4 +1134,24 @@ private async initialize(): Promise<void> {
   closeSidebar() {
     this.isSidebarOpen = false;
   }
+
+  async markUserLocation(map: any) {
+    try {
+      const position = await new Promise<GeolocationPosition>((resolve, reject) => {
+        navigator.geolocation.getCurrentPosition(
+          (pos) => resolve(pos),
+          (err) => reject(err)
+        );
+      });
+
+      const { latitude, longitude } = position.coords;
+      L.marker([latitude, longitude])
+        .addTo(map)
+        .bindPopup("You are here!")
+        .openPopup();
+    } catch (error) {
+      console.error('Failed to mark user location:', error);
+    }
+  }
+
 }

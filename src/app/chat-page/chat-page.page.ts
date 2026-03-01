@@ -11,6 +11,7 @@ import { ChatService, Message } from '../services/chat.service';
 import { PresenceService } from '../services/presence.service';
 import { Subscription } from 'rxjs';
 import { App } from '@capacitor/app';
+import { Geolocation } from '@capacitor/geolocation';
 // Leaflet map library
 import * as L from 'leaflet';
 @Component({
@@ -49,6 +50,7 @@ export class ChatPagePage implements OnInit, OnDestroy {
   // active bottom navigation tab: 'person' | 'people' | 'location' | 'settings'
   activeTab: 'person' | 'people' | 'location' | 'settings' = 'people';
   private map?: L.Map | null = null;
+  private userLocationMarker?: L.Marker;
 
   // Placeholder search conversation results (simulate as in pasted image)
   searchConversationResults = [
@@ -417,32 +419,100 @@ private async initialize(): Promise<void> {
       this.isChatOpen = false;
       this.isSearching = false;
       // initialize map once DOM has updated
-      setTimeout(() => this.initMap(), 50);
+      setTimeout(() => { void this.initMap(); }, 50);
+    }
+  }
+
+  private async getCurrentCoordinates(): Promise<{ latitude: number; longitude: number } | null> {
+    try {
+      const permission = await Geolocation.checkPermissions();
+      if (permission.location !== 'granted') {
+        await Geolocation.requestPermissions();
+      }
+
+      const position = await Geolocation.getCurrentPosition({
+        enableHighAccuracy: true,
+        timeout: 15000
+      });
+
+      return {
+        latitude: position.coords.latitude,
+        longitude: position.coords.longitude
+      };
+    } catch (capacitorError) {
+      try {
+        const position = await new Promise<GeolocationPosition>((resolve, reject) => {
+          navigator.geolocation.getCurrentPosition(
+            (pos) => resolve(pos),
+            (err) => reject(err),
+            { enableHighAccuracy: true, timeout: 15000 }
+          );
+        });
+
+        return {
+          latitude: position.coords.latitude,
+          longitude: position.coords.longitude
+        };
+      } catch (browserError) {
+        console.warn('Unable to get current coordinates', capacitorError, browserError);
+        return null;
+      }
     }
   }
 
   /** Initialize Leaflet map in the `map` element. Safe to call multiple times. */
-  private initMap(): void {
+  private async initMap(): Promise<void> {
     try {
+      const coordinates = await this.getCurrentCoordinates();
+      const center: [number, number] = coordinates
+        ? [coordinates.latitude, coordinates.longitude]
+        : [51.505, -0.09];
+
       if (this.map) {
         // already initialized: invalidate size in case container changed
         this.map.invalidateSize();
+        this.map.setView(center, 15);
+        await this.markUserLocation(this.map, coordinates);
         return;
       }
 
       const mapEl = document.getElementById('map');
       if (!mapEl) return;
 
-      this.map = L.map(mapEl).setView([51.505, -0.09], 13);
+      this.map = L.map(mapEl).setView(center, coordinates ? 15 : 13);
 
       L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         maxZoom: 19,
         attribution: '&copy; OpenStreetMap contributors'
       }).addTo(this.map);
+
+      await this.markUserLocation(this.map, coordinates);
     } catch (err) {
       console.warn('initMap failed', err);
     }
   }
+
+  async markUserLocation(map: L.Map, coordinates?: { latitude: number; longitude: number } | null) {
+      try {
+        const resolvedCoordinates = coordinates ?? await this.getCurrentCoordinates();
+        if (!resolvedCoordinates) return;
+
+        const { latitude, longitude } = resolvedCoordinates;
+
+        if (this.userLocationMarker) {
+          this.userLocationMarker.setLatLng([latitude, longitude]);
+        } else {
+          this.userLocationMarker = L.marker([latitude, longitude])
+            .addTo(map)
+            .bindPopup('You are here!')
+            .openPopup();
+        }
+
+        map.setView([latitude, longitude], 15);
+      } catch (error) {
+        console.error('Failed to mark user location:', error);
+      }
+    }
 
   ngOnDestroy(): void {
     try { this.messagesSub?.unsubscribe(); } catch {}
