@@ -89,7 +89,7 @@
 
 
   <!-- Chat list / Preview View -->
-  <ng-container *ngIf="!isChatOpen && !isSearching">
+  <ng-container *ngIf="(activeTab === 'person' || activeTab === 'people') && !isChatOpen && !isSearching">
     <!-- ...existing code... (chat-header, stories-bar, search-bar, chat-list) ... -->
     <div class="chat-header">
       <div class="left">
@@ -161,7 +161,7 @@
   </ng-container>
 
   <!-- Search Conversation View (replaces main content when searching) -->
-  <ng-container *ngIf="isSearching && !isChatOpen">
+  <ng-container *ngIf="(activeTab === 'person' || activeTab === 'people') && isSearching && !isChatOpen">
     <div class="search-conv-view">
       <div class="search-bar sticky">
         <ion-icon name="search-outline"></ion-icon>
@@ -252,11 +252,18 @@
   <!-- legacy search-results removed (search-conv-view used instead) -->
 
   <!-- Bottom navigation -->
-  <ng-container *ngIf="activeTab === 'location' && !isChatOpen">
+  <ng-container *ngIf="activeTab === 'location' && !isChatOpen" style="background-color: #ffffff;">
     <div class="map-view">
-      <div class="map-placeholder">Map View</div>
+      <div id="map" class="map-container" role="region" aria-label="Map view">
+        <div class="menu-btn2 map-menu-btn" (click)="openMenu('sidebarMenu')">
+          <img src="assets/moreIcon.png" alt="Menu" />
+        </div>
+      </div>
     </div>
   </ng-container>
+
+
+  <!--  Settings view placeholder -->
 
   <div class="bottom-nav">
     <button class="nav-btn" (click)="setNav('person')" [class.active]="activeTab === 'person'">

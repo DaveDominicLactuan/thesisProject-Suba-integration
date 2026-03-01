@@ -1,4 +1,12 @@
 <!-- Thumbnail section (outside control-bar, above) -->
+<!-- Top spinner overlay (shows when isProcessing is true) -->
+<div *ngIf="isProcessing" class="top-spinner-overlay">
+  <div class="spinner-container-rect large-spinner">
+    <svg class="rect-spinner" width="345" height="635">
+      <rect x="10" y="10" width="325" height="615" rx="60" ry="60" class="rect-spinner-path" />
+    </svg>
+  </div>
+</div>
 <div *ngIf="imagePaths.length === 0 && capturedImages.length === 0" class="thumbnail-placeholder"></div>
 <div *ngIf="imagePaths.length > 0" class="thumbnail-scroll2" #thumbScroll (scroll)="onThumbnailScroll($event)" [ngClass]="getThumbClasses(imagePaths.length)">
   <img *ngFor="let img of imagePaths" [src]="(showWithBoxes && img.withBoxes) ? img.withBoxes : img.original" class="thumbnail2" [style.border]="selectedThumbSrc===((showWithBoxes && img.withBoxes) ? img.withBoxes : img.original) ? '3px solid #f09819' : 'none'" (click)="onStoredThumbClick(img)" />

@@ -11,6 +11,8 @@ import { ChatService, Message } from '../services/chat.service';
 import { PresenceService } from '../services/presence.service';
 import { Subscription } from 'rxjs';
 import { App } from '@capacitor/app';
+// Leaflet map library
+import * as L from 'leaflet';
 @Component({
   selector: 'app-chat-page',
   templateUrl: './chat-page.page.html',
@@ -46,6 +48,7 @@ export class ChatPagePage implements OnInit, OnDestroy {
   searchQuery = '';
   // active bottom navigation tab: 'person' | 'people' | 'location' | 'settings'
   activeTab: 'person' | 'people' | 'location' | 'settings' = 'people';
+  private map?: L.Map | null = null;
 
   // Placeholder search conversation results (simulate as in pasted image)
   searchConversationResults = [
@@ -413,6 +416,31 @@ private async initialize(): Promise<void> {
     if (tab === 'location') {
       this.isChatOpen = false;
       this.isSearching = false;
+      // initialize map once DOM has updated
+      setTimeout(() => this.initMap(), 50);
+    }
+  }
+
+  /** Initialize Leaflet map in the `map` element. Safe to call multiple times. */
+  private initMap(): void {
+    try {
+      if (this.map) {
+        // already initialized: invalidate size in case container changed
+        this.map.invalidateSize();
+        return;
+      }
+
+      const mapEl = document.getElementById('map');
+      if (!mapEl) return;
+
+      this.map = L.map(mapEl).setView([51.505, -0.09], 13);
+
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 19,
+        attribution: '&copy; OpenStreetMap contributors'
+      }).addTo(this.map);
+    } catch (err) {
+      console.warn('initMap failed', err);
     }
   }
 

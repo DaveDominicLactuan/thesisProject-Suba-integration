@@ -20,6 +20,14 @@
       <button class="top-btn right" (click)="showTestOverlay()">⋮</button> -->
     </div>
 
+    <div class="top-spinner-overlay">
+      <div class="spinner-container-rect large-spinner">
+        <svg *ngIf="photosProcessed < photosTaken" class="rect-spinner" width="345" height="635">
+          <rect x="10" y="10" width="325" height="615" rx="60" ry="60" class="rect-spinner-path" />
+        </svg>
+      </div>
+    </div>
+
   <!-- 🔽 Bottom Bar -->
   <div class="bottom-bar">
     <!-- Top Section (Buttons + Face Detection) -->
