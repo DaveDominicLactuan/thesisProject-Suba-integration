@@ -18,6 +18,14 @@ import * as L from 'leaflet';
 })
 export class HomePage2Page implements OnInit, OnDestroy {
   private static userSyncTasks: Map<string, Promise<void>> = new Map();
+  currentLocation: {
+    latitude: number;
+    longitude: number;
+    accuracy: number;
+    timestamp: string;
+  } | null = null;
+  locationStatusText: string = 'No location captured';
+  locationErrorText: string = '';
   userName: string | null = null;
   firstName: string | null = null;
   lastName: string | null = null;
@@ -93,6 +101,7 @@ private async initialize(): Promise<void> {
     const resolvedUserId = this.userID || this.auth3.getCurrentUser()?.uid || '';
     this.userID = resolvedUserId || this.userID;
     this.loadPersistedSyncStatus(resolvedUserId);
+    this.loadPersistedLocation(resolvedUserId);
     console.log('[HomePage2.initialize] Starting initial background sync check for user:', resolvedUserId || 'none');
     this.startUserSyncInBackground(resolvedUserId, true);
 
@@ -188,8 +197,212 @@ private async initialize(): Promise<void> {
   ionViewWillEnter() {
     this.loadSessions();
     const uid = this.userID || this.auth3.getCurrentUser()?.uid || '';
-    if (uid) this.loadPersistedSyncStatus(uid);
+    if (uid) {
+      this.loadPersistedSyncStatus(uid);
+      this.loadPersistedLocation(uid);
+    }
     this.requestLocationAccessOnEnter();
+  }
+
+  private getLocationStorageKey(userId: string): string {
+    return `user_sidebar_location_${userId}`;
+  }
+
+  private loadPersistedLocation(userId: string): void {
+    if (!userId) return;
+    try {
+      const raw = localStorage.getItem(this.getLocationStorageKey(userId));
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      if (
+        parsed &&
+        typeof parsed.latitude === 'number' &&
+        typeof parsed.longitude === 'number' &&
+        typeof parsed.accuracy === 'number' &&
+        typeof parsed.timestamp === 'string'
+      ) {
+        this.currentLocation = {
+          latitude: parsed.latitude,
+          longitude: parsed.longitude,
+          accuracy: parsed.accuracy,
+          timestamp: parsed.timestamp
+        };
+        this.locationStatusText = `Updated: ${new Date(parsed.timestamp).toLocaleString()}`;
+        this.locationErrorText = '';
+      }
+    } catch {
+      this.currentLocation = null;
+      this.locationStatusText = 'No location captured';
+      this.locationErrorText = '';
+    }
+  }
+
+  private persistCurrentLocation(userId: string): void {
+    if (!userId || !this.currentLocation) return;
+    try {
+      localStorage.setItem(this.getLocationStorageKey(userId), JSON.stringify(this.currentLocation));
+    } catch {}
+  }
+
+  private clearPersistedLocation(userId: string): void {
+    if (!userId) return;
+    try { localStorage.removeItem(this.getLocationStorageKey(userId)); } catch {}
+  }
+
+  async requestLocationPermissionFromMenu(): Promise<void> {
+    try {
+      if (!('geolocation' in navigator)) {
+        this.locationStatusText = 'Location unavailable';
+        this.locationErrorText = 'Geolocation is not supported on this device/browser.';
+        return;
+      }
+
+      this.locationStatusText = 'Requesting location permission...';
+      this.locationErrorText = '';
+
+      await this.requestLocationAccessOnEnter();
+
+      if (this.currentLocation) {
+        this.locationStatusText = `Updated: ${new Date(this.currentLocation.timestamp).toLocaleString()}`;
+      } else if (!this.locationErrorText) {
+        this.locationStatusText = 'Location permission requested';
+      }
+    } catch (error) {
+      const geoError = error as GeolocationPositionError;
+      this.locationStatusText = 'Location unavailable';
+      this.locationErrorText = geoError?.message || 'Unable to request location permission.';
+      console.warn('[HomePage2.requestLocationPermissionFromMenu] Permission request failed:', error);
+    }
+  }
+
+  async getAndStoreCurrentLocation(): Promise<void> {
+    try {
+      if (!('geolocation' in navigator)) {
+        this.locationErrorText = 'Geolocation is not supported on this device/browser.';
+        this.locationStatusText = 'Location unavailable';
+        return;
+      }
+
+      this.locationStatusText = 'Getting current location...';
+      this.locationErrorText = '';
+
+      const position = await new Promise<GeolocationPosition>((resolve, reject) => {
+        navigator.geolocation.getCurrentPosition(
+          (pos) => resolve(pos),
+          (err) => reject(err),
+          {
+            enableHighAccuracy: true,
+            timeout: 15000,
+            maximumAge: 0
+          }
+        );
+      });
+
+      this.currentLocation = {
+        latitude: position.coords.latitude,
+        longitude: position.coords.longitude,
+        accuracy: position.coords.accuracy,
+        timestamp: new Date(position.timestamp).toISOString()
+      };
+
+      this.locationStatusText = `Updated: ${new Date(position.timestamp).toLocaleString()}`;
+      const uid = this.userID || this.auth3.getCurrentUser()?.uid || '';
+      this.persistCurrentLocation(uid);
+
+      console.log('[HomePage2.getAndStoreCurrentLocation] Location saved to sidebar state:', this.currentLocation);
+    } catch (error) {
+      const geoError = error as GeolocationPositionError;
+      this.locationErrorText = geoError?.message || 'Unknown geolocation error';
+      this.locationStatusText = 'Location unavailable';
+      console.error('[HomePage2.getAndStoreCurrentLocation] Failed to get location:', {
+        code: geoError?.code,
+        message: geoError?.message || 'Unknown geolocation error'
+      });
+    }
+  }
+
+  async showLocationOverlay(): Promise<void> {
+    if (document.getElementById('location-overlay')) return;
+
+    if (!this.currentLocation) {
+      await this.getAndStoreCurrentLocation();
+    }
+
+    const overlay = document.createElement('div');
+    overlay.id = 'location-overlay';
+    overlay.style.position = 'fixed';
+    overlay.style.top = '0';
+    overlay.style.left = '0';
+    overlay.style.width = '100%';
+    overlay.style.height = '100%';
+    overlay.style.background = 'rgba(0,0,0,0.45)';
+    overlay.style.display = 'flex';
+    overlay.style.alignItems = 'center';
+    overlay.style.justifyContent = 'center';
+    overlay.style.zIndex = '10000';
+
+    const box = document.createElement('div');
+    box.style.background = '#fff';
+    box.style.padding = '18px';
+    box.style.borderRadius = '8px';
+    box.style.minWidth = '260px';
+    box.style.maxWidth = '90%';
+    box.style.boxShadow = '0 4px 20px rgba(0,0,0,0.25)';
+
+    const title = document.createElement('div');
+    title.innerText = 'Current Device Location';
+    title.style.fontWeight = '600';
+    title.style.fontSize = '16px';
+    title.style.marginBottom = '10px';
+
+    const details = document.createElement('div');
+    details.style.fontSize = '14px';
+    details.style.lineHeight = '1.55';
+    details.style.color = '#333';
+
+    if (this.currentLocation) {
+      details.innerHTML = `
+        <div><strong>Status:</strong> ${this.locationStatusText}</div>
+        <div><strong>Latitude:</strong> ${this.currentLocation.latitude.toFixed(6)}</div>
+        <div><strong>Longitude:</strong> ${this.currentLocation.longitude.toFixed(6)}</div>
+        <div><strong>Accuracy:</strong> ${Math.round(this.currentLocation.accuracy)} m</div>
+        <div><strong>Timestamp:</strong> ${new Date(this.currentLocation.timestamp).toLocaleString()}</div>
+      `;
+    } else {
+      details.innerHTML = `
+        <div><strong>Status:</strong> ${this.locationStatusText}</div>
+        <div><strong>Error:</strong> ${this.locationErrorText || 'Unable to retrieve location.'}</div>
+      `;
+    }
+
+    const closeBtn = document.createElement('button');
+    closeBtn.innerText = 'Close';
+    closeBtn.style.marginTop = '14px';
+    closeBtn.style.padding = '10px 14px';
+    closeBtn.style.border = 'none';
+    closeBtn.style.borderRadius = '6px';
+    closeBtn.style.background = '#6b7280';
+    closeBtn.style.color = '#fff';
+    closeBtn.style.cursor = 'pointer';
+    closeBtn.style.width = '100%';
+
+    closeBtn.addEventListener('click', () => this.removeLocationOverlay());
+    overlay.addEventListener('click', (ev) => {
+      if (ev.target === overlay) this.removeLocationOverlay();
+    });
+
+    box.appendChild(title);
+    box.appendChild(details);
+    box.appendChild(closeBtn);
+    overlay.appendChild(box);
+    document.body.appendChild(overlay);
+  }
+
+  private removeLocationOverlay(): void {
+    try {
+      const el = document.getElementById('location-overlay');
+      if (el && el.parentElement) el.parentElement.removeChild(el);
+    } catch {}
   }
 
   /**
@@ -558,6 +771,7 @@ private async initialize(): Promise<void> {
 
   /** Navigate to sessions list page. */
   gochatPage() {
+    this.removeBackButtonHandler();
     this.router.navigate(['/chat-page']);
     console.log('chat page');
   }
@@ -571,7 +785,13 @@ private async initialize(): Promise<void> {
   /** Shared logout flow used by overlay button and menu item. */
   async logout(closeOverlay: boolean = false) {
     const currentUid = this.userID || this.auth3.getCurrentUser()?.uid || '';
-    if (currentUid) this.clearSyncStateForUser(currentUid);
+    if (currentUid) {
+      this.clearSyncStateForUser(currentUid);
+      this.clearPersistedLocation(currentUid);
+    }
+    this.currentLocation = null;
+    this.locationStatusText = 'No location captured';
+    this.locationErrorText = '';
     this.syncStatusState = 'idle';
     this.syncStatusText = 'Not synced';
     try {
@@ -582,6 +802,7 @@ private async initialize(): Promise<void> {
     this.isLoggedIn = false;
     if (closeOverlay) {
       this.removeTestOverlay();
+      this.removeLocationOverlay();
     }
     // Navigate to landing page replacing history so next back exits
     try {
@@ -1093,6 +1314,11 @@ private async initialize(): Promise<void> {
             try { this.removeTestOverlay(); } catch (e) {}
             return;
           }
+          const locationOverlay = document.getElementById('location-overlay');
+          if (locationOverlay) {
+            try { this.removeLocationOverlay(); } catch (e) {}
+            return;
+          }
         } catch (e) {}
         try { App.exitApp(); } catch (e) { console.warn('App.exitApp failed', e); }
       });
@@ -1125,6 +1351,7 @@ private async initialize(): Promise<void> {
 
   ngOnDestroy(): void {
     this.removeBackButtonHandler();
+    this.removeLocationOverlay();
   }
   
   openMenu(menuId: string) {

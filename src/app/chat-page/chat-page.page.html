@@ -255,7 +255,8 @@
   <ng-container *ngIf="activeTab === 'location' && !isChatOpen" style="background-color: #ffffff;">
     <div class="map-view">
       <div id="map" class="map-container" role="region" aria-label="Map view">
-        <div class="menu-btn2 map-menu-btn" (click)="openMenu('sidebarMenu')">
+        <!-- <div class="menu-btn2 map-menu-btn" (click)="openMenu('sidebarMenu')"> -->
+          <div class="menu-btn2 map-menu-btn" (click)="openMarkerCreationOverlay()">
           <img src="assets/moreIcon.png" alt="Menu" />
         </div>
       </div>

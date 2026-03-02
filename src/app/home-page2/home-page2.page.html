@@ -28,9 +28,10 @@
         <ion-icon name="checkmark-circle"></ion-icon>
         <span>Availability</span>
       </li>
-      <li class="menu-item">
+      <li class="menu-item" (click)="requestLocationPermissionFromMenu()">
         <ion-icon name="create-outline"></ion-icon>
-        <span>Set Status Message</span>
+        <!-- <span>Set Status Message</span> -->
+        <span>Request Location Permission</span>
       </li>
       <li class="menu-item">
         <ion-icon name="notifications-outline"></ion-icon>
@@ -51,6 +52,26 @@
       <li class="menu-item">
         <ion-icon name="folder-outline"></ion-icon>
         <span>Files</span>
+      </li>
+      <li class="menu-item" (click)="getAndStoreCurrentLocation()">
+        <ion-icon name="locate-outline"></ion-icon>
+        <span>Get Current Location</span>
+      </li>
+      <li class="menu-item" (click)="showLocationOverlay()">
+        <ion-icon name="information-circle-outline"></ion-icon>
+        <span>Show Location Details</span>
+      </li>
+      <li class="menu-item" *ngIf="currentLocation">
+        <ion-icon name="location-outline"></ion-icon>
+        <span>Lat {{ currentLocation.latitude | number:'1.4-4' }}, Lng {{ currentLocation.longitude | number:'1.4-4' }}</span>
+      </li>
+      <li class="menu-item">
+        <ion-icon name="time-outline"></ion-icon>
+        <span>{{ locationStatusText }}</span>
+      </li>
+      <li class="menu-item" *ngIf="locationErrorText">
+        <ion-icon name="alert-circle-outline"></ion-icon>
+        <span>{{ locationErrorText }}</span>
       </li>
       <li class="menu-item">
         <ion-icon name="settings-outline"></ion-icon>

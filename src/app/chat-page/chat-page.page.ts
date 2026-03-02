@@ -51,6 +51,11 @@ export class ChatPagePage implements OnInit, OnDestroy {
   activeTab: 'person' | 'people' | 'location' | 'settings' = 'people';
   private map?: L.Map | null = null;
   private userLocationMarker?: L.Marker;
+  private readonly fallbackCoordinates = { latitude: 10.324849, longitude: 123.849164 };
+  private mapInitAttempts = 0;
+  private readonly maxMapInitAttempts = 8;
+  private mapResizeTimeoutId?: ReturnType<typeof setTimeout>;
+  private markerOverlayElement?: HTMLDivElement;
 
   // Placeholder search conversation results (simulate as in pasted image)
   searchConversationResults = [
@@ -359,6 +364,164 @@ private async initialize(): Promise<void> {
     this.isSidebarOpen = !this.isSidebarOpen;
   }
 
+  openMarkerCreationOverlay(): void {
+    if (this.markerOverlayElement) return;
+
+    const overlay = document.createElement('div');
+    overlay.style.position = 'fixed';
+    overlay.style.top = '0';
+    overlay.style.left = '0';
+    overlay.style.right = '0';
+    overlay.style.bottom = '0';
+    overlay.style.background = 'rgba(0, 0, 0, 0.45)';
+    overlay.style.display = 'flex';
+    overlay.style.alignItems = 'center';
+    overlay.style.justifyContent = 'center';
+    overlay.style.zIndex = '9999';
+    overlay.style.padding = '16px';
+
+    const panel = document.createElement('div');
+    panel.style.background = '#ffffff';
+    panel.style.borderRadius = '14px';
+    panel.style.width = '100%';
+    panel.style.maxWidth = '360px';
+    panel.style.padding = '16px';
+    panel.style.boxShadow = '0 12px 30px rgba(0, 0, 0, 0.2)';
+    panel.style.display = 'flex';
+    panel.style.flexDirection = 'column';
+    panel.style.gap = '10px';
+
+    const title = document.createElement('h3');
+    title.textContent = 'Create map marker';
+    title.style.margin = '0 0 4px';
+    title.style.fontSize = '17px';
+
+    const latInput = document.createElement('input');
+    latInput.type = 'number';
+    latInput.placeholder = 'Latitude (e.g. 10.324849)';
+    latInput.step = 'any';
+    latInput.style.height = '40px';
+    latInput.style.padding = '0 10px';
+    latInput.style.border = '1px solid #d6d6d6';
+    latInput.style.borderRadius = '8px';
+
+    const lngInput = document.createElement('input');
+    lngInput.type = 'number';
+    lngInput.placeholder = 'Longitude (e.g. 123.849164)';
+    lngInput.step = 'any';
+    lngInput.style.height = '40px';
+    lngInput.style.padding = '0 10px';
+    lngInput.style.border = '1px solid #d6d6d6';
+    lngInput.style.borderRadius = '8px';
+
+    const message = document.createElement('div');
+    message.style.minHeight = '18px';
+    message.style.fontSize = '12px';
+    message.style.color = '#d32f2f';
+
+    const actions = document.createElement('div');
+    actions.style.display = 'flex';
+    actions.style.gap = '8px';
+    actions.style.justifyContent = 'flex-end';
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button';
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.style.height = '36px';
+    cancelBtn.style.padding = '0 14px';
+    cancelBtn.style.border = '1px solid #d0d0d0';
+    cancelBtn.style.borderRadius = '8px';
+    cancelBtn.style.background = '#fff';
+
+    const createBtn = document.createElement('button');
+    createBtn.type = 'button';
+    createBtn.textContent = 'Create Marker';
+    createBtn.style.height = '36px';
+    createBtn.style.padding = '0 14px';
+    createBtn.style.border = 'none';
+    createBtn.style.borderRadius = '8px';
+    createBtn.style.background = '#387ef5';
+    createBtn.style.color = '#fff';
+
+    actions.appendChild(cancelBtn);
+    actions.appendChild(createBtn);
+
+    panel.appendChild(title);
+    panel.appendChild(latInput);
+    panel.appendChild(lngInput);
+    panel.appendChild(message);
+    panel.appendChild(actions);
+    overlay.appendChild(panel);
+
+    const dismiss = () => {
+      try { document.body.removeChild(overlay); } catch {}
+      if (this.markerOverlayElement === overlay) {
+        this.markerOverlayElement = undefined;
+      }
+    };
+
+    overlay.addEventListener('click', (event) => {
+      if (event.target === overlay) dismiss();
+    });
+
+    panel.addEventListener('click', (event) => {
+      event.stopPropagation();
+    });
+
+    cancelBtn.addEventListener('click', () => dismiss());
+
+    const createMarkerFromInput = async () => {
+      const latitude = Number.parseFloat(latInput.value);
+      const longitude = Number.parseFloat(lngInput.value);
+
+      if (Number.isNaN(latitude) || Number.isNaN(longitude)) {
+        message.textContent = 'Please enter valid numeric latitude and longitude.';
+        return;
+      }
+
+      if (latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180) {
+        message.textContent = 'Latitude must be -90..90 and longitude must be -180..180.';
+        return;
+      }
+
+      if (!this.map) {
+        await this.initMap();
+      }
+
+      if (!this.map) {
+        message.textContent = 'Map is not ready yet. Try again.';
+        return;
+      }
+
+      L.marker([latitude, longitude])
+        .addTo(this.map)
+        .bindPopup(`Marker: ${latitude.toFixed(6)}, ${longitude.toFixed(6)}`)
+        .openPopup();
+
+      this.map.setView([latitude, longitude], 15);
+      console.log('[ChatPage.openMarkerCreationOverlay] Custom marker created:', { latitude, longitude });
+      dismiss();
+    };
+
+    createBtn.addEventListener('click', () => { void createMarkerFromInput(); });
+    latInput.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        lngInput.focus();
+      }
+    });
+    lngInput.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        void createMarkerFromInput();
+      }
+    });
+
+    document.body.appendChild(overlay);
+    this.markerOverlayElement = overlay;
+    latInput.focus();
+  }
+
     private clearSyncStateForUser(userId: string): void {
     if (!userId) return;
     try { localStorage.removeItem(this.getSyncStatusStorageKey(userId)); } catch {}
@@ -418,16 +581,72 @@ private async initialize(): Promise<void> {
     if (tab === 'location') {
       this.isChatOpen = false;
       this.isSearching = false;
-      // initialize map once DOM has updated
-      setTimeout(() => { void this.initMap(); }, 50);
+      this.handleMapResizeOnReentry();
+      this.scheduleMapInitialization();
     }
   }
 
+  private handleMapResizeOnReentry(): void {
+    if (!this.map) return;
+
+    try {
+      this.map.invalidateSize();
+      console.log('[ChatPage.setNav] Map resize triggered on location tab re-entry (immediate).');
+    } catch (error) {
+      console.warn('[ChatPage.setNav] Immediate map resize failed on re-entry.', error);
+    }
+
+    if (this.mapResizeTimeoutId) {
+      clearTimeout(this.mapResizeTimeoutId);
+    }
+
+    this.mapResizeTimeoutId = setTimeout(() => {
+      if (this.activeTab !== 'location' || !this.map) return;
+      try {
+        this.map.invalidateSize();
+        console.log('[ChatPage.setNav] Map resize triggered on location tab re-entry (delayed).');
+      } catch (error) {
+        console.warn('[ChatPage.setNav] Delayed map resize failed on re-entry.', error);
+      }
+    }, 180);
+  }
+
+  private scheduleMapInitialization(): void {
+    this.mapInitAttempts = 0;
+    const attemptInit = () => {
+      if (this.activeTab !== 'location') return;
+
+      this.mapInitAttempts += 1;
+      const mapEl = document.getElementById('map');
+
+      if (mapEl) {
+        console.log('[ChatPage.setNav] Location tab active. Initializing map now.');
+        void this.initMap();
+        return;
+      }
+
+      if (this.mapInitAttempts < this.maxMapInitAttempts) {
+        console.log('[ChatPage.setNav] Waiting for map container to render before initMap...', {
+          attempt: this.mapInitAttempts,
+          maxAttempts: this.maxMapInitAttempts
+        });
+        setTimeout(attemptInit, 75);
+      } else {
+        console.warn('[ChatPage.setNav] Map container still not found after retries.');
+      }
+    };
+
+    setTimeout(attemptInit, 0);
+  }
+
   private async getCurrentCoordinates(): Promise<{ latitude: number; longitude: number } | null> {
+    console.log('[ChatPage.getCurrentCoordinates] Resolving current coordinates...');
     try {
       const permission = await Geolocation.checkPermissions();
+      console.log('[ChatPage.getCurrentCoordinates] Permission status:', permission);
       if (permission.location !== 'granted') {
         await Geolocation.requestPermissions();
+        console.log('[ChatPage.getCurrentCoordinates] Requested location permissions');
       }
 
       const position = await Geolocation.getCurrentPosition({
@@ -435,11 +654,17 @@ private async initialize(): Promise<void> {
         timeout: 15000
       });
 
+      console.log('[ChatPage.getCurrentCoordinates] Coordinates fetched via Capacitor:', {
+        latitude: position.coords.latitude,
+        longitude: position.coords.longitude
+      });
+
       return {
         latitude: position.coords.latitude,
         longitude: position.coords.longitude
       };
     } catch (capacitorError) {
+      console.warn('[ChatPage.getCurrentCoordinates] Capacitor geolocation failed, trying browser geolocation', capacitorError);
       try {
         const position = await new Promise<GeolocationPosition>((resolve, reject) => {
           navigator.geolocation.getCurrentPosition(
@@ -449,26 +674,38 @@ private async initialize(): Promise<void> {
           );
         });
 
+        console.log('[ChatPage.getCurrentCoordinates] Coordinates fetched via browser geolocation:', {
+          latitude: position.coords.latitude,
+          longitude: position.coords.longitude
+        });
+
         return {
           latitude: position.coords.latitude,
           longitude: position.coords.longitude
         };
       } catch (browserError) {
-        console.warn('Unable to get current coordinates', capacitorError, browserError);
-        return null;
+        console.warn('[ChatPage.getCurrentCoordinates] Unable to get current coordinates; using fallback coordinates', {
+          fallback: this.fallbackCoordinates,
+          capacitorError,
+          browserError
+        });
+        return { ...this.fallbackCoordinates };
       }
     }
   }
 
   /** Initialize Leaflet map in the `map` element. Safe to call multiple times. */
   private async initMap(): Promise<void> {
+    console.log('[ChatPage.initMap] Initializing map...');
     try {
       const coordinates = await this.getCurrentCoordinates();
+      console.log('[ChatPage.initMap] Coordinates resolved for map:', coordinates);
       const center: [number, number] = coordinates
         ? [coordinates.latitude, coordinates.longitude]
-        : [51.505, -0.09];
+        : [this.fallbackCoordinates.latitude, this.fallbackCoordinates.longitude];
 
       if (this.map) {
+        console.log('[ChatPage.initMap] Map already initialized. Updating view and marker.');
         // already initialized: invalidate size in case container changed
         this.map.invalidateSize();
         this.map.setView(center, 15);
@@ -477,44 +714,83 @@ private async initialize(): Promise<void> {
       }
 
       const mapEl = document.getElementById('map');
-      if (!mapEl) return;
+      if (!mapEl) {
+        console.warn('[ChatPage.initMap] Map element not found (#map).');
+        return;
+      }
 
       this.map = L.map(mapEl).setView(center, coordinates ? 15 : 13);
+      console.log('[ChatPage.initMap] Leaflet map created with center:', center);
 
       L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         maxZoom: 19,
         attribution: '&copy; OpenStreetMap contributors'
       }).addTo(this.map);
+      console.log('[ChatPage.initMap] Tile layer added.');
 
       await this.markUserLocation(this.map, coordinates);
+      console.log('[ChatPage.initMap] User location marker handling complete.');
     } catch (err) {
-      console.warn('initMap failed', err);
+      console.warn('[ChatPage.initMap] Initialization failed', err);
     }
   }
 
   async markUserLocation(map: L.Map, coordinates?: { latitude: number; longitude: number } | null) {
+      console.log('[ChatPage.markUserLocation] Marking user location...', { coordinatesFromCaller: coordinates });
       try {
         const resolvedCoordinates = coordinates ?? await this.getCurrentCoordinates();
-        if (!resolvedCoordinates) return;
+        if (!resolvedCoordinates) {
+          console.warn('[ChatPage.markUserLocation] No coordinates resolved.');
+          return;
+        }
 
         const { latitude, longitude } = resolvedCoordinates;
+        console.log('[ChatPage.markUserLocation] Coordinates used for marker:', { latitude, longitude });
 
         if (this.userLocationMarker) {
           this.userLocationMarker.setLatLng([latitude, longitude]);
+          console.log('[ChatPage.markUserLocation] Existing marker updated.');
         } else {
-          this.userLocationMarker = L.marker([latitude, longitude])
-            .addTo(map)
-            .bindPopup('You are here!')
-            .openPopup();
+          // this.userLocationMarker = L.marker([latitude, longitude])
+          //   .addTo(map)
+          //   .bindPopup('You are here!')
+          //   .openPopup();
+          this.userLocationMarker = L.marker([latitude, longitude], {
+  icon: this.userLocationIcon
+})
+  .addTo(map)
+  .bindPopup('You are here!')
+  .openPopup();
+          console.log('[ChatPage.markUserLocation] New marker created.');
         }
 
         map.setView([latitude, longitude], 15);
+        console.log('[ChatPage.markUserLocation] Map centered on user location.');
       } catch (error) {
-        console.error('Failed to mark user location:', error);
+        console.error('[ChatPage.markUserLocation] Failed to mark user location:', error);
       }
     }
 
+    // Add once in your class (near other properties)
+private readonly userLocationIcon = L.icon({
+  iconUrl: 'assets/map/user-marker.png',
+  iconRetinaUrl: 'assets/map/marker-icon-2x.png', // optional but recommended
+  shadowUrl: 'assets/map/marker-shadow.png',      // optional
+  iconSize: [25, 41],
+  iconAnchor: [12, 41],
+  popupAnchor: [1, -34],
+  shadowSize: [41, 41]
+});
+
   ngOnDestroy(): void {
+    if (this.markerOverlayElement) {
+      try { document.body.removeChild(this.markerOverlayElement); } catch {}
+      this.markerOverlayElement = undefined;
+    }
+    if (this.mapResizeTimeoutId) {
+      clearTimeout(this.mapResizeTimeoutId);
+      this.mapResizeTimeoutId = undefined;
+    }
     try { this.messagesSub?.unsubscribe(); } catch {}
     this.messagesSub = undefined;
     // optional: set offline on destroy if desired
