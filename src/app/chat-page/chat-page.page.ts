@@ -56,6 +56,8 @@ export class ChatPagePage implements OnInit, OnDestroy {
   private readonly maxMapInitAttempts = 8;
   private mapResizeTimeoutId?: ReturnType<typeof setTimeout>;
   private markerOverlayElement?: HTMLDivElement;
+  private markerSelectionOverlayElement?: HTMLDivElement;
+  private mapTapOverlayElement?: HTMLDivElement;
 
   // Placeholder search conversation results (simulate as in pasted image)
   searchConversationResults = [
@@ -102,6 +104,15 @@ export class ChatPagePage implements OnInit, OnDestroy {
   chats: any[] = [
     { id: 'ftd', name: 'Fitted - Tech & Design', avatar: 'assets/engIcon.png', lastMessage: 'Thecla: @Ovo How is it going?', time: '11:11 am', unread: true },
     { id: 'demola', name: 'Demola Andreas', avatar: 'assets/engIcon.png', lastMessage: 'Job Description.docx', time: 'Yesterday', badge: 1 }
+  ];
+
+  // Test markers (similar to goalTasks) for placing sample markers on the Leaflet map
+  testMarkers: Array<{ id: number; name: string; latitude: number; longitude: number }> = [
+    { id: 1, name: 'Test Marker A', latitude: 10.324849, longitude: 123.849164 },
+    { id: 2, name: 'Test Marker B', latitude: 10.326000, longitude: 123.850000 },
+    { id: 3, name: 'Test Marker C', latitude: 10.323500, longitude: 123.847500 },
+    { id: 4, name: 'Test Marker D', latitude: 10.327200, longitude: 123.848900 },
+    { id: 5, name: 'Test Marker E', latitude: 10.317700, longitude: 123.903700 }
   ];
 
   /** Inject auth, router, and image storage services for navigation and data. */
@@ -192,39 +203,68 @@ private async initialize(): Promise<void> {
   /** Handle selecting an engineer from search results: create chat and subscribe messages */
   async selectEngineer(user: any) {
     console.log('[ChatPage] Engineer selected:', user);
+
+    const selectedId = user?.id || user?.uid || user?.userID || user?.email;
+    const selectedName = user?.firstName
+      ? `${user.firstName} ${user?.lastName || ''}`.trim()
+      : (user?.name || user?.email || 'Unknown User');
+    const selectedAvatar = user?.photoURL || user?.avatar || null;
+
+    // Ensure selected user appears in chat list and move to top when re-selected.
+    const existingIndex = this.chats.findIndex(c => c.id === selectedId || c.name === selectedName);
+    const chatPreview = {
+      id: selectedId,
+      name: selectedName,
+      avatar: selectedAvatar,
+      lastMessage: user?.lastMessage || '',
+      time: user?.time || '',
+      addedFromSearch: true
+    };
+
+    if (existingIndex >= 0) {
+      const existingChat = this.chats[existingIndex];
+      this.chats.splice(existingIndex, 1);
+      this.chats.unshift({ ...existingChat, ...chatPreview });
+    } else {
+      this.chats.unshift(chatPreview);
+    }
+
+    // Open conversation immediately (UI-first behavior)
+    this.activeChat = chatPreview;
+    this.isSearching = false;
+    this.isChatOpen = true;
+    this.messages = [];
+
     const currentUid = this.auth3.getCurrentUser()?.uid || this.userID || '';
-    if (!currentUid) {
-      console.warn('[ChatPage] No current user; cannot create chat');
+    if (!currentUid || !selectedId) {
+      console.warn('[ChatPage] Missing current user or selected user id; opened UI without backend chat binding.');
+      this.currentChatId = null;
       return;
     }
 
-    // ensure we don't duplicate in chats list (UI list)
-    const exists = this.chats.find(c => c.id === user.id || c.name === user.name);
-    if (!exists) {
-      this.chats.unshift({ id: user.id, name: user.firstName ? `${user.firstName} ${user.lastName}` : user.name || user.email, avatar: user.photoURL || null, lastMessage: '', time: '', addedFromSearch: true });
+    try {
+      // ensure chat document exists and get deterministic chatId
+      const chat = await this.chatService.createOrEnsureChat(currentUid, selectedId);
+      this.activeChat = { ...this.activeChat, chatId: chat.chatId };
+      await this.subscribeToChatMessages(chat.chatId, currentUid);
+      console.log('[ChatPage] Opened chat', chat.chatId);
+    } catch (error) {
+      console.error('[ChatPage] Failed to bind backend chat for selected user:', error);
+      this.currentChatId = null;
     }
+  }
 
-    // ensure chat document exists and get deterministic chatId
-    const chat = await this.chatService.createOrEnsureChat(currentUid, user.id);
-    this.currentChatId = chat.chatId;
-
-    // open conversation view
-    this.activeChat = { id: user.id, name: user.firstName ? `${user.firstName} ${user.lastName}` : user.name || user.email, avatar: user.photoURL || null, chatId: chat.chatId };
-    this.isChatOpen = true;
-
-    // unsubscribe previous
+  private async subscribeToChatMessages(chatId: string, currentUid: string): Promise<void> {
+    this.currentChatId = chatId;
     try { this.messagesSub?.unsubscribe(); } catch {}
 
-    // subscribe to messages and mark unread incoming messages as read
-    this.messagesSub = this.chatService.getMessages(chat.chatId).subscribe(async (msgs) => {
+    this.messagesSub = this.chatService.getMessages(chatId).subscribe(async (msgs) => {
       this.messages = msgs || [];
       const unread = this.messages.filter(m => !m.isRead && m.senderId !== currentUid && m.id);
       for (const m of unread) {
-        try { await this.chatService.markMessageAsRead(chat.chatId, m.id!); } catch (e) { console.warn('markMessageAsRead failed', e); }
+        try { await this.chatService.markMessageAsRead(chatId, m.id!); } catch (e) { console.warn('markMessageAsRead failed', e); }
       }
     });
-
-    console.log('[ChatPage] Opened chat', chat.chatId);
   }
 
   /** Send a message in the current chat */
@@ -368,80 +408,42 @@ private async initialize(): Promise<void> {
     if (this.markerOverlayElement) return;
 
     const overlay = document.createElement('div');
-    overlay.style.position = 'fixed';
-    overlay.style.top = '0';
-    overlay.style.left = '0';
-    overlay.style.right = '0';
-    overlay.style.bottom = '0';
-    overlay.style.background = 'rgba(0, 0, 0, 0.45)';
-    overlay.style.display = 'flex';
-    overlay.style.alignItems = 'center';
-    overlay.style.justifyContent = 'center';
-    overlay.style.zIndex = '9999';
-    overlay.style.padding = '16px';
+    overlay.className = 'map-overlay map-overlay--dim';
 
     const panel = document.createElement('div');
-    panel.style.background = '#ffffff';
-    panel.style.borderRadius = '14px';
-    panel.style.width = '100%';
-    panel.style.maxWidth = '360px';
-    panel.style.padding = '16px';
-    panel.style.boxShadow = '0 12px 30px rgba(0, 0, 0, 0.2)';
-    panel.style.display = 'flex';
-    panel.style.flexDirection = 'column';
-    panel.style.gap = '10px';
+    panel.className = 'map-overlay-panel';
 
     const title = document.createElement('h3');
     title.textContent = 'Create map marker';
-    title.style.margin = '0 0 4px';
-    title.style.fontSize = '17px';
+    title.className = 'map-overlay-title';
 
     const latInput = document.createElement('input');
     latInput.type = 'number';
     latInput.placeholder = 'Latitude (e.g. 10.324849)';
     latInput.step = 'any';
-    latInput.style.height = '40px';
-    latInput.style.padding = '0 10px';
-    latInput.style.border = '1px solid #d6d6d6';
-    latInput.style.borderRadius = '8px';
+    latInput.className = 'map-overlay-input';
 
     const lngInput = document.createElement('input');
     lngInput.type = 'number';
     lngInput.placeholder = 'Longitude (e.g. 123.849164)';
     lngInput.step = 'any';
-    lngInput.style.height = '40px';
-    lngInput.style.padding = '0 10px';
-    lngInput.style.border = '1px solid #d6d6d6';
-    lngInput.style.borderRadius = '8px';
+    lngInput.className = 'map-overlay-input';
 
     const message = document.createElement('div');
-    message.style.minHeight = '18px';
-    message.style.fontSize = '12px';
-    message.style.color = '#d32f2f';
+    message.className = 'map-overlay-message';
 
     const actions = document.createElement('div');
-    actions.style.display = 'flex';
-    actions.style.gap = '8px';
-    actions.style.justifyContent = 'flex-end';
+    actions.className = 'map-overlay-actions';
 
     const cancelBtn = document.createElement('button');
     cancelBtn.type = 'button';
     cancelBtn.textContent = 'Cancel';
-    cancelBtn.style.height = '36px';
-    cancelBtn.style.padding = '0 14px';
-    cancelBtn.style.border = '1px solid #d0d0d0';
-    cancelBtn.style.borderRadius = '8px';
-    cancelBtn.style.background = '#fff';
+    cancelBtn.className = 'map-overlay-btn map-overlay-btn--secondary';
 
     const createBtn = document.createElement('button');
     createBtn.type = 'button';
     createBtn.textContent = 'Create Marker';
-    createBtn.style.height = '36px';
-    createBtn.style.padding = '0 14px';
-    createBtn.style.border = 'none';
-    createBtn.style.borderRadius = '8px';
-    createBtn.style.background = '#387ef5';
-    createBtn.style.color = '#fff';
+    createBtn.className = 'map-overlay-btn map-overlay-btn--primary';
 
     actions.appendChild(cancelBtn);
     actions.appendChild(createBtn);
@@ -493,10 +495,11 @@ private async initialize(): Promise<void> {
         return;
       }
 
-      L.marker([latitude, longitude])
+      const customMarker = L.marker([latitude, longitude])
         .addTo(this.map)
         .bindPopup(`Marker: ${latitude.toFixed(6)}, ${longitude.toFixed(6)}`)
         .openPopup();
+      this.bindMarkerSelectionTrigger(customMarker, 'Marker Selection Overlay');
 
       this.map.setView([latitude, longitude], 15);
       console.log('[ChatPage.openMarkerCreationOverlay] Custom marker created:', { latitude, longitude });
@@ -520,6 +523,113 @@ private async initialize(): Promise<void> {
     document.body.appendChild(overlay);
     this.markerOverlayElement = overlay;
     latInput.focus();
+  }
+
+  async openMarkerSelectionOverlay(titleText: string = 'You are here Selection Overlay'): Promise<void> {
+    if (this.markerSelectionOverlayElement) return;
+
+    if (!this.engineers.length) {
+      try { await this.fetchEngineers(); } catch (err) { console.warn('[ChatPage] fetchEngineers in marker overlay failed', err); }
+    }
+
+    const options = (this.engineers.length ? this.engineers : this.searchConversationResults) || [];
+
+    const overlay = document.createElement('div');
+    overlay.className = 'marker-selection-overlay';
+
+    const wrap = document.createElement('div');
+    wrap.className = 'marker-selection-wrap';
+
+    const panel = document.createElement('div');
+    panel.className = 'marker-selection-panel';
+
+    const title = document.createElement('h3');
+    title.textContent = titleText;
+    title.className = 'marker-selection-title';
+
+    const list = document.createElement('div');
+    list.className = 'marker-selection-list';
+
+    if (!options.length) {
+      const empty = document.createElement('div');
+      empty.textContent = 'No users available.';
+      empty.className = 'marker-selection-empty';
+      list.appendChild(empty);
+    } else {
+      for (const option of options) {
+        const item = document.createElement('button');
+        item.type = 'button';
+        item.className = 'marker-selection-item';
+
+        const avatar = document.createElement('div');
+        avatar.className = 'marker-selection-avatar';
+
+        const avatarUrl = option?.photoURL || option?.avatar;
+        if (avatarUrl) {
+          const img = document.createElement('img');
+          img.src = avatarUrl;
+          img.alt = 'avatar';
+          img.className = 'marker-selection-avatar-image';
+          avatar.appendChild(img);
+        } else {
+          const initials = (option?.initials || this.getInitials(option?.firstName ? `${option.firstName} ${option?.lastName || ''}` : option?.name || option?.email || 'U')).toUpperCase();
+          const initialText = document.createElement('span');
+          initialText.textContent = initials;
+          initialText.className = 'marker-selection-avatar-initials';
+          avatar.appendChild(initialText);
+        }
+
+        const info = document.createElement('div');
+        info.className = 'marker-selection-info';
+
+        const name = document.createElement('div');
+        name.textContent = option?.firstName
+          ? `${option.firstName} ${option?.lastName || ''}`.trim()
+          : (option?.name || option?.email || 'Unknown User');
+        name.className = 'marker-selection-name';
+
+        const sub = document.createElement('div');
+        sub.textContent = option?.email || option?.subtitle || option?.lastMessage || '';
+        sub.className = 'marker-selection-sub';
+
+        info.appendChild(name);
+        info.appendChild(sub);
+        item.appendChild(avatar);
+        item.appendChild(info);
+
+        item.addEventListener('click', () => {
+          dismiss();
+          void this.selectEngineer(option);
+        });
+
+        list.appendChild(item);
+      }
+    }
+
+    const arrow = document.createElement('div');
+    arrow.className = 'marker-selection-arrow';
+
+    const dismiss = () => {
+      try { document.body.removeChild(overlay); } catch {}
+      if (this.markerSelectionOverlayElement === overlay) {
+        this.markerSelectionOverlayElement = undefined;
+      }
+    };
+
+    overlay.addEventListener('click', (event) => {
+      if (event.target === overlay) dismiss();
+    });
+
+    panel.addEventListener('click', (event) => event.stopPropagation());
+
+    panel.appendChild(title);
+    panel.appendChild(list);
+    wrap.appendChild(panel);
+    wrap.appendChild(arrow);
+    overlay.appendChild(wrap);
+
+    document.body.appendChild(overlay);
+    this.markerSelectionOverlayElement = overlay;
   }
 
     private clearSyncStateForUser(userId: string): void {
@@ -551,15 +661,55 @@ private async initialize(): Promise<void> {
   }
 
   /** Open the conversation view for a selected chat */
-  openChat(chat: any) {
+  async openChat(chat: any) {
     this.activeChat = chat || { name: 'Chat' };
     this.isChatOpen = true;
+    this.isSearching = false;
+    this.messages = [];
     // optional: lock page scroll or add class
     try { document.body.classList.add('chat-open'); } catch {}
+
+    const currentUid = this.auth3.getCurrentUser()?.uid || this.userID || '';
+    const selectedId = chat?.id || chat?.uid || chat?.userID || chat?.email;
+
+    if (!currentUid) {
+      this.currentChatId = null;
+      return;
+    }
+
+    try {
+      // If this chat already has a resolved chatId, just subscribe.
+      if (chat?.chatId) {
+        await this.subscribeToChatMessages(chat.chatId, currentUid);
+        return;
+      }
+
+      if (!selectedId) {
+        this.currentChatId = null;
+        return;
+      }
+
+      // Resolve chat and load history for chat-list taps too.
+      const ensured = await this.chatService.createOrEnsureChat(currentUid, selectedId);
+      this.activeChat = { ...this.activeChat, chatId: ensured.chatId };
+
+      const chatIndex = this.chats.findIndex(c => c.id === selectedId || c.name === chat?.name);
+      if (chatIndex >= 0) {
+        this.chats[chatIndex] = { ...this.chats[chatIndex], chatId: ensured.chatId };
+      }
+
+      await this.subscribeToChatMessages(ensured.chatId, currentUid);
+    } catch (error) {
+      console.warn('[ChatPage.openChat] Unable to load chat history for selected chat:', error);
+      this.currentChatId = null;
+    }
   }
 
   /** Close the conversation view and return to the chat list preview */
   closeChat() {
+    try { this.messagesSub?.unsubscribe(); } catch {}
+    this.messagesSub = undefined;
+    this.currentChatId = null;
     this.isChatOpen = false;
     this.activeChat = null;
     try { document.body.classList.remove('chat-open'); } catch {}
@@ -576,6 +726,7 @@ private async initialize(): Promise<void> {
     if (tab === 'person' || tab === 'people') {
       this.isChatOpen = false;
       this.isSearching = false;
+      this.destroyMapInstance();
     }
     // selecting location will show the Map view (ensure no chat overlay is open)
     if (tab === 'location') {
@@ -583,7 +734,164 @@ private async initialize(): Promise<void> {
       this.isSearching = false;
       this.handleMapResizeOnReentry();
       this.scheduleMapInitialization();
+    } else if (tab === 'settings') {
+      this.destroyMapInstance();
     }
+  }
+
+  private destroyMapInstance(): void {
+    if (!this.map) return;
+    try {
+      this.map.remove();
+    } catch (error) {
+      console.warn('[ChatPage.destroyMapInstance] Failed to remove map instance cleanly.', error);
+    }
+    this.map = null;
+    this.userLocationMarker = undefined;
+  }
+
+  private bindMarkerSelectionTrigger(marker: L.Marker, titleText: string): void {
+    marker.off('click');
+    marker.off('touchend');
+
+    const openOverlay = () => {
+      setTimeout(() => {
+        void this.openMarkerSelectionOverlay(titleText);
+      }, 0);
+    };
+
+    marker.on('click', openOverlay);
+    marker.on('touchend', openOverlay);
+  }
+
+  private bindMapTapCapture(): void {
+    if (!this.map) return;
+    this.map.off('click');
+    this.map.on('click', (event: L.LeafletMouseEvent) => {
+      const latitude = event.latlng.lat;
+      const longitude = event.latlng.lng;
+      console.log('[ChatPage.mapTap] tapped coordinates:', { latitude, longitude });
+      this.openMapTapMarkerOverlay(latitude, longitude);
+    });
+  }
+
+  private openMapTapMarkerOverlay(initialLatitude: number, initialLongitude: number): void {
+    if (!this.map) return;
+    if (this.mapTapOverlayElement) return;
+
+    const overlay = document.createElement('div');
+    overlay.className = 'map-overlay map-overlay--dim';
+
+    const panel = document.createElement('div');
+    panel.className = 'map-overlay-panel';
+
+    const title = document.createElement('h3');
+    title.textContent = 'Place marker from tapped position';
+    title.className = 'map-overlay-title';
+
+    const latInput = document.createElement('input');
+    latInput.type = 'number';
+    latInput.placeholder = 'Latitude';
+    latInput.step = 'any';
+    latInput.value = initialLatitude.toFixed(6);
+    latInput.className = 'map-overlay-input';
+
+    const lngInput = document.createElement('input');
+    lngInput.type = 'number';
+    lngInput.placeholder = 'Longitude';
+    lngInput.step = 'any';
+    lngInput.value = initialLongitude.toFixed(6);
+    lngInput.className = 'map-overlay-input';
+
+    const message = document.createElement('div');
+    message.className = 'map-overlay-message';
+
+    const actions = document.createElement('div');
+    actions.className = 'map-overlay-actions';
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button';
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.className = 'map-overlay-btn map-overlay-btn--secondary';
+
+    const placeBtn = document.createElement('button');
+    placeBtn.type = 'button';
+    placeBtn.textContent = 'Place Marker';
+    placeBtn.className = 'map-overlay-btn map-overlay-btn--primary';
+
+    actions.appendChild(cancelBtn);
+    actions.appendChild(placeBtn);
+
+    panel.appendChild(title);
+    panel.appendChild(latInput);
+    panel.appendChild(lngInput);
+    panel.appendChild(message);
+    panel.appendChild(actions);
+    overlay.appendChild(panel);
+
+    const dismiss = () => {
+      try { document.body.removeChild(overlay); } catch {}
+      if (this.mapTapOverlayElement === overlay) {
+        this.mapTapOverlayElement = undefined;
+      }
+    };
+
+    overlay.addEventListener('click', (event) => {
+      if (event.target === overlay) dismiss();
+    });
+
+    panel.addEventListener('click', (event) => {
+      event.stopPropagation();
+    });
+
+    cancelBtn.addEventListener('click', () => dismiss());
+
+    const placeMarkerFromInput = () => {
+      if (!this.map) {
+        message.textContent = 'Map is not ready yet. Try again.';
+        return;
+      }
+
+      const latitude = Number.parseFloat(latInput.value);
+      const longitude = Number.parseFloat(lngInput.value);
+
+      if (Number.isNaN(latitude) || Number.isNaN(longitude)) {
+        message.textContent = 'Please enter valid numeric latitude and longitude.';
+        return;
+      }
+
+      if (latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180) {
+        message.textContent = 'Latitude must be -90..90 and longitude must be -180..180.';
+        return;
+      }
+
+      const tappedMarker = L.marker([latitude, longitude])
+        .addTo(this.map)
+        .bindPopup(`Marker: ${latitude.toFixed(6)}, ${longitude.toFixed(6)}`)
+        .openPopup();
+
+      this.bindMarkerSelectionTrigger(tappedMarker, 'Marker Selection Overlay');
+      this.map.setView([latitude, longitude], 15);
+      console.log('[ChatPage.mapTap] marker placed from overlay:', { latitude, longitude });
+      dismiss();
+    };
+
+    placeBtn.addEventListener('click', placeMarkerFromInput);
+    latInput.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        lngInput.focus();
+      }
+    });
+    lngInput.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        placeMarkerFromInput();
+      }
+    });
+
+    document.body.appendChild(overlay);
+    this.mapTapOverlayElement = overlay;
   }
 
   private handleMapResizeOnReentry(): void {
@@ -698,6 +1006,21 @@ private async initialize(): Promise<void> {
   private async initMap(): Promise<void> {
     console.log('[ChatPage.initMap] Initializing map...');
     try {
+      const mapEl = document.getElementById('map');
+      if (!mapEl) {
+        console.warn('[ChatPage.initMap] Map element not found (#map).');
+        return;
+      }
+
+      // If map exists but points to an old/detached container (after tab/page navigation), recreate it.
+      if (this.map) {
+        const existingContainer = (this.map as any)?._container as HTMLElement | undefined;
+        if (!existingContainer || existingContainer !== mapEl || !document.body.contains(existingContainer)) {
+          console.log('[ChatPage.initMap] Existing map is bound to a stale container. Recreating map instance.');
+          this.destroyMapInstance();
+        }
+      }
+
       const coordinates = await this.getCurrentCoordinates();
       console.log('[ChatPage.initMap] Coordinates resolved for map:', coordinates);
       const center: [number, number] = coordinates
@@ -713,20 +1036,18 @@ private async initialize(): Promise<void> {
         return;
       }
 
-      const mapEl = document.getElementById('map');
-      if (!mapEl) {
-        console.warn('[ChatPage.initMap] Map element not found (#map).');
-        return;
-      }
-
       this.map = L.map(mapEl).setView(center, coordinates ? 15 : 13);
       console.log('[ChatPage.initMap] Leaflet map created with center:', center);
+      // place developer/test markers after map creation
+      try { this.placeTestMarkers(); } catch (err) { console.error('[ChatPage.initMap] placeTestMarkers error', err); }
 
       L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         maxZoom: 19,
         attribution: '&copy; OpenStreetMap contributors'
       }).addTo(this.map);
       console.log('[ChatPage.initMap] Tile layer added.');
+
+      this.bindMapTapCapture();
 
       await this.markUserLocation(this.map, coordinates);
       console.log('[ChatPage.initMap] User location marker handling complete.');
@@ -749,6 +1070,7 @@ private async initialize(): Promise<void> {
 
         if (this.userLocationMarker) {
           this.userLocationMarker.setLatLng([latitude, longitude]);
+          this.bindMarkerSelectionTrigger(this.userLocationMarker, 'You are here Selection Overlay');
           console.log('[ChatPage.markUserLocation] Existing marker updated.');
         } else {
           // this.userLocationMarker = L.marker([latitude, longitude])
@@ -761,6 +1083,8 @@ private async initialize(): Promise<void> {
   .addTo(map)
   .bindPopup('You are here!')
   .openPopup();
+          this.bindMarkerSelectionTrigger(this.userLocationMarker, 'You are here Selection Overlay');
+
           console.log('[ChatPage.markUserLocation] New marker created.');
         }
 
@@ -782,10 +1106,48 @@ private readonly userLocationIcon = L.icon({
   shadowSize: [41, 41]
 });
 
+    /** Place the test markers (from `testMarkers`) onto the currently-initialized map. */
+    private placeTestMarkers(): void {
+      if (!this.map) return;
+      for (const m of this.testMarkers) {
+        try {
+          const marker = L.marker([m.latitude, m.longitude]).addTo(this.map).bindPopup(`<strong>${m.name}</strong>`);
+          // preserve same behavior as other markers: open selection overlay when clicked
+          this.bindMarkerSelectionTrigger(marker, m.name);
+        } catch (err) {
+          console.error('[ChatPage.placeTestMarkers] Failed to add marker', m, err);
+        }
+      }
+    }
+
+  ionViewDidLeave(): void {
+    this.destroyMapInstance();
+    if (this.markerOverlayElement) {
+      try { document.body.removeChild(this.markerOverlayElement); } catch {}
+      this.markerOverlayElement = undefined;
+    }
+    if (this.markerSelectionOverlayElement) {
+      try { document.body.removeChild(this.markerSelectionOverlayElement); } catch {}
+      this.markerSelectionOverlayElement = undefined;
+    }
+    if (this.mapTapOverlayElement) {
+      try { document.body.removeChild(this.mapTapOverlayElement); } catch {}
+      this.mapTapOverlayElement = undefined;
+    }
+  }
+
   ngOnDestroy(): void {
     if (this.markerOverlayElement) {
       try { document.body.removeChild(this.markerOverlayElement); } catch {}
       this.markerOverlayElement = undefined;
+    }
+    if (this.markerSelectionOverlayElement) {
+      try { document.body.removeChild(this.markerSelectionOverlayElement); } catch {}
+      this.markerSelectionOverlayElement = undefined;
+    }
+    if (this.mapTapOverlayElement) {
+      try { document.body.removeChild(this.mapTapOverlayElement); } catch {}
+      this.mapTapOverlayElement = undefined;
     }
     if (this.mapResizeTimeoutId) {
       clearTimeout(this.mapResizeTimeoutId);

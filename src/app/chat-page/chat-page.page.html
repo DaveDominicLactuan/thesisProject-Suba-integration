@@ -158,6 +158,11 @@
         </div>
       </div>
     </div>
+
+    <div class="chat-list-bottom-art" aria-hidden="true">
+      <div class="chat-list-bottom-art-outer"></div>
+      <div class="chat-list-bottom-art-inner"></div>
+    </div>
   </ng-container>
 
   <!-- Search Conversation View (replaces main content when searching) -->
@@ -199,16 +204,6 @@
       </div>
     </div>
   </ng-container>
-
-  <!-- Chat conversation view (shown after clicking a chat-item) -->
-  <ng-container *ngIf="isChatOpen">
-    <!-- ...existing code... -->
-  </ng-container>
-
-  <!-- Bottom navigation -->
-  <div class="bottom-nav">
-    <!-- ...existing code... -->
-</div>
 
   <!-- Chat conversation view (shown after clicking a chat-item) -->
   <ng-container *ngIf="isChatOpen">
