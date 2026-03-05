@@ -913,12 +913,12 @@ ion-menu ion-item:hover {
 	left: 0;
 	right: 0;
 	bottom: 0;
-	background: rgba(0, 0, 0, 0.2);
+	background: rgba(0, 0, 0, 0.14);
 	display: flex;
 	align-items: center;
 	justify-content: center;
 	z-index: 10000;
-	padding: 14px;
+	padding: 16px;
 }
 
 .marker-selection-wrap {
@@ -926,68 +926,83 @@ ion-menu ion-item:hover {
 	flex-direction: column;
 	align-items: center;
 	width: 100%;
-	max-width: 520px;
+	max-width: 560px;
 }
 
 .marker-selection-panel {
 	width: 100%;
-	max-width: 520px;
-	background: #ffffff;
-	border: 2px solid #2e2e2e;
-	border-radius: 14px;
-	padding: 12px;
+	max-width: 540px;
+	background: #e8e8e8;
+	border: 1px solid #b8b8b8;
+	border-radius: 12px;
+	padding: 20px 18px 16px;
 	box-sizing: border-box;
-	max-height: 380px;
+	max-height: min(80vh, 530px);
 	display: flex;
 	flex-direction: column;
+	gap: 16px;
+	box-shadow: 0 8px 20px rgba(0, 0, 0, 0.1);
 }
 
 .marker-selection-title {
-	margin: 0 0 12px;
-	text-align: center;
-	font-size: 24px;
+	margin: 0;
+	text-align: left;
+	font-size: 15px;
 	line-height: 1.2;
-	font-weight: 700;
+	font-weight: 600;
+	color: #2a2a2a;
 }
 
 .marker-selection-list {
 	display: flex;
 	flex-direction: column;
-	gap: 10px;
+	gap: 14px;
 	overflow-y: auto;
-	max-height: 240px;
-	padding-right: 4px;
+	max-height: min(52vh, 340px);
+	padding-right: 2px;
+	-webkit-overflow-scrolling: touch;
 }
 
 .marker-selection-empty {
 	text-align: center;
-	color: #777;
-	padding: 16px 8px;
+	color: #636363;
+	padding: 24px 12px;
+	font-size: 0.95rem;
 }
 
 .marker-selection-item {
 	display: flex;
 	align-items: center;
-	gap: 12px;
+	gap: 14px;
 	width: 100%;
 	border: none;
-	border-radius: 10px;
-	background: #d9d9d9;
-	padding: 10px 12px;
+	border-radius: 5px;
+	background: #4fd86f;
+	padding: 10px 14px;
+	min-height: 92px;
 	cursor: pointer;
 	text-align: left;
+	transition: transform 0.12s ease, filter 0.12s ease;
+}
+
+.marker-selection-item:hover {
+	filter: brightness(0.98);
+}
+
+.marker-selection-item:active {
+	transform: scale(0.99);
 }
 
 .marker-selection-avatar {
-	width: 40px;
-	height: 40px;
-	min-width: 40px;
+	width: 64px;
+	height: 64px;
+	min-width: 64px;
 	border-radius: 999px;
 	overflow: hidden;
 	display: flex;
 	align-items: center;
 	justify-content: center;
-	background: #ff1a1a;
+	background: #ffb429;
 }
 
 .marker-selection-avatar-image {
@@ -997,34 +1012,88 @@ ion-menu ion-item:hover {
 }
 
 .marker-selection-avatar-initials {
-	color: #fff;
+	color: #1f1f1f;
 	font-weight: 700;
+	font-size: 1rem;
 }
 
 .marker-selection-info {
 	display: flex;
 	flex-direction: column;
+	gap: 3px;
 	min-width: 0;
 }
 
 .marker-selection-name {
-	font-size: 22px;
-	line-height: 1.05;
+	font-size: 2.1rem;
+	line-height: 1.02;
 	color: #1f1f1f;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
 }
 
 .marker-selection-sub {
-	font-size: 18px;
+	font-size: 2rem;
+	line-height: 1.02;
 	color: #1f1f1f;
 	opacity: 0.95;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
 }
 
-.marker-selection-arrow {
-	width: 0;
-	height: 0;
-	border-left: 18px solid transparent;
-	border-right: 18px solid transparent;
-	border-top: 28px solid #ffffff;
-	filter: drop-shadow(0 1px 0 #2e2e2e);
-	margin-top: -1px;
+.marker-selection-close-btn {
+	align-self: flex-end;
+	width: 176px;
+	height: 46px;
+	padding: 0 16px;
+	border: none;
+	border-radius: 10px;
+	background: #4432d8;
+	color: #ffffff;
+	font-size: 2rem;
+	line-height: 1;
+	cursor: pointer;
+	transition: filter 0.12s ease;
+}
+
+.marker-selection-close-btn:hover {
+	filter: brightness(1.06);
+}
+
+@media (max-width: 640px) {
+	.marker-selection-panel {
+		max-width: 94vw;
+		padding: 14px 12px;
+		gap: 12px;
+	}
+
+	.marker-selection-list {
+		gap: 10px;
+		max-height: min(52vh, 300px);
+	}
+
+	.marker-selection-item {
+		min-height: 78px;
+		padding: 8px 10px;
+		gap: 10px;
+	}
+
+	.marker-selection-avatar {
+		width: 52px;
+		height: 52px;
+		min-width: 52px;
+	}
+
+	.marker-selection-name,
+	.marker-selection-sub {
+		font-size: 1.45rem;
+	}
+
+	.marker-selection-close-btn {
+		width: 138px;
+		height: 40px;
+		font-size: 1.55rem;
+	}
 }

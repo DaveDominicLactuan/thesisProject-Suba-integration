@@ -68,13 +68,155 @@ export class ChatPagePage implements OnInit, OnDestroy {
   private isElementVisiblyRendered(element: HTMLElement): boolean {
     const style = window.getComputedStyle(element);
     const rect = element.getBoundingClientRect();
+    const viewportWidth = window.innerWidth || document.documentElement.clientWidth;
+    const viewportHeight = window.innerHeight || document.documentElement.clientHeight;
+    const intersectsViewport = (
+      rect.bottom >= 0 &&
+      rect.right >= 0 &&
+      rect.top <= viewportHeight &&
+      rect.left <= viewportWidth
+    );
+
     return (
       style.display !== 'none' &&
       style.visibility !== 'hidden' &&
       style.opacity !== '0' &&
       rect.width > 0 &&
-      rect.height > 0
+      rect.height > 0 &&
+      intersectsViewport
     );
+  }
+
+  private applyMarkerSelectionOverlayInlineStyles(
+    overlay: HTMLDivElement,
+    wrap: HTMLDivElement,
+    panel: HTMLDivElement,
+    list: HTMLDivElement,
+    closeBtn: HTMLButtonElement
+  ): void {
+    const isMobile = window.innerWidth <= 640;
+
+    Object.assign(overlay.style, {
+      position: 'fixed',
+      inset: '0',
+      background: 'rgba(0, 0, 0, 0.14)',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      zIndex: '2147483646',
+      padding: isMobile ? '12px' : '16px'
+    });
+
+    Object.assign(wrap.style, {
+      display: 'flex',
+      flexDirection: 'column',
+      alignItems: 'center',
+      width: '100%',
+      maxWidth: isMobile ? '94vw' : '560px'
+    });
+
+    Object.assign(panel.style, {
+      width: '100%',
+      maxWidth: isMobile ? '94vw' : '540px',
+      background: '#e8e8e8',
+      border: '1px solid #b8b8b8',
+      borderRadius: '12px',
+      padding: isMobile ? '14px 12px' : '20px 18px 16px',
+      boxSizing: 'border-box',
+      // maxHeight: isMobile ? 'min(82vh, 500px)' : 'min(80vh, 530px)',
+       maxHeight: isMobile ? 'min(82vh, 350px)' : 'min(80vh, 530px)',
+      display: 'flex',
+      flexDirection: 'column',
+      gap: isMobile ? '12px' : '16px',
+      boxShadow: '0 8px 20px rgba(0, 0, 0, 0.1)'
+    });
+
+    Object.assign(list.style, {
+      display: 'flex',
+      flexDirection: 'column',
+      gap: isMobile ? '10px' : '14px',
+      overflowY: 'auto',
+      maxHeight: isMobile ? 'min(52vh, 300px)' : 'min(52vh, 340px)',
+      paddingRight: '2px'
+    });
+
+    Object.assign(closeBtn.style, {
+      alignSelf: 'flex-end',
+      width: isMobile ? '138px' : '176px',
+      height: isMobile ? '120px' : '126px',
+      padding: '0 16px',
+      border: 'none',
+      borderRadius: '10px',
+      background: '#4432d8',
+      color: '#ffffff',
+      fontSize: isMobile ? '1.35rem' : '2rem',
+      lineHeight: '1',
+      cursor: 'pointer'
+    });
+  }
+
+  private applyMarkerSelectionItemInlineStyles(
+    item: HTMLButtonElement,
+    avatar: HTMLDivElement,
+    info: HTMLDivElement,
+    name: HTMLDivElement,
+    sub: HTMLDivElement
+  ): void {
+    const isMobile = window.innerWidth <= 640;
+
+    Object.assign(item.style, {
+      display: 'flex',
+      alignItems: 'center',
+      gap: isMobile ? '10px' : '14px',
+      width: '100%',
+      border: 'none',
+      borderRadius: '5px',
+      // background: '#4fd86f',
+      background: 'FCF8F8',
+      padding: isMobile ? '8px 10px' : '10px 14px',
+      minHeight: isMobile ? '78px' : '92px',
+      cursor: 'pointer',
+      textAlign: 'left',
+      transition: 'transform 0.12s ease, filter 0.12s ease'
+    });
+
+    Object.assign(avatar.style, {
+      width: isMobile ? '52px' : '64px',
+      height: isMobile ? '52px' : '64px',
+      minWidth: isMobile ? '52px' : '64px',
+      borderRadius: '999px',
+      overflow: 'hidden',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      background: '#ffb429'
+    });
+
+    Object.assign(info.style, {
+      display: 'flex',
+      flexDirection: 'column',
+      gap: '3px',
+      minWidth: '0'
+    });
+
+    Object.assign(name.style, {
+      fontSize: isMobile ? '1.2rem' : '1.9rem',
+      lineHeight: '1.5',
+      color: '#1f1f1f',
+      whiteSpace: 'nowrap',
+      overflow: 'hidden',
+      textOverflow: 'ellipsis'
+    });
+
+    Object.assign(sub.style, {
+      fontSize: isMobile ? '1.25rem' : '1.9rem',
+      lineHeight: '1.02',
+      color: '#1f1f1f',
+      opacity: '0.95',
+      whiteSpace: 'nowrap',
+      overflow: 'hidden',
+      textOverflow: 'ellipsis'
+    });
   }
 
   private applyMapTapOverlayInlineStyles(
@@ -621,14 +763,37 @@ private async initialize(): Promise<void> {
     latInput.focus();
   }
 
-  async openMarkerSelectionOverlay(titleText: string = 'You are here Selection Overlay'): Promise<void> {
-    if (this.markerSelectionOverlayElement) return;
+  async openMarkerSelectionOverlay(titleText: string = 'Engineer Selection Overlay'): Promise<void> {
+    console.log('[ChatPage.markerSelection] openMarkerSelectionOverlay requested', {
+      titleText,
+      hasOverlayRef: !!this.markerSelectionOverlayElement,
+      engineersCached: this.engineers.length
+    });
+
+    if (this.markerSelectionOverlayElement) {
+      const isMounted = document.body.contains(this.markerSelectionOverlayElement);
+      const isVisible = isMounted && this.isElementVisiblyRendered(this.markerSelectionOverlayElement);
+      console.log('[ChatPage.markerSelection] Existing overlay reference detected', { isMounted, isVisible });
+
+      if (isMounted && isVisible) {
+        console.log('[ChatPage.markerSelection] Overlay is already open; skipping duplicate render.');
+        return;
+      }
+
+      try { document.body.removeChild(this.markerSelectionOverlayElement); } catch {}
+      this.markerSelectionOverlayElement = undefined;
+      console.warn('[ChatPage.markerSelection] Cleared stale overlay reference before rendering a new one.');
+    }
 
     if (!this.engineers.length) {
       try { await this.fetchEngineers(); } catch (err) { console.warn('[ChatPage] fetchEngineers in marker overlay failed', err); }
     }
 
     const options = (this.engineers.length ? this.engineers : this.searchConversationResults) || [];
+    console.log('[ChatPage.markerSelection] Preparing overlay options', {
+      source: this.engineers.length ? 'firestore-engineers' : 'placeholder-results',
+      count: options.length
+    });
 
     const overlay = document.createElement('div');
     overlay.className = 'marker-selection-overlay';
@@ -638,18 +803,38 @@ private async initialize(): Promise<void> {
 
     const panel = document.createElement('div');
     panel.className = 'marker-selection-panel';
-
-    const title = document.createElement('h3');
-    title.textContent = titleText;
-    title.className = 'marker-selection-title';
+    panel.setAttribute('role', 'dialog');
+    panel.setAttribute('aria-modal', 'true');
+    panel.setAttribute('aria-label', titleText || 'Engineer selection');
 
     const list = document.createElement('div');
     list.className = 'marker-selection-list';
 
+    const closeBtn = document.createElement('button');
+    closeBtn.type = 'button';
+    closeBtn.className = 'marker-selection-close-btn';
+    closeBtn.textContent = 'Close';
+
+    this.applyMarkerSelectionOverlayInlineStyles(overlay, wrap, panel, list, closeBtn);
+
+    const dismiss = (reason: 'button' | 'backdrop' | 'selection' = 'button') => {
+      console.log('[ChatPage.markerSelection] Closing overlay', { reason });
+      try { document.body.removeChild(overlay); } catch {}
+      if (this.markerSelectionOverlayElement === overlay) {
+        this.markerSelectionOverlayElement = undefined;
+      }
+    };
+
     if (!options.length) {
       const empty = document.createElement('div');
-      empty.textContent = 'No users available.';
+      empty.textContent = 'No engineers available.';
       empty.className = 'marker-selection-empty';
+      Object.assign(empty.style, {
+        textAlign: 'center',
+        color: '#636363',
+        padding: '24px 12px',
+        fontSize: '0.95rem'
+      });
       list.appendChild(empty);
     } else {
       for (const option of options) {
@@ -666,12 +851,22 @@ private async initialize(): Promise<void> {
           img.src = avatarUrl;
           img.alt = 'avatar';
           img.className = 'marker-selection-avatar-image';
+          Object.assign(img.style, {
+            width: '100%',
+            height: '100%',
+            objectFit: 'cover'
+          });
           avatar.appendChild(img);
         } else {
           const initials = (option?.initials || this.getInitials(option?.firstName ? `${option.firstName} ${option?.lastName || ''}` : option?.name || option?.email || 'U')).toUpperCase();
           const initialText = document.createElement('span');
           initialText.textContent = initials;
           initialText.className = 'marker-selection-avatar-initials';
+          Object.assign(initialText.style, {
+            color: '#1f1f1f',
+            fontWeight: '700',
+            fontSize: window.innerWidth <= 640 ? '0.95rem' : '1rem'
+          });
           avatar.appendChild(initialText);
         }
 
@@ -679,14 +874,40 @@ private async initialize(): Promise<void> {
         info.className = 'marker-selection-info';
 
         const name = document.createElement('div');
-        name.textContent = option?.firstName
+        const displayName = option?.firstName
           ? `${option.firstName} ${option?.lastName || ''}`.trim()
           : (option?.name || option?.email || 'Unknown User');
+        name.textContent = displayName;
         name.className = 'marker-selection-name';
 
         const sub = document.createElement('div');
-        sub.textContent = option?.email || option?.subtitle || option?.lastMessage || '';
+        const contact = option?.phoneNumber
+          || option?.phone
+          || option?.contactNumber
+          || option?.mobile
+          || option?.mobileNumber
+          || option?.telephone
+          || option?.tel
+          || option?.contact
+          || 'Phone Number';
+        sub.textContent = contact;
         sub.className = 'marker-selection-sub';
+
+        this.applyMarkerSelectionItemInlineStyles(item, avatar, info, name, sub);
+
+        item.addEventListener('pointerenter', () => {
+          item.style.filter = 'brightness(0.98)';
+        });
+        item.addEventListener('pointerleave', () => {
+          item.style.filter = '';
+          item.style.transform = '';
+        });
+        item.addEventListener('pointerdown', () => {
+          item.style.transform = 'scale(0.99)';
+        });
+        item.addEventListener('pointerup', () => {
+          item.style.transform = '';
+        });
 
         info.appendChild(name);
         info.appendChild(sub);
@@ -694,7 +915,11 @@ private async initialize(): Promise<void> {
         item.appendChild(info);
 
         item.addEventListener('click', () => {
-          dismiss();
+          console.log('[ChatPage.markerSelection] Engineer row tapped', {
+            selectedId: option?.id || option?.uid || option?.userID || option?.email || 'unknown',
+            selectedName: displayName
+          });
+          dismiss('selection');
           void this.selectEngineer(option);
         });
 
@@ -702,30 +927,39 @@ private async initialize(): Promise<void> {
       }
     }
 
-    const arrow = document.createElement('div');
-    arrow.className = 'marker-selection-arrow';
-
-    const dismiss = () => {
-      try { document.body.removeChild(overlay); } catch {}
-      if (this.markerSelectionOverlayElement === overlay) {
-        this.markerSelectionOverlayElement = undefined;
-      }
-    };
+    closeBtn.addEventListener('click', () => dismiss('button'));
 
     overlay.addEventListener('click', (event) => {
-      if (event.target === overlay) dismiss();
+      if (event.target === overlay) dismiss('backdrop');
     });
 
     panel.addEventListener('click', (event) => event.stopPropagation());
 
-    panel.appendChild(title);
     panel.appendChild(list);
+    panel.appendChild(closeBtn);
     wrap.appendChild(panel);
-    wrap.appendChild(arrow);
     overlay.appendChild(wrap);
 
     document.body.appendChild(overlay);
     this.markerSelectionOverlayElement = overlay;
+
+    const rect = panel.getBoundingClientRect();
+    const overlayComputedStyle = window.getComputedStyle(overlay);
+    console.log('[ChatPage.markerSelection] Overlay rendered', {
+      isMounted: document.body.contains(overlay),
+      isVisible: this.isElementVisiblyRendered(overlay),
+      optionsCount: options.length,
+      panelTop: Math.round(rect.top),
+      panelLeft: Math.round(rect.left),
+      panelWidth: Math.round(rect.width),
+      panelHeight: Math.round(rect.height),
+      overlayPosition: overlayComputedStyle.position,
+      overlayZIndex: overlayComputedStyle.zIndex,
+      viewportWidth: window.innerWidth,
+      viewportHeight: window.innerHeight
+    });
+
+    try { closeBtn.focus(); } catch {}
   }
 
     private clearSyncStateForUser(userId: string): void {
@@ -852,14 +1086,25 @@ private async initialize(): Promise<void> {
     marker.off('click');
     marker.off('touchend');
 
-    const openOverlay = () => {
+    const openOverlay = (trigger: 'click' | 'touchend') => {
+      console.log('[ChatPage.markerSelection] Marker interaction detected', { trigger, titleText });
       setTimeout(() => {
-        void this.openMarkerSelectionOverlay(titleText);
+        void this.openMarkerSelectionOverlay(titleText)
+          .then(() => {
+            console.log('[ChatPage.markerSelection] openMarkerSelectionOverlay resolved', { trigger, titleText });
+          })
+          .catch((err) => {
+            console.error('[ChatPage.markerSelection] openMarkerSelectionOverlay failed', {
+              trigger,
+              titleText,
+              err
+            });
+          });
       }, 0);
     };
 
-    marker.on('click', openOverlay);
-    marker.on('touchend', openOverlay);
+    marker.on('click', () => openOverlay('click'));
+    marker.on('touchend', () => openOverlay('touchend'));
   }
 
   private handleMapTapCoordinates(latitude: number, longitude: number, source: 'click' | 'touchend'): void {
