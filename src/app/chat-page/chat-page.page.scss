@@ -255,7 +255,7 @@
 .story-avatar {
 	width: 64px;
 	height: 64px;
-	border-radius: 50%;
+	border-radius: 10%;
 	object-fit: cover;
 	border: 3px solid #f2f2f2;
 	margin-bottom: 6px;
@@ -370,7 +370,8 @@
 	min-height: 52px;
 	max-width: 52px;
 	max-height: 52px;
-	border-radius: 50%;
+	// border-radius: 50%;
+	border-radius: 10%;
 	object-fit: cover;
 	background: #eee;
 	display: flex;

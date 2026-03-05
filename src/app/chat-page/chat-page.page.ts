@@ -59,6 +59,102 @@ export class ChatPagePage implements OnInit, OnDestroy {
   private markerSelectionOverlayElement?: HTMLDivElement;
   private mapTapOverlayElement?: HTMLDivElement;
 
+  private dismissMapTapOverlay(): void {
+    if (!this.mapTapOverlayElement) return;
+    try { document.body.removeChild(this.mapTapOverlayElement); } catch {}
+    this.mapTapOverlayElement = undefined;
+  }
+
+  private isElementVisiblyRendered(element: HTMLElement): boolean {
+    const style = window.getComputedStyle(element);
+    const rect = element.getBoundingClientRect();
+    return (
+      style.display !== 'none' &&
+      style.visibility !== 'hidden' &&
+      style.opacity !== '0' &&
+      rect.width > 0 &&
+      rect.height > 0
+    );
+  }
+
+  private applyMapTapOverlayInlineStyles(
+    overlay: HTMLDivElement,
+    panel: HTMLDivElement,
+    title: HTMLHeadingElement,
+    lngInput: HTMLInputElement,
+    latInput: HTMLInputElement,
+    message: HTMLDivElement,
+    actions: HTMLDivElement,
+    cancelBtn: HTMLButtonElement,
+    placeBtn: HTMLButtonElement
+  ): void {
+    Object.assign(overlay.style, {
+      position: 'fixed',
+      inset: '0',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      padding: '16px',
+      zIndex: '2147483647',
+      background: 'rgba(0, 0, 0, 0.45)'
+    });
+
+    Object.assign(panel.style, {
+      background: '#ffffff',
+      borderRadius: '14px',
+      width: '100%',
+      maxWidth: '360px',
+      padding: '16px',
+      boxShadow: '0 12px 30px rgba(0, 0, 0, 0.2)',
+      display: 'flex',
+      flexDirection: 'column',
+      gap: '10px'
+    });
+
+    Object.assign(title.style, {
+      margin: '0 0 4px',
+      fontSize: '17px'
+    });
+
+    const inputStyle: Partial<CSSStyleDeclaration> = {
+      height: '40px',
+      padding: '0 10px',
+      border: '1px solid #d6d6d6',
+      borderRadius: '8px'
+    };
+    Object.assign(lngInput.style, inputStyle);
+    Object.assign(latInput.style, inputStyle);
+
+    Object.assign(message.style, {
+      minHeight: '18px',
+      fontSize: '12px',
+      color: '#d32f2f'
+    });
+
+    Object.assign(actions.style, {
+      display: 'flex',
+      gap: '8px',
+      justifyContent: 'flex-end'
+    });
+
+    Object.assign(cancelBtn.style, {
+      height: '36px',
+      padding: '0 14px',
+      borderRadius: '8px',
+      border: '1px solid #d0d0d0',
+      background: '#fff'
+    });
+
+    Object.assign(placeBtn.style, {
+      height: '36px',
+      padding: '0 14px',
+      borderRadius: '8px',
+      border: 'none',
+      background: '#387ef5',
+      color: '#fff'
+    });
+  }
+
   // Placeholder search conversation results (simulate as in pasted image)
   searchConversationResults = [
     {
@@ -726,6 +822,7 @@ private async initialize(): Promise<void> {
     if (tab === 'person' || tab === 'people') {
       this.isChatOpen = false;
       this.isSearching = false;
+      this.dismissMapTapOverlay();
       this.destroyMapInstance();
     }
     // selecting location will show the Map view (ensure no chat overlay is open)
@@ -735,6 +832,7 @@ private async initialize(): Promise<void> {
       this.handleMapResizeOnReentry();
       this.scheduleMapInitialization();
     } else if (tab === 'settings') {
+      this.dismissMapTapOverlay();
       this.destroyMapInstance();
     }
   }
@@ -764,20 +862,61 @@ private async initialize(): Promise<void> {
     marker.on('touchend', openOverlay);
   }
 
+  private handleMapTapCoordinates(latitude: number, longitude: number, source: 'click' | 'touchend'): void {
+    const roundedLatitude = Number(latitude.toFixed(6));
+    const roundedLongitude = Number(longitude.toFixed(6));
+    console.log(`[ChatPage.mapTap] ${source} trigger detected:`, {
+      latitude: roundedLatitude,
+      longitude: roundedLongitude
+    });
+    this.openMapTapMarkerOverlay(roundedLatitude, roundedLongitude);
+  }
+
+  private handleMapTap(event: L.LeafletMouseEvent): void {
+    this.handleMapTapCoordinates(event.latlng.lat, event.latlng.lng, 'click');
+  }
+
   private bindMapTapCapture(): void {
     if (!this.map) return;
+    console.log('[ChatPage.bindMapTapCapture] Binding click/touch map listeners for tap-marker overlay.');
     this.map.off('click');
-    this.map.on('click', (event: L.LeafletMouseEvent) => {
-      const latitude = event.latlng.lat;
-      const longitude = event.latlng.lng;
-      console.log('[ChatPage.mapTap] tapped coordinates:', { latitude, longitude });
-      this.openMapTapMarkerOverlay(latitude, longitude);
+    this.map.off('touchend');
+    this.map.on('click', (event: L.LeafletMouseEvent) => this.handleMapTap(event));
+    this.map.on('touchend', (event: any) => {
+      const touchLatLng = event?.latlng;
+      if (!touchLatLng) {
+        console.warn('[ChatPage.mapTap] touchend detected but no latlng was provided by Leaflet.', event);
+        return;
+      }
+      this.handleMapTapCoordinates(touchLatLng.lat, touchLatLng.lng, 'touchend');
     });
   }
 
   private openMapTapMarkerOverlay(initialLatitude: number, initialLongitude: number): void {
-    if (!this.map) return;
-    if (this.mapTapOverlayElement) return;
+    console.log('[ChatPage.mapTapOverlay] Triggered for tapped coordinates:', {
+      latitude: initialLatitude,
+      longitude: initialLongitude
+    });
+    if (!this.map) {
+      console.warn('[ChatPage.mapTapOverlay] Not opened because map is not initialized.');
+      return;
+    }
+
+    if (this.mapTapOverlayElement) {
+      const isMounted = document.body.contains(this.mapTapOverlayElement);
+      const isVisible = isMounted && this.isElementVisiblyRendered(this.mapTapOverlayElement);
+
+      if (!isMounted || !isVisible) {
+        console.warn('[ChatPage.mapTapOverlay] Overlay state exists but is not visibly rendered. Recreating overlay.', {
+          isMounted,
+          isVisible
+        });
+        this.dismissMapTapOverlay();
+      } else {
+        console.log('[ChatPage.mapTapOverlay] Already open; skipping duplicate trigger.');
+        return;
+      }
+    }
 
     const overlay = document.createElement('div');
     overlay.className = 'map-overlay map-overlay--dim';
@@ -789,19 +928,19 @@ private async initialize(): Promise<void> {
     title.textContent = 'Place marker from tapped position';
     title.className = 'map-overlay-title';
 
-    const latInput = document.createElement('input');
-    latInput.type = 'number';
-    latInput.placeholder = 'Latitude';
-    latInput.step = 'any';
-    latInput.value = initialLatitude.toFixed(6);
-    latInput.className = 'map-overlay-input';
-
     const lngInput = document.createElement('input');
     lngInput.type = 'number';
-    lngInput.placeholder = 'Longitude';
+    lngInput.placeholder = 'Longitude (from tap)';
     lngInput.step = 'any';
     lngInput.value = initialLongitude.toFixed(6);
     lngInput.className = 'map-overlay-input';
+
+    const latInput = document.createElement('input');
+    latInput.type = 'number';
+    latInput.placeholder = 'Latitude (from tap)';
+    latInput.step = 'any';
+    latInput.value = initialLatitude.toFixed(6);
+    latInput.className = 'map-overlay-input';
 
     const message = document.createElement('div');
     message.className = 'map-overlay-message';
@@ -823,11 +962,23 @@ private async initialize(): Promise<void> {
     actions.appendChild(placeBtn);
 
     panel.appendChild(title);
-    panel.appendChild(latInput);
     panel.appendChild(lngInput);
+    panel.appendChild(latInput);
     panel.appendChild(message);
     panel.appendChild(actions);
     overlay.appendChild(panel);
+
+    this.applyMapTapOverlayInlineStyles(
+      overlay,
+      panel,
+      title,
+      lngInput,
+      latInput,
+      message,
+      actions,
+      cancelBtn,
+      placeBtn
+    );
 
     const dismiss = () => {
       try { document.body.removeChild(overlay); } catch {}
@@ -865,6 +1016,8 @@ private async initialize(): Promise<void> {
         return;
       }
 
+      console.log('[ChatPage.mapTapOverlay] Place Marker tapped with:', { latitude, longitude });
+
       const tappedMarker = L.marker([latitude, longitude])
         .addTo(this.map)
         .bindPopup(`Marker: ${latitude.toFixed(6)}, ${longitude.toFixed(6)}`)
@@ -877,13 +1030,13 @@ private async initialize(): Promise<void> {
     };
 
     placeBtn.addEventListener('click', placeMarkerFromInput);
-    latInput.addEventListener('keydown', (event) => {
+    lngInput.addEventListener('keydown', (event) => {
       if (event.key === 'Enter') {
         event.preventDefault();
-        lngInput.focus();
+        latInput.focus();
       }
     });
-    lngInput.addEventListener('keydown', (event) => {
+    latInput.addEventListener('keydown', (event) => {
       if (event.key === 'Enter') {
         event.preventDefault();
         placeMarkerFromInput();
@@ -892,6 +1045,13 @@ private async initialize(): Promise<void> {
 
     document.body.appendChild(overlay);
     this.mapTapOverlayElement = overlay;
+    console.log('[ChatPage.mapTapOverlay] Overlay opened successfully.');
+    console.log('[ChatPage.mapTapOverlay] Overlay visibility snapshot:', {
+      isMounted: document.body.contains(overlay),
+      isVisible: this.isElementVisiblyRendered(overlay),
+      rect: overlay.getBoundingClientRect().toJSON()
+    });
+    lngInput.focus();
   }
 
   private handleMapResizeOnReentry(): void {
@@ -1031,6 +1191,7 @@ private async initialize(): Promise<void> {
         console.log('[ChatPage.initMap] Map already initialized. Updating view and marker.');
         // already initialized: invalidate size in case container changed
         this.map.invalidateSize();
+        this.bindMapTapCapture();
         this.map.setView(center, 15);
         await this.markUserLocation(this.map, coordinates);
         return;
@@ -1098,8 +1259,10 @@ private async initialize(): Promise<void> {
     // Add once in your class (near other properties)
 private readonly userLocationIcon = L.icon({
   iconUrl: 'assets/map/user-marker.png',
-  iconRetinaUrl: 'assets/map/marker-icon-2x.png', // optional but recommended
-  shadowUrl: 'assets/map/marker-shadow.png',      // optional
+  // iconRetinaUrl: 'assets/map/marker-icon-2x.png', // optional but recommended
+  // shadowUrl: 'assets/map/marker-shadow.png',      // optional
+  iconRetinaUrl: 'assets/user-marker.png', // optional but recommended
+  shadowUrl: 'assets/user-marker.png',      // optional
   iconSize: [25, 41],
   iconAnchor: [12, 41],
   popupAnchor: [1, -34],
@@ -1130,10 +1293,7 @@ private readonly userLocationIcon = L.icon({
       try { document.body.removeChild(this.markerSelectionOverlayElement); } catch {}
       this.markerSelectionOverlayElement = undefined;
     }
-    if (this.mapTapOverlayElement) {
-      try { document.body.removeChild(this.mapTapOverlayElement); } catch {}
-      this.mapTapOverlayElement = undefined;
-    }
+    this.dismissMapTapOverlay();
   }
 
   ngOnDestroy(): void {
@@ -1145,10 +1305,7 @@ private readonly userLocationIcon = L.icon({
       try { document.body.removeChild(this.markerSelectionOverlayElement); } catch {}
       this.markerSelectionOverlayElement = undefined;
     }
-    if (this.mapTapOverlayElement) {
-      try { document.body.removeChild(this.mapTapOverlayElement); } catch {}
-      this.mapTapOverlayElement = undefined;
-    }
+    this.dismissMapTapOverlay();
     if (this.mapResizeTimeoutId) {
       clearTimeout(this.mapResizeTimeoutId);
       this.mapResizeTimeoutId = undefined;
