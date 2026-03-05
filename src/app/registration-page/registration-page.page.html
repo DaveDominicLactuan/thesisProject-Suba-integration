@@ -55,58 +55,108 @@
 
 
     <form [formGroup]="regForm" (ngSubmit)="onRegister()">
-  <ng-container *ngIf="selectedRole">
-    <div class="form-field" [class.invalid]="f['firstName'].invalid && (f['firstName'].touched || submitted)">
-      <ion-icon name="person-outline"></ion-icon>
-      <input type="text" placeholder="First Name" formControlName="firstName" />
-    </div>
-    <div *ngIf="f['firstName'].invalid && (f['firstName'].touched || submitted)" class="field-error">First name is required.</div>
-
-    <div class="form-field" [class.invalid]="f['lastName'].invalid && (f['lastName'].touched || submitted)">
-      <ion-icon name="person-outline"></ion-icon>
-      <input type="text" placeholder="Last Name" formControlName="lastName" />
-    </div>
-    <div *ngIf="f['lastName'].invalid && (f['lastName'].touched || submitted)" class="field-error">Last name is required.</div>
+      <ng-container *ngIf="selectedRole">
+        <!-- Stepper navigation UI -->
+        <div class="stepper">
+          <div class="step" [class.active]="step === 1">1</div>
+          <div class="step" [class.active]="step === 2">2</div>
+          <div class="step" [class.active]="step === 3">3</div>
+          <div class="step" [class.active]="step === 4">4</div>
+        </div>
 
 
+        <!-- Step 1: Account Info -->
+        <div *ngIf="step === 1">
+          <div class="form-field" [class.invalid]="f['email'].invalid && (f['email'].touched || submitted)">
+            <ion-icon name="mail-outline"></ion-icon>
+            <input type="email" placeholder="Email" formControlName="email" />
+          </div>
+          <div *ngIf="f['email'].invalid && (f['email'].touched || submitted)" class="field-error">
+            <span *ngIf="f['email'].errors?.['required']">Email is required.</span>
+            <span *ngIf="f['email'].errors?.['email']">Please enter a valid email address.</span>
+          </div>
 
-    <div *ngIf="selectedRole === 'engineer'">
-      <div class="form-field" [class.invalid]="f['engineeringID'].invalid && (f['engineeringID'].touched || submitted)">
-        <ion-icon name="id-card-outline"></ion-icon>
-        <input type="text" placeholder="Engineering ID" formControlName="engineeringID" />
-      </div>
-      <div *ngIf="f['engineeringID'].invalid && (f['engineeringID'].touched || submitted)" class="field-error">Engineering ID is required for Engineer role.</div>
-    </div>
+          <div class="form-field" [class.invalid]="f['password'].invalid && (f['password'].touched || submitted)">
+            <ion-icon name="lock-closed-outline"></ion-icon>
+            <input type="password" placeholder="Password" formControlName="password" />
+          </div>
+          <div *ngIf="f['password'].invalid && (f['password'].touched || submitted)" class="field-error">
+            <span *ngIf="f['password'].errors?.['required']">Password is required.</span>
+            <span *ngIf="f['password'].errors?.['minlength']">Password must be at least 6 characters.</span>
+          </div>
 
-    <div class="form-field" [class.invalid]="f['email'].invalid && (f['email'].touched || submitted)">
-      <ion-icon name="mail-outline"></ion-icon>
-      <input type="email" placeholder="Email" formControlName="email" />
-    </div>
-    <div *ngIf="f['email'].invalid && (f['email'].touched || submitted)" class="field-error">
-      <span *ngIf="f['email'].errors?.['required']">Email is required.</span>
-      <span *ngIf="f['email'].errors?.['email']">Please enter a valid email address.</span>
-    </div>
+          <div class="form-field" [class.invalid]="(f['confirmPassword'].invalid && (f['confirmPassword'].touched || submitted)) || (regForm.errors?.['mismatch'] && submitted)">
+            <ion-icon name="lock-closed-outline"></ion-icon>
+            <input type="password" placeholder="Confirm Password" formControlName="confirmPassword" />
+          </div>
+          <div *ngIf="(f['confirmPassword'].invalid && (f['confirmPassword'].touched || submitted))" class="field-error">Confirm password is required.</div>
+          <div *ngIf="regForm.errors?.['mismatch'] && submitted" class="field-error">Passwords do not match.</div>
 
-    <div class="form-field" [class.invalid]="f['password'].invalid && (f['password'].touched || submitted)">
-      <ion-icon name="lock-closed-outline"></ion-icon>
-      <input type="password" placeholder="Password" formControlName="password" />
-    </div>
-    <div *ngIf="f['password'].invalid && (f['password'].touched || submitted)" class="field-error">
-      <span *ngIf="f['password'].errors?.['required']">Password is required.</span>
-      <span *ngIf="f['password'].errors?.['minlength']">Password must be at least 6 characters.</span>
-    </div>
+          <button class="signup-btn" type="button" (click)="nextStep()" [disabled]="f['email'].invalid || f['password'].invalid || f['confirmPassword'].invalid || regForm.errors?.['mismatch']">Next</button>
+        </div>
 
-    <div class="form-field" [class.invalid]="(f['confirmPassword'].invalid && (f['confirmPassword'].touched || submitted)) || (regForm.errors?.['mismatch'] && submitted)">
-      <ion-icon name="lock-closed-outline"></ion-icon>
-      <input type="password" placeholder="Confirm Password" formControlName="confirmPassword" />
-    </div>
-    <div *ngIf="(f['confirmPassword'].invalid && (f['confirmPassword'].touched || submitted))" class="field-error">Confirm password is required.</div>
-    <div *ngIf="regForm.errors?.['mismatch'] && submitted" class="field-error">Passwords do not match.</div>
+        <!-- Step 2: User Info -->
+        <div *ngIf="step === 2">
+          <div class="form-field" [class.invalid]="f['firstName'].invalid && (f['firstName'].touched || submitted)">
+            <ion-icon name="person-outline"></ion-icon>
+            <input type="text" placeholder="First Name" formControlName="firstName" />
+          </div>
+          <div *ngIf="f['firstName'].invalid && (f['firstName'].touched || submitted)" class="field-error">First name is required.</div>
 
-    <button class="signup-btn" type="submit" [disabled]="regForm.invalid || !selectedRole">SIGN UP</button>
-    <button class="signup-btn" type="submit" (click)="showNoticeWindow()">Append</button>
-  </ng-container>
-</form>
+          <div class="form-field" [class.invalid]="f['lastName'].invalid && (f['lastName'].touched || submitted)">
+            <ion-icon name="person-outline"></ion-icon>
+            <input type="text" placeholder="Last Name" formControlName="lastName" />
+          </div>
+          <div *ngIf="f['lastName'].invalid && (f['lastName'].touched || submitted)" class="field-error">Last name is required.</div>
+
+          <div *ngIf="selectedRole === 'engineer'">
+            <div class="form-field" [class.invalid]="f['engineeringID'].invalid && (f['engineeringID'].touched || submitted)">
+              <ion-icon name="id-card-outline"></ion-icon>
+              <input type="text" placeholder="PRC Number" formControlName="engineeringID" />
+            </div>
+            <div *ngIf="f['engineeringID'].invalid && (f['engineeringID'].touched || submitted)" class="field-error">PRC Number is required for Engineer role.</div>
+          </div>
+
+          <button class="signup-btn" type="button" (click)="prevStep()">Back</button>
+          <button class="signup-btn" type="button" (click)="nextStep()" [disabled]="f['firstName'].invalid || f['lastName'].invalid || (selectedRole === 'engineer' && f['engineeringID'].invalid)">Next</button>
+        </div>
+
+        <!-- Step 3: Contact Info -->
+        <div *ngIf="step === 3">
+          <div class="form-field" [class.invalid]="f['phoneNumber']?.invalid && (f['phoneNumber']?.touched || submitted)">
+            <ion-icon name="call-outline"></ion-icon>
+            <input type="tel" placeholder="Phone Number" formControlName="phoneNumber" />
+          </div>
+          <div *ngIf="f['phoneNumber']?.invalid && (f['phoneNumber']?.touched || submitted)" class="field-error">Phone number is required.</div>
+
+          <div class="form-field" [class.invalid]="f['location']?.invalid && (f['location']?.touched || submitted)">
+            <ion-icon name="location-outline"></ion-icon>
+            <input type="text" placeholder="Location (City, Province)" formControlName="location" />
+          </div>
+          <div *ngIf="f['location']?.invalid && (f['location']?.touched || submitted)" class="field-error">Location is required.</div>
+
+          <button class="signup-btn" type="button" (click)="prevStep()">Back</button>
+          <button class="signup-btn" type="button" (click)="nextStep()" [disabled]="f['phoneNumber']?.invalid || f['location']?.invalid">Next</button>
+        </div>
+
+        <!-- Step 4: Confirm Details -->
+        <div *ngIf="step === 4">
+          <div class="confirm-details">
+            <h3 style="text-align:center;margin-bottom:18px;">Confirm Your Details</h3>
+            <div class="confirm-row"><span>First Name:</span> <span>{{ regForm.value.firstName }}</span></div>
+            <div class="confirm-row"><span>Last Name:</span> <span>{{ regForm.value.lastName }}</span></div>
+            <div class="confirm-row" *ngIf="selectedRole === 'engineer'"><span>PRC Number:</span> <span>{{ regForm.value.engineeringID }}</span></div>
+            <div class="confirm-row"><span>Email:</span> <span>{{ regForm.value.email }}</span></div>
+            <div class="confirm-row"><span>Phone Number:</span> <span>{{ regForm.value.phoneNumber }}</span></div>
+            <div class="confirm-row"><span>Location:</span> <span>{{ regForm.value.location }}</span></div>
+            <div class="confirm-row"><span>Password:</span> <span>••••••••</span></div>
+            <div class="confirm-row"><span>Role:</span> <span>{{ selectedRole | titlecase }}</span></div>
+          </div>
+          <button class="signup-btn" type="button" (click)="prevStep()">Back</button>
+          <button class="signup-btn" type="submit" [disabled]="regForm.invalid || !selectedRole">Confirm & Sign Up</button>
+        </div>
+      </ng-container>
+    </form>
 
 
   </div>

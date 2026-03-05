@@ -1,3 +1,23 @@
+.scrollable-menu {
+  max-height: 78vh;
+  overflow-y: auto;
+  padding-right: 4px;
+  scrollbar-width: thin;
+  scrollbar-color: #ffb347 #f0f0f0;
+}
+
+// Custom scrollbar for webkit browsers
+.scrollable-menu::-webkit-scrollbar {
+  width: 7px;
+}
+.scrollable-menu::-webkit-scrollbar-thumb {
+  background: #ffb347;
+  border-radius: 6px;
+}
+.scrollable-menu::-webkit-scrollbar-track {
+  background: #f0f0f0;
+  border-radius: 6px;
+}
 * {
   font-family: 'Segoe UI Variable Text Semibold', sans-serif;
 }

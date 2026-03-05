@@ -13,6 +13,10 @@ import { Auth3Service } from '../services/auth3.service';
   standalone: false
 })
 export class RegistrationPagePage implements OnInit {
+  // Stepper state for multi-stage registration
+  step: number = 1;
+  maxStep: number = 4; // 1: Basic Info, 2: PRC, 3: Account Info, 4: Confirm
+
 //  regForm = this.fb.group({
   //   firstName: ['', Validators.required],
   //   lastName: ['', Validators.required],
@@ -55,19 +59,29 @@ regForm!: FormGroup; // our single form
 /**
  * Lifecycle: build the reactive registration form with validators.
  */
-ngOnInit() {
-  // Build the registration form with form controls, values and validators
-this.regForm = this.fb.group({
+  ngOnInit() {
+    // Build the registration form with form controls, values and validators
+    this.regForm = this.fb.group({
       firstName: ['', Validators.required],
       lastName: ['', Validators.required],
-      engineeringID: [''], // Not required by default, will be validated conditionally
+      engineeringID: ['', this.selectedRole === 'engineer' ? Validators.required : []], // PRC required for engineer
       email: ['', [Validators.required, Validators.email]],
       password: ['', [Validators.required, Validators.minLength(6)]],
-      confirmPassword: ['', Validators.required]
+      confirmPassword: ['', Validators.required],
+      phoneNumber: ['', Validators.required],
+      location: ['', Validators.required]
     }, {
       validators: this.passwordMatchValidator
     });
-}
+  }
+
+// Stepper navigation
+  nextStep() {
+    if (this.step < this.maxStep) this.step++;
+  }
+  prevStep() {
+    if (this.step > 1) this.step--;
+  }
 
 //Function to check if the password and confirmPassword are the same
  passwordMatchValidator(formGroup: FormGroup) {
@@ -124,10 +138,9 @@ async onRegister() {
     return;
   }
 
-  // Check if the selected role is 'engineer' and if engineeringID is provided
-  // If it's Engineer role but no ID provided, show error and exit early
+  // Check if the selected role is 'engineer' and if PRC is provided
   if (this.selectedRole === 'engineer' && !engineeringID) {
-    this.registrationError = 'Engineering ID is required for Engineer role.';
+    this.registrationError = 'PRC Number is required for Engineer role.';
     return;
   }
   try {
@@ -166,7 +179,7 @@ async onRegister() {
             userID: uid,
             firstName: firstName ?? '',
             lastName: lastName ?? '',
-            engineeringID: engineeringID ?? '',
+            prcNumber: engineeringID ?? '',
             email: email ?? '',
             role: this.selectedRole ?? 'user',
             ifAdmin: false,

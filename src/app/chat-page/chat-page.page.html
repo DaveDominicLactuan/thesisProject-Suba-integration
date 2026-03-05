@@ -19,7 +19,7 @@
       <p class="profile-email">{{ email }}</p>
     </div>
   </div>
-  <ul class="menu-items">
+  <ul class="menu-items scrollable-menu">
     <div class="menu-section">
       <li class="menu-item">
         <ion-icon name="checkmark-circle"></ion-icon>
@@ -111,7 +111,7 @@
         <div class="story-avatar add">
           <ion-icon name="add"></ion-icon>
         </div>
-        <div class="story-label">Your Story</div>
+        <div class="story-label">Find Engineer</div>
       </div>
       <div class="story-item">
         <div class="story-avatar ftd">FTD</div>
@@ -263,16 +263,19 @@
 
   <div class="bottom-nav">
     <button class="nav-btn" (click)="setNav('person')" [class.active]="activeTab === 'person'">
-      <ion-icon name="person-outline"></ion-icon>
+      <img src="assets/userIcon.png" alt="User" style="width: 24px; height: 24px;" />
     </button>
     <button class="nav-btn" (click)="setNav('people')" [class.active]="activeTab === 'people'">
-      <ion-icon name="people-outline"></ion-icon>
+      <!-- <ion-icon name="people-outline"></ion-icon> -->
+       <img src="assets/people.png" alt="User" style="width: 24px; height: 24px;" /> 
     </button>
     <button class="nav-btn" (click)="setNav('location')" [class.active]="activeTab === 'location'">
-      <ion-icon name="location-outline"></ion-icon>
+      <!-- <ion-icon name="location-outline"></ion-icon> -->
+       <img src="assets/bottomBarMarker.png" alt="User" style="width: 24px; height: 24px;" />
     </button>
     <button class="nav-btn" (click)="setNav('settings')" [class.active]="activeTab === 'settings'">
-      <ion-icon name="settings-outline"></ion-icon>
+      <!-- <ion-icon name="settings-outline"></ion-icon> -->
+       <img src="assets/chatSettingsIcon.png" alt="User" style="width: 24px; height: 24px;" />
     </button>
   </div>
 </ion-content>

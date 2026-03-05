@@ -997,6 +997,7 @@ private async initialize(): Promise<void> {
 
     cancelBtn.addEventListener('click', () => dismiss());
 
+    // Custom icon for markers placed from map tap overlay
     const placeMarkerFromInput = () => {
       if (!this.map) {
         message.textContent = 'Map is not ready yet. Try again.';
@@ -1018,7 +1019,7 @@ private async initialize(): Promise<void> {
 
       console.log('[ChatPage.mapTapOverlay] Place Marker tapped with:', { latitude, longitude });
 
-      const tappedMarker = L.marker([latitude, longitude])
+      const tappedMarker = L.marker([latitude, longitude], { icon: this.tapMarkerIcon })
         .addTo(this.map)
         .bindPopup(`Marker: ${latitude.toFixed(6)}, ${longitude.toFixed(6)}`)
         .openPopup();
@@ -1053,6 +1054,16 @@ private async initialize(): Promise<void> {
     });
     lngInput.focus();
   }
+
+  // Custom icon for markers placed from map tap overlay
+  private readonly tapMarkerIcon = L.icon({
+    iconUrl: 'assets/map/tap-marker.png', // Place your custom marker image here
+    iconSize: [25, 41],
+    iconAnchor: [12, 41],
+    popupAnchor: [1, -34],
+    shadowUrl: 'assets/map/marker-shadow2.png',
+    shadowSize: [41, 41]
+  });
 
   private handleMapResizeOnReentry(): void {
     if (!this.map) return;
@@ -1260,21 +1271,32 @@ private async initialize(): Promise<void> {
 private readonly userLocationIcon = L.icon({
   iconUrl: 'assets/map/user-marker.png',
   // iconRetinaUrl: 'assets/map/marker-icon-2x.png', // optional but recommended
-  // shadowUrl: 'assets/map/marker-shadow.png',      // optional
+  shadowUrl: 'assets/map/marker-shadow2.png',      // optional
   iconRetinaUrl: 'assets/user-marker.png', // optional but recommended
-  shadowUrl: 'assets/user-marker.png',      // optional
+  // shadowUrl: 'assets/user-marker.png',      // optional
   iconSize: [25, 41],
   iconAnchor: [12, 41],
   popupAnchor: [1, -34],
   shadowSize: [41, 41]
 });
 
-    /** Place the test markers (from `testMarkers`) onto the currently-initialized map. */
+    /** Place the test markers (from `testMarkers`) onto the currently-initialized map, using a custom icon. */
+    private readonly testMarkerIcon = L.icon({
+      iconUrl: 'assets/map/test-marker.png', // Place your custom marker image here
+      iconSize: [25, 41],
+      iconAnchor: [12, 41],
+      popupAnchor: [1, -34],
+      shadowUrl: 'assets/map/marker-shadow2.png',
+      shadowSize: [41, 41]
+    });
+
     private placeTestMarkers(): void {
       if (!this.map) return;
       for (const m of this.testMarkers) {
         try {
-          const marker = L.marker([m.latitude, m.longitude]).addTo(this.map).bindPopup(`<strong>${m.name}</strong>`);
+          const marker = L.marker([m.latitude, m.longitude], { icon: this.testMarkerIcon })
+            .addTo(this.map)
+            .bindPopup(`<strong>${m.name}</strong>`);
           // preserve same behavior as other markers: open selection overlay when clicked
           this.bindMarkerSelectionTrigger(marker, m.name);
         } catch (err) {
