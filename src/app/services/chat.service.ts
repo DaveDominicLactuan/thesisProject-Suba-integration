@@ -1,5 +1,5 @@
 import { Injectable } from '@angular/core';
-import { Firestore, collection, doc, setDoc, serverTimestamp, writeBatch, query, where, orderBy, collectionData, docData } from '@angular/fire/firestore';
+import { Firestore, collection, doc, setDoc, serverTimestamp, writeBatch, query, where, orderBy, collectionData, docData, getDoc } from '@angular/fire/firestore';
 import { Observable } from 'rxjs';
 
 export interface Chat {
@@ -14,7 +14,15 @@ export interface Message {
   senderId: string;
   text: string;
   timestamp?: any;
+  deliveredAt?: any;
   isRead?: boolean;
+  readAt?: any;
+}
+
+export interface TypingState {
+  userId: string;
+  isTyping: boolean;
+  updatedAt?: any;
 }
 
 export interface UserModel {
@@ -38,10 +46,11 @@ export class ChatService {
   // Create a chat doc (id deterministic) or ensure it exists
   async createOrEnsureChat(uidA: string, uidB: string): Promise<Chat> {
     const chatId = this.createChatIdForUsers(uidA, uidB);
+    const participants = [uidA, uidB].sort();
     const chatRef = doc(this.firestore, 'chats', chatId);
     // Ensure chat doc exists with participants
-    await setDoc(chatRef, { chatId, participants: [uidA, uidB] }, { merge: true });
-    return { chatId, participants: [uidA, uidB] };
+    await setDoc(chatRef, { chatId, participants }, { merge: true });
+    return { chatId, participants };
   }
 
   // Return observable of chats for a user (array-contains)
@@ -64,6 +73,26 @@ export class ChatService {
     return collectionData(q, { idField: 'id' }) as Observable<Message[]>;
   }
 
+  // Observe typing states for chat participants in realtime
+  observeTyping(chatId: string): Observable<TypingState[]> {
+    const typingCol = collection(this.firestore, 'chats', chatId, 'typing');
+    return collectionData(typingCol, { idField: 'userId' }) as Observable<TypingState[]>;
+  }
+
+  // Upsert typing state for a participant
+  async setTypingState(chatId: string, userId: string, isTyping: boolean): Promise<void> {
+    const typingRef = doc(this.firestore, 'chats', chatId, 'typing', userId);
+    await setDoc(
+      typingRef,
+      {
+        userId,
+        isTyping,
+        updatedAt: serverTimestamp()
+      },
+      { merge: true }
+    );
+  }
+
   // Send a message using a write batch: add message doc and update parent chat lastMessage/timestamp
   async sendMessage(chatId: string, message: { senderId: string; text: string; }): Promise<void> {
     const chatRef = doc(this.firestore, 'chats', chatId);
@@ -75,6 +104,7 @@ export class ChatService {
       senderId: message.senderId,
       text: message.text,
       timestamp: serverTimestamp(),
+      deliveredAt: serverTimestamp(),
       isRead: false
     });
     batch.set(chatRef, { lastMessage: message.text, timestamp: serverTimestamp() }, { merge: true });
@@ -87,4 +117,14 @@ export class ChatService {
     await setDoc(msgRef, { isRead: true, readAt: serverTimestamp() }, { merge: true });
   }
 
+  // Fetch the last seen timestamp for a user
+  async getLastSeen(userId: string): Promise<number | null> {
+    const userRef = doc(this.firestore, 'users', userId);
+    const userDoc = await getDoc(userRef);
+    if (userDoc.exists()) {
+      const userData = userDoc.data() as UserModel;
+      return userData.lastSeen || null;
+    }
+    return null;
+  }
 }

@@ -5,9 +5,9 @@ import { AuthService } from '../services/auth.service';
 import { NavController, Platform } from '@ionic/angular';
 import { User } from 'firebase/auth';
 import { Auth3Service } from '../services/auth3.service';
-import { Firestore, collection, query, where, getDocs } from '@angular/fire/firestore';
+import { Firestore, collection, doc, getDoc, query, where, getDocs } from '@angular/fire/firestore';
 import { ImageStorageService } from '../services/image-storage.service';
-import { ChatService, Message } from '../services/chat.service';
+import { Chat, ChatService, Message, TypingState } from '../services/chat.service';
 import { PresenceService } from '../services/presence.service';
 import { Subscription } from 'rxjs';
 import { App } from '@capacitor/app';
@@ -45,6 +45,11 @@ export class ChatPagePage implements OnInit, OnDestroy {
   messages: Message[] = [];
   messageText: string = '';
   private messagesSub?: Subscription;
+  private typingSub?: Subscription;
+  private typingDebounceTimeoutId?: ReturnType<typeof setTimeout>;
+  isOtherUserTyping: boolean = false;
+  private readonly typingDebounceMs = 220;
+  private userProfileCache: Map<string, any> = new Map();
   isSearching = false;
   searchQuery = '';
   // active bottom navigation tab: 'person' | 'people' | 'location' | 'settings'
@@ -58,6 +63,8 @@ export class ChatPagePage implements OnInit, OnDestroy {
   private markerOverlayElement?: HTMLDivElement;
   private markerSelectionOverlayElement?: HTMLDivElement;
   private mapTapOverlayElement?: HTMLDivElement;
+  private markerSelectionSquare?: L.Rectangle;
+  private readonly markerSquareHalfSideMeters = 120;
 
   private dismissMapTapOverlay(): void {
     if (!this.mapTapOverlayElement) return;
@@ -85,6 +92,90 @@ export class ChatPagePage implements OnInit, OnDestroy {
       rect.height > 0 &&
       intersectsViewport
     );
+  }
+
+  private drawMarkerCenteredSquare(center: L.LatLng, trigger: 'click' | 'touchend' | 'story-item', titleText: string): void {
+    if (!this.map) {
+      console.warn('[ChatPage.markerSquare] Skipped drawing square because map is not initialized.');
+      return;
+    }
+
+    const halfSideMeters = this.markerSquareHalfSideMeters;
+    const sideMeters = halfSideMeters * 2;
+
+    // Approximate meter-to-degree conversion at the marker latitude.
+    const metersPerDegreeLat = 111_320;
+    const cosLat = Math.cos((center.lat * Math.PI) / 180);
+    const metersPerDegreeLng = Math.max(1, Math.abs(cosLat) * 111_320);
+    const deltaLat = halfSideMeters / metersPerDegreeLat;
+    const deltaLng = halfSideMeters / metersPerDegreeLng;
+
+    const southWest = L.latLng(center.lat - deltaLat, center.lng - deltaLng);
+    const northEast = L.latLng(center.lat + deltaLat, center.lng + deltaLng);
+    const squareBounds = L.latLngBounds(southWest, northEast);
+
+    try {
+      this.markerSelectionSquare?.remove();
+    } catch {}
+
+    this.markerSelectionSquare = L.rectangle(squareBounds, {
+      color: '#111111',
+      weight: 2,
+      fill: false,
+      interactive: false
+    }).addTo(this.map);
+
+    try { this.markerSelectionSquare.bringToFront(); } catch {}
+
+    const areaSqMeters = sideMeters * sideMeters;
+    const areaHectares = areaSqMeters / 10_000;
+    const cornerRadiusMeters = Math.sqrt(2) * halfSideMeters;
+
+    console.log('[ChatPage.markerSquare] Square drawn around marker', {
+      trigger,
+      titleText,
+      center: {
+        latitude: Number(center.lat.toFixed(6)),
+        longitude: Number(center.lng.toFixed(6))
+      },
+      squareRadiusMeters: halfSideMeters,
+      cornerRadiusMeters: Number(cornerRadiusMeters.toFixed(2)),
+      sideMeters,
+      areaSquareMeters: Number(areaSqMeters.toFixed(2)),
+      areaHectares: Number(areaHectares.toFixed(4)),
+      bounds: {
+        southWest: {
+          latitude: Number(southWest.lat.toFixed(6)),
+          longitude: Number(southWest.lng.toFixed(6))
+        },
+        northEast: {
+          latitude: Number(northEast.lat.toFixed(6)),
+          longitude: Number(northEast.lng.toFixed(6))
+        }
+      }
+    });
+  }
+
+  private async ensureMapReadyForLocationTab(maxAttempts: number = 18, delayMs: number = 120): Promise<L.Map | null> {
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      if (this.map) {
+        return this.map;
+      }
+
+      const mapElement = document.getElementById('map');
+      if (mapElement) {
+        await this.initMap();
+        if (this.map) {
+          return this.map;
+        }
+      }
+
+      await new Promise<void>((resolve) => {
+        setTimeout(() => resolve(), delayMs);
+      });
+    }
+
+    return this.map ?? null;
   }
 
   private applyMarkerSelectionOverlayInlineStyles(
@@ -338,11 +429,9 @@ export class ChatPagePage implements OnInit, OnDestroy {
   // dynamic list of users with role 'engineer' from Firestore
   engineers: any[] = [];
 
-  // chat list rendered in the UI (initially seeded with same two sample chats)
-  chats: any[] = [
-    { id: 'ftd', name: 'Fitted - Tech & Design', avatar: 'assets/engIcon.png', lastMessage: 'Thecla: @Ovo How is it going?', time: '11:11 am', unread: true },
-    { id: 'demola', name: 'Demola Andreas', avatar: 'assets/engIcon.png', lastMessage: 'Job Description.docx', time: 'Yesterday', badge: 1 }
-  ];
+  // Real-time chat list for the current user
+  chats: any[] = [];
+  private chatsSub?: Subscription;
 
   // Test markers (similar to goalTasks) for placing sample markers on the Leaflet map
   testMarkers: Array<{ id: number; name: string; latitude: number; longitude: number }> = [
@@ -358,13 +447,16 @@ export class ChatPagePage implements OnInit, OnDestroy {
 
   }
 
+
 ngOnInit(): void {
   console.log('[HomePage2.ngOnInit] ===== PAGE INIT START (ngOnInit called) =====');
   console.log('[HomePage2.ngOnInit] Auth currentUser on ngOnInit:', this.auth3.getCurrentUser()?.uid || 'null');
-  
-  //initializes the data needed for the page such as user data, profile and session
   this.initialize();
+  this.startUserChatsSubscription().catch((err) => {
+    console.warn('[ChatPage.ngOnInit] Unable to start chat list subscription:', err);
+  });
 }
+
 
 /** Perform async initialization tasks (profile + sessions). */
 private async initialize(): Promise<void> {
@@ -376,11 +468,201 @@ private async initialize(): Promise<void> {
     this.email = profile?.email || this.email;
     this.userID = this.auth3.getCurrentUser()?.uid || this.userID || (profile && (profile.userID || profile.uid));
 
+    if (!this.chatsSub) {
+      this.startUserChatsSubscription().catch((err) => {
+        console.warn('[ChatPage.initialize] Deferred chat list subscription failed:', err);
+      });
+    }
+
     // Start presence service (RTDB -> Firestore sync)
     try { this.presenceService.start(); } catch (e) { console.warn('PresenceService.start failed', e); }
   } catch (err) {
     console.warn('[ChatPage] initialize error', err);
   }
+}
+
+private async resolveCurrentUid(timeoutMs: number = 8000): Promise<string | null> {
+  const directUid = this.auth3.getCurrentUser()?.uid || this.userID || null;
+  if (directUid) {
+    this.userID = directUid;
+    return directUid;
+  }
+
+  try {
+    const authedUser = await this.auth3.waitForAuthUser(timeoutMs);
+    const waitedUid = authedUser?.uid || null;
+    if (waitedUid) {
+      this.userID = waitedUid;
+    }
+    return waitedUid;
+  } catch (error) {
+    console.warn('[ChatPage] Failed to resolve current UID from auth state:', error);
+    return null;
+  }
+}
+
+private async startUserChatsSubscription(): Promise<void> {
+  const uid = await this.resolveCurrentUid();
+  if (!uid) {
+    return;
+  }
+
+  try { this.chatsSub?.unsubscribe(); } catch {}
+
+  this.chatsSub = this.chatService.getUserChats(uid).subscribe(async (chats) => {
+    const hydratedChats = await this.hydrateChatsForDisplay(chats || [], uid);
+    this.chats = hydratedChats;
+
+    // Keep the open header in sync when profile/presence changes in Firestore.
+    if (this.activeChat?.chatId) {
+      const updated = hydratedChats.find((c) => c.chatId === this.activeChat.chatId);
+      if (updated) {
+        this.activeChat = { ...this.activeChat, ...updated };
+      }
+    }
+  });
+}
+
+private resolveTimestampToMillis(timestamp: any): number {
+  if (!timestamp) return 0;
+  if (typeof timestamp?.toMillis === 'function') return timestamp.toMillis();
+  if (typeof timestamp?.seconds === 'number') return timestamp.seconds * 1000;
+  if (typeof timestamp === 'number') return timestamp;
+  return 0;
+}
+
+private composeUserDisplayName(user: any): string {
+  if (!user) return '';
+  const fullName = `${user?.firstName || ''} ${user?.lastName || ''}`.trim();
+  return fullName || user?.name || user?.displayName || user?.email || '';
+}
+
+private async getUserProfileById(userId: string): Promise<any | null> {
+  if (!userId) return null;
+  if (this.userProfileCache.has(userId)) {
+    return this.userProfileCache.get(userId);
+  }
+
+  try {
+    const userRef = doc(this.firestore, 'users', userId);
+    const userSnap = await getDoc(userRef);
+    if (!userSnap.exists()) {
+      this.userProfileCache.set(userId, null);
+      return null;
+    }
+
+    const profile = { id: userSnap.id, ...(userSnap.data() as any) };
+    this.userProfileCache.set(userId, profile);
+    return profile;
+  } catch (error) {
+    console.warn('[ChatPage] Failed to load user profile for chat participant:', userId, error);
+    return null;
+  }
+}
+
+private async hydrateChatsForDisplay(rawChats: Chat[], currentUid: string): Promise<any[]> {
+  const hydrated = await Promise.all(
+    (rawChats || []).map(async (chat: any) => {
+      const participants = Array.isArray(chat?.participants) ? chat.participants : [];
+      const otherParticipantId = participants.find((participantId: string) => participantId && participantId !== currentUid) || null;
+      const otherProfile = otherParticipantId ? await this.getUserProfileById(otherParticipantId) : null;
+
+      const nameFromProfile = this.composeUserDisplayName(otherProfile);
+      const avatarFromProfile = otherProfile?.photoURL || otherProfile?.avatar || otherProfile?.avatarUrl || null;
+
+      return {
+        ...chat,
+        id: otherParticipantId || chat?.chatId,
+        otherParticipantId,
+        name: chat?.name || nameFromProfile || otherParticipantId || chat?.chatId,
+        avatar: chat?.avatar || avatarFromProfile,
+        isOnline: Boolean(otherProfile?.isOnline)
+      };
+    })
+  );
+
+  return hydrated.sort((a, b) => {
+    const tA = this.resolveTimestampToMillis(a?.timestamp);
+    const tB = this.resolveTimestampToMillis(b?.timestamp);
+    return tB - tA;
+  });
+}
+
+private upsertChatPreview(chatPreview: any): void {
+  if (!chatPreview?.chatId) return;
+  const existingIndex = this.chats.findIndex((chat) => chat.chatId === chatPreview.chatId);
+
+  if (existingIndex >= 0) {
+    const existingChat = this.chats[existingIndex];
+    this.chats.splice(existingIndex, 1);
+    this.chats.unshift({ ...existingChat, ...chatPreview });
+    return;
+  }
+
+  this.chats.unshift(chatPreview);
+}
+
+private subscribeToTypingState(chatId: string, currentUid: string): void {
+  try { this.typingSub?.unsubscribe(); } catch {}
+
+  this.typingSub = this.chatService.observeTyping(chatId).subscribe((typingStates: TypingState[]) => {
+    this.isOtherUserTyping = (typingStates || []).some(
+      (state) => state.userId !== currentUid && state.isTyping
+    );
+  });
+}
+
+private async updateTypingState(isTyping: boolean): Promise<void> {
+  const chatId = this.currentChatId;
+  const currentUid = this.auth3.getCurrentUser()?.uid || this.userID || '';
+  if (!chatId || !currentUid) return;
+
+  try {
+    await this.chatService.setTypingState(chatId, currentUid, isTyping);
+  } catch (error) {
+    console.warn('[ChatPage] Unable to update typing state:', error);
+  }
+}
+
+private async resetTypingStateForCurrentUser(): Promise<void> {
+  if (this.typingDebounceTimeoutId) {
+    clearTimeout(this.typingDebounceTimeoutId);
+    this.typingDebounceTimeoutId = undefined;
+  }
+
+  await this.updateTypingState(false);
+  this.isOtherUserTyping = false;
+}
+
+onMessageDraftChange(value: string): void {
+  this.messageText = value;
+  const hasDraft = (value || '').trim().length > 0;
+
+  if (this.typingDebounceTimeoutId) {
+    clearTimeout(this.typingDebounceTimeoutId);
+  }
+
+  this.typingDebounceTimeoutId = setTimeout(() => {
+    this.updateTypingState(hasDraft).catch((error) => {
+      console.warn('[ChatPage] Debounced typing update failed:', error);
+    });
+  }, hasDraft ? this.typingDebounceMs : 0);
+}
+
+onMessageInputBlur(): void {
+  this.updateTypingState(false).catch((error) => {
+    console.warn('[ChatPage] Failed to clear typing state on blur:', error);
+  });
+}
+
+isMessageDelivered(message: Message): boolean {
+  return Boolean(message?.deliveredAt || message?.timestamp);
+}
+
+getMessageStatusLabel(message: Message): 'Sent' | 'Delivered' | 'Read' {
+  if (message?.isRead) return 'Read';
+  if (this.isMessageDelivered(message)) return 'Delivered';
+  return 'Sent';
 }
 
 
@@ -390,6 +672,38 @@ private async initialize(): Promise<void> {
   goToHomePage() {
     this.router.navigate(['/home-page2']);
     console.log('camera page');
+  }
+
+  async onFindEngineerStoryClick(): Promise<void> {
+    console.log('[ChatPage.findEngineerStory] Find Engineer story tapped. Navigating to map tab...');
+    this.setNav('location');
+
+    const mapInstance = await this.ensureMapReadyForLocationTab();
+    if (!mapInstance) {
+      console.warn('[ChatPage.findEngineerStory] Unable to initialize map after switching to location tab.');
+      return;
+    }
+
+    const coordinates = await this.getCurrentCoordinates();
+    if (!coordinates) {
+      console.warn('[ChatPage.findEngineerStory] Current coordinates unavailable; square will not be drawn.');
+      return;
+    }
+
+    const center = L.latLng(coordinates.latitude, coordinates.longitude);
+    await this.markUserLocation(mapInstance, coordinates);
+    this.drawMarkerCenteredSquare(center, 'story-item', 'Find Engineer Story');
+
+    try {
+      mapInstance.setView(center, 16);
+    } catch (err) {
+      console.warn('[ChatPage.findEngineerStory] Failed to center map view after drawing square.', err);
+    }
+
+    console.log('[ChatPage.findEngineerStory] Current location square drawn from story tap.', {
+      latitude: Number(center.lat.toFixed(6)),
+      longitude: Number(center.lng.toFixed(6))
+    });
   }
 
 
@@ -448,46 +762,71 @@ private async initialize(): Promise<void> {
       : (user?.name || user?.email || 'Unknown User');
     const selectedAvatar = user?.photoURL || user?.avatar || null;
 
-    // Ensure selected user appears in chat list and move to top when re-selected.
-    const existingIndex = this.chats.findIndex(c => c.id === selectedId || c.name === selectedName);
-    const chatPreview = {
-      id: selectedId,
-      name: selectedName,
-      avatar: selectedAvatar,
-      lastMessage: user?.lastMessage || '',
-      time: user?.time || '',
-      addedFromSearch: true
-    };
-
-    if (existingIndex >= 0) {
-      const existingChat = this.chats[existingIndex];
-      this.chats.splice(existingIndex, 1);
-      this.chats.unshift({ ...existingChat, ...chatPreview });
-    } else {
-      this.chats.unshift(chatPreview);
-    }
-
-    // Open conversation immediately (UI-first behavior)
-    this.activeChat = chatPreview;
-    this.isSearching = false;
-    this.isChatOpen = true;
-    this.messages = [];
-
-    const currentUid = this.auth3.getCurrentUser()?.uid || this.userID || '';
-    if (!currentUid || !selectedId) {
-      console.warn('[ChatPage] Missing current user or selected user id; opened UI without backend chat binding.');
+    if (!selectedId) {
+      console.warn('[ChatPage] Missing selected engineer/user id from search result payload:', user);
       this.currentChatId = null;
       return;
     }
 
+    const currentUid = await this.resolveCurrentUid();
+    if (!currentUid) {
+      console.warn('[ChatPage] Missing current user uid; cannot bind backend chat yet.');
+      this.currentChatId = null;
+      return;
+    }
+
+    // Open conversation container immediately to match expected UX on tap.
+    this.activeChat = {
+      id: selectedId,
+      otherParticipantId: selectedId,
+      name: selectedName,
+      avatar: selectedAvatar,
+      isOnline: Boolean(user?.isOnline),
+      lastMessage: '',
+      timestamp: null
+    };
+    this.isSearching = false;
+    this.isChatOpen = true;
+    this.messages = [];
+    this.isOtherUserTyping = false;
+    try { document.body.classList.add('chat-open'); } catch {}
+
     try {
       // ensure chat document exists and get deterministic chatId
       const chat = await this.chatService.createOrEnsureChat(currentUid, selectedId);
-      this.activeChat = { ...this.activeChat, chatId: chat.chatId };
+      const selectedProfile = await this.getUserProfileById(selectedId);
+      const resolvedName = this.composeUserDisplayName(selectedProfile) || selectedName;
+      const resolvedAvatar = selectedProfile?.photoURL || selectedProfile?.avatar || selectedProfile?.avatarUrl || selectedAvatar;
+
+      const chatPreview = {
+        chatId: chat.chatId,
+        participants: chat.participants,
+        id: selectedId,
+        otherParticipantId: selectedId,
+        name: resolvedName,
+        avatar: resolvedAvatar,
+        isOnline: Boolean(selectedProfile?.isOnline),
+        lastMessage: '',
+        timestamp: null
+      };
+
+      this.activeChat = chatPreview;
+      this.isSearching = false;
+      this.isChatOpen = true;
+      this.messages = [];
+      this.isOtherUserTyping = false;
+
+      this.upsertChatPreview(chatPreview);
+
       await this.subscribeToChatMessages(chat.chatId, currentUid);
+      this.subscribeToTypingState(chat.chatId, currentUid);
       console.log('[ChatPage] Opened chat', chat.chatId);
     } catch (error) {
       console.error('[ChatPage] Failed to bind backend chat for selected user:', error);
+      const errorCode = (error as any)?.code || '';
+      if (errorCode === 'permission-denied' || errorCode === 'firestore/permission-denied') {
+        alert('Chat access is blocked by Firestore security rules. Deploy the updated firestore.rules, then try again.');
+      }
       this.currentChatId = null;
     }
   }
@@ -513,6 +852,7 @@ private async initialize(): Promise<void> {
     const text = (this.messageText || '').trim();
     if (!text) return;
     try {
+      await this.updateTypingState(false);
       await this.chatService.sendMessage(this.currentChatId, { senderId, text });
       this.messageText = '';
     } catch (e) {
@@ -996,39 +1336,23 @@ private async initialize(): Promise<void> {
     this.isChatOpen = true;
     this.isSearching = false;
     this.messages = [];
-    // optional: lock page scroll or add class
+    this.isOtherUserTyping = false;
     try { document.body.classList.add('chat-open'); } catch {}
 
-    const currentUid = this.auth3.getCurrentUser()?.uid || this.userID || '';
-    const selectedId = chat?.id || chat?.uid || chat?.userID || chat?.email;
-
-    if (!currentUid) {
+    const currentUid = await this.resolveCurrentUid();
+    // For chat-list, chatId is always present
+    const chatId = chat?.chatId;
+    if (!currentUid || !chatId) {
       this.currentChatId = null;
       return;
     }
-
     try {
-      // If this chat already has a resolved chatId, just subscribe.
-      if (chat?.chatId) {
-        await this.subscribeToChatMessages(chat.chatId, currentUid);
-        return;
+      const hydrated = await this.hydrateChatsForDisplay([chat], currentUid);
+      if (hydrated.length > 0) {
+        this.activeChat = hydrated[0];
       }
-
-      if (!selectedId) {
-        this.currentChatId = null;
-        return;
-      }
-
-      // Resolve chat and load history for chat-list taps too.
-      const ensured = await this.chatService.createOrEnsureChat(currentUid, selectedId);
-      this.activeChat = { ...this.activeChat, chatId: ensured.chatId };
-
-      const chatIndex = this.chats.findIndex(c => c.id === selectedId || c.name === chat?.name);
-      if (chatIndex >= 0) {
-        this.chats[chatIndex] = { ...this.chats[chatIndex], chatId: ensured.chatId };
-      }
-
-      await this.subscribeToChatMessages(ensured.chatId, currentUid);
+      await this.subscribeToChatMessages(chatId, currentUid);
+      this.subscribeToTypingState(chatId, currentUid);
     } catch (error) {
       console.warn('[ChatPage.openChat] Unable to load chat history for selected chat:', error);
       this.currentChatId = null;
@@ -1037,8 +1361,16 @@ private async initialize(): Promise<void> {
 
   /** Close the conversation view and return to the chat list preview */
   closeChat() {
+    this.resetTypingStateForCurrentUser().catch(() => {});
+    try { this.typingSub?.unsubscribe(); } catch {}
+    this.typingSub = undefined;
     try { this.messagesSub?.unsubscribe(); } catch {}
     this.messagesSub = undefined;
+    if (this.typingDebounceTimeoutId) {
+      clearTimeout(this.typingDebounceTimeoutId);
+      this.typingDebounceTimeoutId = undefined;
+    }
+    this.isOtherUserTyping = false;
     this.currentChatId = null;
     this.isChatOpen = false;
     this.activeChat = null;
@@ -1051,17 +1383,19 @@ private async initialize(): Promise<void> {
 
   /** Switch bottom navigation tab and update view state. */
   setNav(tab: 'person' | 'people' | 'location' | 'settings') {
+    if (this.isChatOpen) {
+      this.closeChat();
+    }
+
     this.activeTab = tab;
     // ensure the main chat preview is shown when selecting person or people
     if (tab === 'person' || tab === 'people') {
-      this.isChatOpen = false;
       this.isSearching = false;
       this.dismissMapTapOverlay();
       this.destroyMapInstance();
     }
     // selecting location will show the Map view (ensure no chat overlay is open)
     if (tab === 'location') {
-      this.isChatOpen = false;
       this.isSearching = false;
       this.handleMapResizeOnReentry();
       this.scheduleMapInitialization();
@@ -1078,6 +1412,7 @@ private async initialize(): Promise<void> {
     } catch (error) {
       console.warn('[ChatPage.destroyMapInstance] Failed to remove map instance cleanly.', error);
     }
+    this.markerSelectionSquare = undefined;
     this.map = null;
     this.userLocationMarker = undefined;
   }
@@ -1088,6 +1423,15 @@ private async initialize(): Promise<void> {
 
     const openOverlay = (trigger: 'click' | 'touchend') => {
       console.log('[ChatPage.markerSelection] Marker interaction detected', { trigger, titleText });
+      try {
+        this.drawMarkerCenteredSquare(marker.getLatLng(), trigger, titleText);
+      } catch (squareError) {
+        console.error('[ChatPage.markerSquare] Failed to draw marker square', {
+          trigger,
+          titleText,
+          squareError
+        });
+      }
       setTimeout(() => {
         void this.openMarkerSelectionOverlay(titleText)
           .then(() => {
@@ -1564,6 +1908,16 @@ private readonly userLocationIcon = L.icon({
   }
 
   ngOnDestroy(): void {
+    // Clean up chat subscription
+    try { this.chatsSub?.unsubscribe(); } catch {}
+    this.chatsSub = undefined;
+    this.resetTypingStateForCurrentUser().catch(() => {});
+    try { this.typingSub?.unsubscribe(); } catch {}
+    this.typingSub = undefined;
+    if (this.typingDebounceTimeoutId) {
+      clearTimeout(this.typingDebounceTimeoutId);
+      this.typingDebounceTimeoutId = undefined;
+    }
     if (this.markerOverlayElement) {
       try { document.body.removeChild(this.markerOverlayElement); } catch {}
       this.markerOverlayElement = undefined;

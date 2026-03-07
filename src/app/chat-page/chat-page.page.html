@@ -107,7 +107,7 @@
       </div>
     </div>
     <div class="stories-bar" role="list">
-      <div class="story-item">
+      <div class="story-item" role="button" tabindex="0" (click)="onFindEngineerStoryClick()" (keyup.enter)="onFindEngineerStoryClick()">
         <div class="story-avatar add">
           <ion-icon name="add"></ion-icon>
         </div>
@@ -139,22 +139,21 @@
         (click)="clearSearch()"
       ></ion-icon>
     </div>
-    <div class="chat-stack-label">Chat Stack</div>
+    <!-- <div class="chat-stack-label">Chat Stack</div> -->
     <div class="chat-list">
-      <div class="chat-item" *ngFor="let c of chats" [ngClass]="{ 'unread': c.unread }" (click)="openChat(c)">
-        <div class="chat-avatar" [ngClass]="{ 'ftd': c.id === 'ftd' }">
+      <div class="chat-item" *ngFor="let c of chats" (click)="openChat(c)">
+        <div class="chat-avatar">
           <ng-container *ngIf="c.avatar; else avatarInitials">
             <img [src]="c.avatar" alt="avatar" />
           </ng-container>
           <ng-template #avatarInitials>{{ getInitials(c.name) }}</ng-template>
         </div>
         <div class="chat-info">
-          <div class="chat-title">{{ c.name }}</div>
+          <div class="chat-title">{{ c.name || c.chatId }}</div>
           <div class="chat-message">{{ c.lastMessage }}</div>
         </div>
         <div class="chat-meta">
-          <div class="chat-time">{{ c.time }}</div>
-          <div *ngIf="c.badge" class="chat-badge">{{ c.badge }}</div>
+          <div class="chat-time">{{ c.timestamp?.seconds ? (c.timestamp?.seconds * 1000 | date:'shortTime') : '' }}</div>
         </div>
       </div>
     </div>
@@ -213,7 +212,9 @@
         <div class="conv-avatar"><img [src]="activeChat?.avatar || 'assets/engIcon.png'" alt="avatar"/></div>
         <div class="conv-info">
           <div class="conv-name">{{ activeChat?.name }}</div>
-          <div class="conv-status">Online</div>
+          <div class="conv-status" *ngIf="!isOtherUserTyping">
+            {{ syncStatusText }}
+          </div>
         </div>
       </div>
       <button class="call-btn">Call</button>
@@ -225,14 +226,24 @@
         <div class="msg-bubble">{{ m.text }}</div>
         <div *ngIf="m.senderId === (auth3.getCurrentUser()?.uid || userID)" class="msg-avatar"><img src="assets/engIcon.png"/></div>
         <div class="msg-meta" *ngIf="m.senderId === (auth3.getCurrentUser()?.uid || userID)">
-          <ion-icon name="checkmark-done" *ngIf="m.isRead"></ion-icon>
-          <ion-icon name="checkmark" *ngIf="!m.isRead"></ion-icon>
+          <ion-icon name="checkmark" *ngIf="!isMessageDelivered(m)"></ion-icon>
+          <ion-icon name="checkmark-done" *ngIf="isMessageDelivered(m) && !m.isRead"></ion-icon>
+          <ion-icon class="is-read" name="checkmark-done" *ngIf="m.isRead"></ion-icon>
+          <span class="msg-status-text">{{ getMessageStatusLabel(m) }}</span>
         </div>
       </div>
 
       <div class="conv-input">
         <button class="attach">📎</button>
-        <input type="text" placeholder="Type a message" [(ngModel)]="messageText" name="messageInput" (keyup.enter)="sendMessage()" />
+        <input
+          type="text"
+          placeholder="Type a message"
+          [(ngModel)]="messageText"
+          (ngModelChange)="onMessageDraftChange($event)"
+          (blur)="onMessageInputBlur()"
+          name="messageInput"
+          (keyup.enter)="sendMessage()"
+        />
         <button class="send" (click)="sendMessage()">➤</button>
       </div>
     </div>
@@ -270,8 +281,8 @@
        <img src="assets/people.png" alt="User" style="width: 24px; height: 24px;" /> 
     </button>
     <button class="nav-btn" (click)="setNav('location')" [class.active]="activeTab === 'location'">
-      <!-- <ion-icon name="location-outline"></ion-icon> -->
-       <img src="assets/bottomBarMarker.png" alt="User" style="width: 24px; height: 24px;" />
+      <ion-icon name="location-outline"></ion-icon>
+       <!-- <img src="assets/bottomBarMarker.png" alt="User" style="width: 24px; height: 24px;" /> -->
     </button>
     <button class="nav-btn" (click)="setNav('settings')" [class.active]="activeTab === 'settings'">
       <!-- <ion-icon name="settings-outline"></ion-icon> -->
