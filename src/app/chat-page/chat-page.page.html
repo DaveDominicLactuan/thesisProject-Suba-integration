@@ -113,16 +113,30 @@
         </div>
         <div class="story-label">Find Engineer</div>
       </div>
-      <div class="story-item">
-        <div class="story-avatar ftd">FTD</div>
-        <div class="story-label">Fitted</div>
-      </div>
-      <div class="story-item">
+      <div class="story-item" *ngFor="let c of chats">
         <div class="story-avatar">
-          <img src="assets/engIcon.png" alt="Demola" />
+          <ng-container *ngIf="c.avatar; else avatarInitials">
+            <img [src]="c.avatar" alt="{{ c.name }}" />
+          </ng-container>
+          <ng-template #avatarInitials>{{ getInitials(c.name) }}</ng-template>
         </div>
-        <div class="story-label">Demola A</div>
+        <div class="story-label">{{ c.name }}</div>
       </div>
+    </div>
+    <div class="search-bar" *ngIf="isSearching">
+      <ion-icon name="search-outline"></ion-icon>
+      <input
+        type="text"
+        placeholder="Search here..."
+        [value]="searchQuery"
+        (focus)="onSearchFocus()"
+        (input)="onSearchInput($event)"
+      />
+      <ion-icon
+        *ngIf="searchQuery"
+        name="close-circle"
+        (click)="clearSearch()"
+      ></ion-icon>
     </div>
     <div class="search-bar">
       <ion-icon name="search-outline"></ion-icon>
@@ -141,7 +155,33 @@
     </div>
     <!-- <div class="chat-stack-label">Chat Stack</div> -->
     <div class="chat-list">
-      <div class="chat-item" *ngFor="let c of chats" (click)="openChat(c)">
+      <div class="chat-item"
+           *ngFor="let c of chats"
+           (click)="openChat(c)"
+           (mousedown)="onChatItemPressStart($event, c)"
+           (touchstart)="onChatItemPressStart($event, c)"
+           (mouseup)="onChatItemPressEnd($event)"
+           (mouseleave)="onChatItemPressEnd($event)"
+           (touchend)="onChatItemPressEnd($event)">
+        <!-- Chat Options Overlay (Bottom Sheet) -->
+        <div *ngIf="showChatOptionsOverlay" class="chat-options-overlay" [ngStyle]="{'transform': 'translateY(' + chatOptionsOverlayY + 'px)'}"
+             (mousedown)="onOverlayDragStart($event)" (touchstart)="onOverlayDragStart($event)">
+          <div class="chat-options-drag-handle"></div>
+          <div class="chat-options-list">
+            <button class="chat-options-row" (click)="onDeleteChatOption()">
+              <ion-icon name="trash-outline"></ion-icon>
+              <span>Delete</span>
+            </button>
+            <button class="chat-options-row" (click)="onNotifyChatOption()">
+              <ion-icon name="notifications-outline"></ion-icon>
+              <span>Notify</span>
+            </button>
+            <button class="chat-options-row chat-options-close" (click)="closeChatOptionsOverlay()">
+              <ion-icon name="close-outline"></ion-icon>
+              <span>Close</span>
+            </button>
+          </div>
+        </div>
         <div class="chat-avatar">
           <ng-container *ngIf="c.avatar; else avatarInitials">
             <img [src]="c.avatar" alt="avatar" />

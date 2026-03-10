@@ -22,6 +22,95 @@ import * as L from 'leaflet';
 })
 
 export class ChatPagePage implements OnInit, OnDestroy {
+  // --- Chat Options Overlay State ---
+  showChatOptionsOverlay = false;
+  chatOptionsOverlayY = 0;
+  private chatOptionsLongPressTimer: any = null;
+  private chatOptionsDragStartY: number | null = null;
+  private chatOptionsDragCurrentY: number | null = null;
+  private chatOptionsDragActive = false;
+  private chatOptionsMinDragToClose = 80;
+  private chatOptionsSelectedChat: any = null;
+    // Long-press logic for chat-item
+    onChatItemPressStart(event: MouseEvent | TouchEvent, chat: any) {
+      if (this.chatOptionsLongPressTimer) clearTimeout(this.chatOptionsLongPressTimer);
+      this.chatOptionsLongPressTimer = setTimeout(() => {
+        this.chatOptionsSelectedChat = chat;
+        this.showChatOptionsOverlay = true;
+        this.chatOptionsOverlayY = 0;
+      }, 420); // 420ms for long-press
+    }
+
+    onChatItemPressEnd(event: MouseEvent | TouchEvent) {
+      if (this.chatOptionsLongPressTimer) {
+        clearTimeout(this.chatOptionsLongPressTimer);
+        this.chatOptionsLongPressTimer = null;
+      }
+    }
+
+    // Overlay drag-to-close logic
+    onOverlayDragStart(event: MouseEvent | TouchEvent) {
+      event.stopPropagation();
+      this.chatOptionsDragActive = true;
+      this.chatOptionsDragStartY = this.getEventY(event);
+      this.chatOptionsDragCurrentY = 0;
+      document.addEventListener('mousemove', this.onOverlayDragMove);
+      document.addEventListener('touchmove', this.onOverlayDragMove, { passive: false });
+      document.addEventListener('mouseup', this.onOverlayDragEnd);
+      document.addEventListener('touchend', this.onOverlayDragEnd);
+    }
+
+    onOverlayDragMove = (event: MouseEvent | TouchEvent) => {
+      if (!this.chatOptionsDragActive || this.chatOptionsDragStartY === null) return;
+      const y = this.getEventY(event);
+      const deltaY = y - this.chatOptionsDragStartY;
+      this.chatOptionsDragCurrentY = deltaY > 0 ? deltaY : 0;
+      this.chatOptionsOverlayY = this.chatOptionsDragCurrentY;
+    };
+
+    onOverlayDragEnd = (event: MouseEvent | TouchEvent) => {
+      if (!this.chatOptionsDragActive) return;
+      this.chatOptionsDragActive = false;
+      document.removeEventListener('mousemove', this.onOverlayDragMove);
+      document.removeEventListener('touchmove', this.onOverlayDragMove);
+      document.removeEventListener('mouseup', this.onOverlayDragEnd);
+      document.removeEventListener('touchend', this.onOverlayDragEnd);
+      if ((this.chatOptionsDragCurrentY || 0) > this.chatOptionsMinDragToClose) {
+        this.closeChatOptionsOverlay();
+      } else {
+        this.chatOptionsOverlayY = 0;
+      }
+      this.chatOptionsDragStartY = null;
+      this.chatOptionsDragCurrentY = null;
+    };
+
+    getEventY(event: MouseEvent | TouchEvent): number {
+      if ((event as TouchEvent).touches && (event as TouchEvent).touches.length > 0) {
+        return (event as TouchEvent).touches[0].clientY;
+      } else if ((event as MouseEvent).clientY !== undefined) {
+        return (event as MouseEvent).clientY;
+      }
+      return 0;
+    }
+
+    closeChatOptionsOverlay() {
+      this.showChatOptionsOverlay = false;
+      this.chatOptionsOverlayY = 0;
+      this.chatOptionsSelectedChat = null;
+      this.chatOptionsDragStartY = null;
+      this.chatOptionsDragCurrentY = null;
+      this.chatOptionsDragActive = false;
+    }
+
+    // Placeholder logic for options
+    onDeleteChatOption() {
+      alert('Delete option pressed (placeholder).');
+      this.closeChatOptionsOverlay();
+    }
+    onNotifyChatOption() {
+      alert('Notify option pressed (placeholder).');
+      this.closeChatOptionsOverlay();
+    }
   private static userSyncTasks: Map<string, Promise<void>> = new Map();
   userName: string | null = null;
   firstName: string | null = null;
@@ -441,6 +530,9 @@ export class ChatPagePage implements OnInit, OnDestroy {
     { id: 4, name: 'Test Marker D', latitude: 10.327200, longitude: 123.848900 },
     { id: 5, name: 'Test Marker E', latitude: 10.317700, longitude: 123.903700 }
   ];
+
+  // Ensure the stories property is declared and initialized
+  stories: any[] = [];
 
   /** Inject auth, router, and image storage services for navigation and data. */
   constructor(private formBuilder: FormBuilder, private router: Router, private authService: AuthService, private navCtrl: NavController, public auth3: Auth3Service, private imageStorage: ImageStorageService, private platform: Platform, private firestore: Firestore, private chatService: ChatService, private presenceService: PresenceService) {
@@ -1130,8 +1222,9 @@ getMessageStatusLabel(message: Message): 'Sent' | 'Delivered' | 'Read' {
     }
 
     const options = (this.engineers.length ? this.engineers : this.searchConversationResults) || [];
+    const optionsSource = this.engineers.length ? 'firestore-engineers' : 'placeholder-results';
     console.log('[ChatPage.markerSelection] Preparing overlay options', {
-      source: this.engineers.length ? 'firestore-engineers' : 'placeholder-results',
+      source: optionsSource,
       count: options.length
     });
 
@@ -1177,7 +1270,7 @@ getMessageStatusLabel(message: Message): 'Sent' | 'Delivered' | 'Read' {
       });
       list.appendChild(empty);
     } else {
-      for (const option of options) {
+      for (const [optionIndex, option] of options.entries()) {
         const item = document.createElement('button');
         item.type = 'button';
         item.className = 'marker-selection-item';
@@ -1254,13 +1347,37 @@ getMessageStatusLabel(message: Message): 'Sent' | 'Delivered' | 'Read' {
         item.appendChild(avatar);
         item.appendChild(info);
 
-        item.addEventListener('click', () => {
-          console.log('[ChatPage.markerSelection] Engineer row tapped', {
-            selectedId: option?.id || option?.uid || option?.userID || option?.email || 'unknown',
-            selectedName: displayName
-          });
+        item.addEventListener('click', async () => {
+          const selectedId = option?.id || option?.uid || option?.userID || option?.email || 'unknown';
+          const selectedPayload = {
+            source: optionsSource,
+            selectedIndex: optionIndex,
+            selectedId,
+            selectedName: displayName,
+            selectedContact: contact,
+            selectedItemData: option
+          };
+
+          console.log('[ChatPage.markerSelection] Engineer row tapped', selectedPayload);
           dismiss('selection');
-          void this.selectEngineer(option);
+
+          // Start chat directly from the exact selected marker list item.
+          try {
+            await this.selectEngineer(option);
+            console.log('[ChatPage.markerSelection] Chat start requested from marker selection', {
+              selectedId,
+              selectedName: displayName,
+              selectedIndex: optionIndex,
+              source: optionsSource
+            });
+          } catch (error) {
+            console.error('[ChatPage.markerSelection] Failed to start chat from marker selection', {
+              selectedId,
+              selectedIndex: optionIndex,
+              source: optionsSource,
+              error
+            });
+          }
         });
 
         list.appendChild(item);
@@ -1377,8 +1494,14 @@ getMessageStatusLabel(message: Message): 'Sent' | 'Delivered' | 'Read' {
     try { document.body.classList.remove('chat-open'); } catch {}
   }
 
-  openNewChat() {
-    this.router.navigate(['/camera-page2']);
+  openNewChat(): void {
+    this.isSearching = true; // Activate search mode
+    setTimeout(() => {
+      const searchInput = document.querySelector('.search-bar input') as HTMLInputElement;
+      if (searchInput) {
+        searchInput.focus(); // Focus on the search input field
+      }
+    }, 0);
   }
 
   /** Switch bottom navigation tab and update view state. */
