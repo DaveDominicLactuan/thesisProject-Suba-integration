@@ -247,34 +247,61 @@
   <!-- Chat conversation view (shown after clicking a chat-item) -->
   <ng-container *ngIf="isChatOpen">
     <div class="conversation-header">
-      <button class="back-btn" (click)="closeChat()">Back</button>
-      <div class="conv-user">
-        <div class="conv-avatar"><img [src]="activeChat?.avatar || 'assets/engIcon.png'" alt="avatar"/></div>
-        <div class="conv-info">
-          <div class="conv-name">{{ activeChat?.name }}</div>
-          <div class="conv-status" *ngIf="!isOtherUserTyping">
-            {{ syncStatusText }}
+      <div class="top-section">
+        <button class="back-btn" (click)="closeChat()">
+          <ion-icon name="arrow-back-outline"></ion-icon>
+        </button>
+        <div class="header-title">
+          <span>Message</span>
+        </div>
+        <button class="menu-btn">
+          <ion-icon name="ellipsis-horizontal-outline"></ion-icon>
+        </button>
+      </div>
+      <div class="bottom-section">
+        <div class="conv-user">
+          <div class="conv-avatar">
+            <ion-icon name="person-circle-outline"></ion-icon>
+          </div>
+          <div class="conv-info">
+            <div class="conv-name">{{ activeChat?.name }}</div>
+            <div class="conv-status" *ngIf="!isOtherUserTyping">
+              {{ syncStatusText }}
+            </div>
           </div>
         </div>
+        <button class="call-btn">
+          <ion-icon name="call-outline"></ion-icon>
+        </button>
       </div>
-      <button class="call-btn">Call</button>
     </div>
 
     <div class="conversation">
       <div *ngFor="let m of messages" class="message" [ngClass]="{ 'sent': (m.senderId === (auth3.getCurrentUser()?.uid || userID)), 'received': (m.senderId !== (auth3.getCurrentUser()?.uid || userID)) }">
-        <div *ngIf="m.senderId !== (auth3.getCurrentUser()?.uid || userID)" class="msg-avatar"><img [src]="activeChat?.avatar || 'assets/engIcon.png'"/></div>
-        <div class="msg-bubble">{{ m.text }}</div>
-        <div *ngIf="m.senderId === (auth3.getCurrentUser()?.uid || userID)" class="msg-avatar"><img src="assets/engIcon.png"/></div>
+        <div *ngIf="m.senderId !== (auth3.getCurrentUser()?.uid || userID)" class="msg-avatar">
+          <ion-icon name="person-circle-outline"></ion-icon>
+        </div>
+        <div class="msg-bubble-wrap">
+          <div class="msg-bubble" (click)="onMsgBubbleTap(m)">{{ m.text }}</div>
+          <div class="msg-status-container" *ngIf="tappedMessageId === m.id">
+            <ion-icon class="is-read" name="checkmark-done" *ngIf="m.isRead"></ion-icon>
+            <span class="msg-status-text">{{ getMessageStatusLabel(m) }}</span>
+          </div>
+        </div>
+        <div *ngIf="m.senderId === (auth3.getCurrentUser()?.uid || userID)" class="msg-avatar">
+          <ion-icon name="person-circle-outline"></ion-icon>
+        </div>
         <div class="msg-meta" *ngIf="m.senderId === (auth3.getCurrentUser()?.uid || userID)">
           <ion-icon name="checkmark" *ngIf="!isMessageDelivered(m)"></ion-icon>
           <ion-icon name="checkmark-done" *ngIf="isMessageDelivered(m) && !m.isRead"></ion-icon>
-          <ion-icon class="is-read" name="checkmark-done" *ngIf="m.isRead"></ion-icon>
-          <span class="msg-status-text">{{ getMessageStatusLabel(m) }}</span>
+          <!-- <ion-icon class="is-read" name="checkmark-done" *ngIf="m.isRead"></ion-icon> -->
         </div>
       </div>
 
       <div class="conv-input">
-        <button class="attach">📎</button>
+        <button class="attach">
+          <ion-icon name="attach-outline"></ion-icon>
+        </button>
         <input
           type="text"
           placeholder="Type a message"
@@ -284,7 +311,9 @@
           name="messageInput"
           (keyup.enter)="sendMessage()"
         />
-        <button class="send" (click)="sendMessage()">➤</button>
+        <button class="send" (click)="sendMessage()">
+          <ion-icon name="send-outline"></ion-icon>
+        </button>
       </div>
     </div>
 
@@ -309,25 +338,85 @@
     </div>
   </ng-container>
 
+  
+<!-- Profile View (replicating the provided design) -->
+<ng-container *ngIf="activeTab === 'profile'">
+  <div class="profile-view">
+    <div class="profile-header">
+      <div class="profile-avatar-wrapper">
+        <div class="profile-avatar">
+          <img src="assets/profile-placeholder.png" alt="Profile Picture" />
+        </div>
+        <button class="profile-edit-btn" (click)="editProfile()">
+          <ion-icon name="create-outline"></ion-icon>
+        </button>
+      </div>
+      <h1 class="profile-name">{{ firstName }} {{ lastName }}</h1>
+    </div>
+    <div class="profile-details">
+      <div class="profile-detail">
+        <span class="profile-label">
+          <ion-icon name="call-outline"></ion-icon> Phone :
+        </span>
+        <span class="profile-value">{{ phone }}</span>
+        <button class="copy-btn" title="Copy phone"><ion-icon name="copy-outline"></ion-icon></button>
+      </div>
+      <div class="profile-detail">
+        <span class="profile-label">
+          <ion-icon name="male-female-outline"></ion-icon> Gender :
+        </span>
+        <span class="profile-value">{{ gender }}</span>
+        <button class="copy-btn" title="Copy gender"><ion-icon name="copy-outline"></ion-icon></button>
+      </div>
+      <div class="profile-detail">
+        <span class="profile-label">
+          <ion-icon name="calendar-outline"></ion-icon> Birthday :
+        </span>
+        <span class="profile-value">{{ birthday }}</span>
+        <button class="copy-btn" title="Copy birthday"><ion-icon name="copy-outline"></ion-icon></button>
+      </div>
+      <div class="profile-detail">
+        <span class="profile-label">
+          <ion-icon name="mail-outline"></ion-icon> Email :
+        </span>
+        <span class="profile-value">{{ email }}</span>
+        <button class="copy-btn" title="Copy email"><ion-icon name="copy-outline"></ion-icon></button>
+      </div>
+    </div>
+    <div class="profile-actions">
+      <button class="edit-profile-btn" (click)="editProfile()">
+        <ion-icon name="create-outline"></ion-icon>
+        Edit Profile
+      </button>
+      <button class="logout-btn" (click)="logout()">
+        <ion-icon name="log-out-outline"></ion-icon>
+        Logout
+      </button>
+    </div>
+  </div>
+</ng-container>
+
+
 
   <!--  Settings view placeholder -->
 
   <div class="bottom-nav">
-    <button class="nav-btn" (click)="setNav('person')" [class.active]="activeTab === 'person'">
-      <img src="assets/userIcon.png" alt="User" style="width: 24px; height: 24px;" />
+    <button class="nav-btn" (click)="setNav('profile')" [class.active]="activeTab === 'profile'">
+      <img src="assets/userIcon.png" alt="User" style="width: 27px; height: 27px;" />
     </button>
     <button class="nav-btn" (click)="setNav('people')" [class.active]="activeTab === 'people'">
       <!-- <ion-icon name="people-outline"></ion-icon> -->
-       <img src="assets/people.png" alt="User" style="width: 24px; height: 24px;" /> 
+       <img src="assets/people.png" alt="User" style="width: 27px; height: 27px;" /> 
     </button>
     <button class="nav-btn" (click)="setNav('location')" [class.active]="activeTab === 'location'">
-      <ion-icon name="location-outline"></ion-icon>
+      <!-- <ion-icon name="location-outline"></ion-icon> -->
+       <img src="assets/bottomBarMarker.png" alt="User" style="width: 20px; height: 29px;" /> 
        <!-- <img src="assets/bottomBarMarker.png" alt="User" style="width: 24px; height: 24px;" /> -->
     </button>
-    <button class="nav-btn" (click)="setNav('settings')" [class.active]="activeTab === 'settings'">
-      <!-- <ion-icon name="settings-outline"></ion-icon> -->
+    <!-- <button class="nav-btn" (click)="setNav('settings')" [class.active]="activeTab === 'settings'">
+       <ion-icon name="settings-outline"></ion-icon> 
        <img src="assets/chatSettingsIcon.png" alt="User" style="width: 24px; height: 24px;" />
-    </button>
+    </button> -->
   </div>
 </ion-content>
 

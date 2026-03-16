@@ -55,7 +55,7 @@
 
 
     <form [formGroup]="regForm" (ngSubmit)="onRegister()">
-      <ng-container *ngIf="selectedRole">
+      <div class="steps-container" *ngIf="selectedRole">
         <!-- Stepper navigation UI -->
         <div class="stepper">
           <div class="step" [class.active]="step === 1">1</div>
@@ -66,7 +66,7 @@
 
 
         <!-- Step 1: Account Info -->
-        <div *ngIf="step === 1">
+        <div *ngIf="step === 1" class="step-panel">
           <div class="form-field" [class.invalid]="f['email'].invalid && (f['email'].touched || submitted)">
             <ion-icon name="mail-outline"></ion-icon>
             <input type="email" placeholder="Email" formControlName="email" />
@@ -96,7 +96,7 @@
         </div>
 
         <!-- Step 2: User Info -->
-        <div *ngIf="step === 2">
+        <div *ngIf="step === 2" class="step-panel">
           <div class="form-field" [class.invalid]="f['firstName'].invalid && (f['firstName'].touched || submitted)">
             <ion-icon name="person-outline"></ion-icon>
             <input type="text" placeholder="First Name" formControlName="firstName" />
@@ -122,7 +122,7 @@
         </div>
 
         <!-- Step 3: Contact Info -->
-        <div *ngIf="step === 3">
+        <div *ngIf="step === 3" class="step-panel">
           <div class="form-field" [class.invalid]="f['phoneNumber']?.invalid && (f['phoneNumber']?.touched || submitted)">
             <ion-icon name="call-outline"></ion-icon>
             <input type="tel" placeholder="Phone Number" formControlName="phoneNumber" />
@@ -140,7 +140,7 @@
         </div>
 
         <!-- Step 4: Confirm Details -->
-        <div *ngIf="step === 4">
+        <div *ngIf="step === 4" class="step-panel">
           <div class="confirm-details">
             <h3 style="text-align:center;margin-bottom:18px;">Confirm Your Details</h3>
             <div class="confirm-row"><span>First Name:</span> <span>{{ regForm.value.firstName }}</span></div>
@@ -152,10 +152,12 @@
             <div class="confirm-row"><span>Password:</span> <span>••••••••</span></div>
             <div class="confirm-row"><span>Role:</span> <span>{{ selectedRole | titlecase }}</span></div>
           </div>
-          <button class="signup-btn" type="button" (click)="prevStep()">Back</button>
-          <button class="signup-btn" type="submit" [disabled]="regForm.invalid || !selectedRole">Confirm & Sign Up</button>
+          <div class="step-actions">
+            <button class="signup-btn" type="button" (click)="prevStep()">Back</button>
+            <button class="signup-btn" type="submit" [disabled]="regForm.invalid || !selectedRole">Confirm & Sign Up</button>
+          </div>
         </div>
-      </ng-container>
+      </div>
     </form>
 
 

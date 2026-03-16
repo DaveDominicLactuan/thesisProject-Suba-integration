@@ -116,6 +116,9 @@ export class ChatPagePage implements OnInit, OnDestroy {
   firstName: string | null = null;
   lastName: string | null = null;
   email: string | null = null;
+  phone: string | null = null;
+  gender: string | null = null;
+  birthday: string | null = null;
   engineeringID: string | null = null;
   userID: string | null = null;
   sessions: any[] = [];
@@ -133,6 +136,7 @@ export class ChatPagePage implements OnInit, OnDestroy {
   currentChatId: string | null = null;
   messages: Message[] = [];
   messageText: string = '';
+  tappedMessageId: string | null = null;
   private messagesSub?: Subscription;
   private typingSub?: Subscription;
   private typingDebounceTimeoutId?: ReturnType<typeof setTimeout>;
@@ -142,7 +146,7 @@ export class ChatPagePage implements OnInit, OnDestroy {
   isSearching = false;
   searchQuery = '';
   // active bottom navigation tab: 'person' | 'people' | 'location' | 'settings'
-  activeTab: 'person' | 'people' | 'location' | 'settings' = 'people';
+  activeTab: 'person' | 'people' | 'location' | 'settings' | 'profile' = 'people';
   private map?: L.Map | null = null;
   private userLocationMarker?: L.Marker;
   private readonly fallbackCoordinates = { latitude: 10.324849, longitude: 123.849164 };
@@ -759,6 +763,10 @@ getMessageStatusLabel(message: Message): 'Sent' | 'Delivered' | 'Read' {
 
 
   // Additional methods can be added here
+onMsgBubbleTap(message: Message): void {
+  this.tappedMessageId = this.tappedMessageId === (message.id ?? null) ? null : (message.id ?? null);
+}
+
 
   /** Navigate to legacy camera page route. */
   goToHomePage() {
@@ -1505,24 +1513,26 @@ getMessageStatusLabel(message: Message): 'Sent' | 'Delivered' | 'Read' {
   }
 
   /** Switch bottom navigation tab and update view state. */
-  setNav(tab: 'person' | 'people' | 'location' | 'settings') {
+  setNav(tab: 'person' | 'people' | 'location' | 'settings' | 'profile') {
     if (this.isChatOpen) {
       this.closeChat();
     }
 
     this.activeTab = tab;
-    // ensure the main chat preview is shown when selecting person or people
+
+    // Ensure the main chat preview is shown when selecting person or people
     if (tab === 'person' || tab === 'people') {
       this.isSearching = false;
       this.dismissMapTapOverlay();
       this.destroyMapInstance();
     }
-    // selecting location will show the Map view (ensure no chat overlay is open)
+
+    // Selecting location will show the Map view (ensure no chat overlay is open)
     if (tab === 'location') {
       this.isSearching = false;
       this.handleMapResizeOnReentry();
       this.scheduleMapInitialization();
-    } else if (tab === 'settings') {
+    } else if (tab === 'settings' || tab === 'profile') {
       this.dismissMapTapOverlay();
       this.destroyMapInstance();
     }
@@ -2030,6 +2040,10 @@ private readonly userLocationIcon = L.icon({
     this.dismissMapTapOverlay();
   }
 
+  public editProfile() {
+    console.log('[ChatPage] Edit Profile triggered');
+  }
+
   ngOnDestroy(): void {
     // Clean up chat subscription
     try { this.chatsSub?.unsubscribe(); } catch {}
@@ -2058,5 +2072,7 @@ private readonly userLocationIcon = L.icon({
     this.messagesSub = undefined;
     // optional: set offline on destroy if desired
   }
+
+
 }
 
