@@ -672,7 +672,7 @@
 	display: flex;
 	justify-content: space-around;
 	align-items: center;
-	z-index: 100;
+	z-index: 1300;
 }
 .nav-btn {
 	background: none;
@@ -942,13 +942,225 @@ ion-menu ion-item:hover {
 	align-items: center;
 	justify-content: center;
 	background: #fff;
-	padding-bottom: 56px; /* leave space for bottom-nav */
+	padding-bottom: 0;
+	position: relative;
+	isolation: isolate; /* keep map in its own stacking context */
 }
 .map-container {
 	width: 100%;
 	height: 106.5%;
 	position: relative;
 	top: 3%;
+	z-index: 1; /* Leaflet stays below sheet and nav */
+}
+
+/* ===== Google Maps-style Bottom Sheet ===== */
+$bottom-nav-offset: calc(78px + env(safe-area-inset-bottom));
+$sheet-peek-height: 72px;
+$sheet-active-height: 52vh;
+$sheet-transition: transform 0.32s cubic-bezier(0.4, 0, 0.2, 1);
+
+.map-bottom-sheet {
+	position: fixed;
+	left: 0;
+	right: 0;
+	bottom: 0;
+	z-index: 1200;
+	background: #fff;
+	border-top-left-radius: 20px;
+	border-top-right-radius: 20px;
+	box-shadow: 0 -4px 28px rgba(0,0,0,0.14);
+	/* Keep the sheet under bottom-nav while preserving a visible inactive peek above it. */
+	transform: translateY(calc(100% - #{$sheet-peek-height} - #{$bottom-nav-offset}));
+	transition: $sheet-transition;
+	will-change: transform;
+	display: flex;
+	flex-direction: column;
+	height: calc(#{$sheet-active-height} + #{$bottom-nav-offset});
+	overflow: hidden;
+	/* dragging should not select text */
+	user-select: none;
+	-webkit-user-select: none;
+
+	&.active {
+		transform: translateY(0);
+	}
+}
+
+.map-sheet-handle-bar {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	padding: 10px 0 4px;
+	cursor: pointer;
+	flex-shrink: 0;
+}
+
+.map-sheet-handle-pill {
+	width: 40px;
+	height: 5px;
+	background: #ddd;
+	border-radius: 3px;
+}
+
+/* Peek row — visible in both states, acts as the compact inactive bar */
+.map-sheet-peek {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	padding: 0 18px 10px;
+	cursor: pointer;
+	flex-shrink: 0;
+}
+
+.map-sheet-peek-avatar {
+	width: 42px;
+	height: 42px;
+	border-radius: 50%;
+	background: linear-gradient(135deg, #6b46ff 0%, #a855f7 100%);
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	color: #fff;
+	font-weight: 700;
+	font-size: 0.95rem;
+	flex-shrink: 0;
+}
+
+.map-sheet-peek-text {
+	flex: 1;
+	min-width: 0;
+}
+
+.map-sheet-peek-name {
+	font-size: 0.95rem;
+	font-weight: 600;
+	color: #1a1a2e;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.map-sheet-peek-sub {
+	font-size: 0.78rem;
+	color: #888;
+	margin-top: 1px;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.map-sheet-peek-chevron {
+	font-size: 1.2rem;
+	color: #aaa;
+	transition: transform 0.28s ease;
+	flex-shrink: 0;
+	&.rotated {
+		transform: rotate(180deg);
+	}
+}
+
+/* Active body content */
+.map-sheet-body {
+	flex: 1;
+	overflow-y: auto;
+	padding: 4px 20px calc(16px + #{$bottom-nav-offset});
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	/* hidden in inactive state by overflow of parent */
+}
+
+.map-sheet-engineer-header {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+}
+
+.map-sheet-name {
+	font-size: 1.35rem;
+	font-weight: 700;
+	color: #1a1a2e;
+	margin: 0 0 2px;
+}
+
+.map-sheet-rating-row {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+}
+
+.map-sheet-stars {
+	color: #f59e0b;
+	font-size: 1rem;
+	letter-spacing: 1px;
+}
+
+.map-sheet-rating-val {
+	font-size: 0.92rem;
+	font-weight: 600;
+	color: #444;
+}
+
+.map-sheet-address,
+.map-sheet-avail {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	font-size: 0.88rem;
+	color: #555;
+	ion-icon {
+		font-size: 1rem;
+		color: #6b46ff;
+		flex-shrink: 0;
+	}
+}
+
+.map-sheet-chat-btn {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	gap: 6px;
+	margin-top: 10px;
+	padding: 10px 32px;
+	background: #fff;
+	border: 1.5px solid #6b46ff;
+	border-radius: 24px;
+	color: #6b46ff;
+	font-size: 0.95rem;
+	font-weight: 600;
+	cursor: pointer;
+	align-self: flex-start;
+	transition: background 0.18s, color 0.18s;
+	ion-icon { font-size: 1rem; }
+	&:active, &:hover {
+		background: #6b46ff;
+		color: #fff;
+	}
+}
+
+/* Placeholder photo cards */
+.map-sheet-photos {
+	display: flex;
+	gap: 12px;
+	margin-top: 14px;
+	flex-shrink: 0;
+}
+
+.map-sheet-photo {
+	flex: 1;
+	height: 90px;
+	border-radius: 12px;
+	background: #f0eefc;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	overflow: hidden;
+}
+
+.map-sheet-photo-icon {
+	font-size: 2.2rem;
+	color: #b0a0f0;
 }
 
 .map-menu-btn {

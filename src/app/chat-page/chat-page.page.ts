@@ -111,6 +111,74 @@ export class ChatPagePage implements OnInit, OnDestroy {
       alert('Notify option pressed (placeholder).');
       this.closeChatOptionsOverlay();
     }
+
+  // --- Map Bottom Sheet State ---
+  isMapBottomSheetActive = false;
+  selectedMapEngineer: any = null;
+  private mapSheetDragStartY: number | null = null;
+  private readonly mapSheetDragThreshold = 55;
+
+  toggleMapBottomSheet(): void {
+    this.isMapBottomSheetActive = !this.isMapBottomSheetActive;
+    console.log(`[ChatPage.mapBottomSheet] Toggled. State: ${this.isMapBottomSheetActive ? 'Active' : 'Inactive'}`);
+  }
+
+  onMapSheetDragStart(event: MouseEvent | TouchEvent): void {
+    this.mapSheetDragStartY = this.getSheetEventY(event);
+
+    const moveHandler = (moveEvent: MouseEvent | TouchEvent): void => {
+      if (this.mapSheetDragStartY === null) return;
+      const deltaY = this.mapSheetDragStartY - this.getSheetEventY(moveEvent);
+      if (deltaY > this.mapSheetDragThreshold && !this.isMapBottomSheetActive) {
+        this.isMapBottomSheetActive = true;
+        console.log('[ChatPage.mapBottomSheet] Drag-up activated. State: Active');
+        cleanup();
+      } else if (deltaY < -this.mapSheetDragThreshold && this.isMapBottomSheetActive) {
+        this.isMapBottomSheetActive = false;
+        console.log('[ChatPage.mapBottomSheet] Drag-down deactivated. State: Inactive');
+        cleanup();
+      }
+    };
+
+    const upHandler = (): void => {
+      this.mapSheetDragStartY = null;
+      cleanup();
+    };
+
+    const cleanup = (): void => {
+      document.removeEventListener('mousemove', moveHandler as EventListener);
+      document.removeEventListener('touchmove', moveHandler as EventListener);
+      document.removeEventListener('mouseup', upHandler);
+      document.removeEventListener('touchend', upHandler);
+    };
+
+    document.addEventListener('mousemove', moveHandler as EventListener, { passive: true });
+    document.addEventListener('touchmove', moveHandler as EventListener, { passive: true });
+    document.addEventListener('mouseup', upHandler, { once: true });
+    document.addEventListener('touchend', upHandler, { once: true });
+  }
+
+  private getSheetEventY(event: MouseEvent | TouchEvent): number {
+    if ('touches' in event && event.touches.length > 0) return event.touches[0].clientY;
+    if ('changedTouches' in event && (event as TouchEvent).changedTouches.length > 0) {
+      return (event as TouchEvent).changedTouches[0].clientY;
+    }
+    return (event as MouseEvent).clientY;
+  }
+
+  openMapMarkerBottomSheet(markerData: any): void {
+    this.selectedMapEngineer = markerData;
+    this.isMapBottomSheetActive = true;
+    console.log('[ChatPage.mapBottomSheet] Marker clicked. State: Active', { engineer: markerData });
+  }
+
+  openChatFromMapSheet(event: MouseEvent): void {
+    event.stopPropagation();
+    if (this.selectedMapEngineer) {
+      void this.selectEngineer(this.selectedMapEngineer);
+    }
+  }
+
   private static userSyncTasks: Map<string, Promise<void>> = new Map();
   userName: string | null = null;
   firstName: string | null = null;
@@ -1555,6 +1623,9 @@ onMsgBubbleTap(message: Message): void {
     marker.off('touchend');
 
     const openOverlay = (trigger: 'click' | 'touchend') => {
+      // Activate the Google Maps-style bottom sheet with the marker's data
+      const markerData = { name: titleText };
+      this.openMapMarkerBottomSheet(markerData);
       console.log('[ChatPage.markerSelection] Marker interaction detected', { trigger, titleText });
       try {
         this.drawMarkerCenteredSquare(marker.getLatLng(), trigger, titleText);

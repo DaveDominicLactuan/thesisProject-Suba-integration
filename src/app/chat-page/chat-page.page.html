@@ -335,6 +335,70 @@
           <img src="assets/moreIcon.png" alt="Menu" />
         </div>
       </div>
+
+      <!-- Google Maps-style Bottom Sheet -->
+      <div class="map-bottom-sheet"
+           [ngClass]="{'active': isMapBottomSheetActive}"
+           (mousedown)="onMapSheetDragStart($event)"
+           (touchstart)="onMapSheetDragStart($event)">
+
+        <!-- Drag handle bar — clicking toggles active/inactive -->
+        <div class="map-sheet-handle-bar" (click)="toggleMapBottomSheet()">
+          <div class="map-sheet-handle-pill"></div>
+        </div>
+
+        <!-- Inactive peek row (always rendered, hidden in active via CSS) -->
+        <div class="map-sheet-peek" (click)="toggleMapBottomSheet()">
+          <div class="map-sheet-peek-avatar">
+            <span>{{ selectedMapEngineer ? getInitials(selectedMapEngineer.firstName ? (selectedMapEngineer.firstName + ' ' + (selectedMapEngineer.lastName || '')) : selectedMapEngineer.name) : '?' }}</span>
+          </div>
+          <div class="map-sheet-peek-text">
+            <div class="map-sheet-peek-name">
+              {{ selectedMapEngineer ? (selectedMapEngineer.firstName ? (selectedMapEngineer.firstName + ' ' + (selectedMapEngineer.lastName || '')) : selectedMapEngineer.name) : 'Tap a marker to view' }}
+            </div>
+            <div class="map-sheet-peek-sub">
+              {{ selectedMapEngineer ? '★ 4.0 · Office Address' : 'Drag up or tap to explore' }}
+            </div>
+          </div>
+          <ion-icon name="chevron-up-outline" class="map-sheet-peek-chevron" [ngClass]="{'rotated': isMapBottomSheetActive}"></ion-icon>
+        </div>
+
+        <!-- Active expanded body -->
+        <div class="map-sheet-body">
+          <div class="map-sheet-engineer-header">
+            <h2 class="map-sheet-name">
+              {{ selectedMapEngineer ? (selectedMapEngineer.firstName ? (selectedMapEngineer.firstName + ' ' + (selectedMapEngineer.lastName || '')) : selectedMapEngineer.name) : 'Engineer Name Here' }}
+            </h2>
+            <div class="map-sheet-rating-row">
+              <span class="map-sheet-stars">★★★★☆</span>
+              <span class="map-sheet-rating-val">4.0</span>
+            </div>
+            <div class="map-sheet-address">
+              <ion-icon name="location-outline"></ion-icon>
+              <span>Office Address</span>
+            </div>
+            <div class="map-sheet-avail">
+              <ion-icon name="time-outline"></ion-icon>
+              <span>Available: 8AM Tue</span>
+            </div>
+            <button class="map-sheet-chat-btn" (click)="openChatFromMapSheet($event)">
+              <ion-icon name="chatbubble-outline"></ion-icon>
+              Chat
+            </button>
+          </div>
+
+          <!-- Placeholder office / location photos -->
+          <div class="map-sheet-photos">
+            <div class="map-sheet-photo" aria-label="Office photo 1">
+              <ion-icon name="business-outline" class="map-sheet-photo-icon"></ion-icon>
+            </div>
+            <div class="map-sheet-photo" aria-label="Office photo 2">
+              <ion-icon name="map-outline" class="map-sheet-photo-icon"></ion-icon>
+            </div>
+          </div>
+        </div>
+      </div>
+
     </div>
   </ng-container>
 
