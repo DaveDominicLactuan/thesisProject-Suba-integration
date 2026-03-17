@@ -6,6 +6,7 @@ import { NavController } from '@ionic/angular';
 // import { HttpClient } from '@angular/common/http';
 import { Firestore, doc, setDoc } from '@angular/fire/firestore';
 import { Auth3Service } from '../services/auth3.service';
+import { RegistrationMapCoordinates } from './registration-leaflet-map/registration-leaflet-map.component';
 @Component({
   selector: 'app-registration-page',
   templateUrl: './registration-page.page.html',
@@ -43,6 +44,8 @@ regForm!: FormGroup; // our single form
   submitted: boolean = false;
   registrationError: string | null = null;
   registrationSuccess: string | null = null;
+  isRegistering: boolean = false;
+  officeLocationCoordinates: RegistrationMapCoordinates | null = null;
 
 // signupForm: FormGroup;
 
@@ -69,7 +72,9 @@ regForm!: FormGroup; // our single form
       password: ['', [Validators.required, Validators.minLength(6)]],
       confirmPassword: ['', Validators.required],
       phoneNumber: ['', Validators.required],
-      location: ['', Validators.required]
+      location: ['', Validators.required],
+      officeLatitude: [null, Validators.required],
+      officeLongitude: [null, Validators.required]
     }, {
       validators: this.passwordMatchValidator
     });
@@ -77,9 +82,11 @@ regForm!: FormGroup; // our single form
 
 // Stepper navigation
   nextStep() {
+    if (this.isRegistering) return;
     if (this.step < this.maxStep) this.step++;
   }
   prevStep() {
+    if (this.isRegistering) return;
     if (this.step > 1) this.step--;
   }
 
@@ -90,6 +97,10 @@ regForm!: FormGroup; // our single form
     return password === confirmPassword ? null : { mismatch: true };
   }
 
+  private waitForUiPaint(): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, 0));
+  }
+
 
 // Function to handle registration
 /**
@@ -97,6 +108,10 @@ regForm!: FormGroup; // our single form
  * then navigate to landing on success or show error on failure.
  */
 async onRegister() {
+  if (this.isRegistering) {
+    return;
+  }
+
   // Mark the form as submitted so validation error messages appear on the UI
   this.submitted = true;
   // Clear any previous registration error messages
@@ -104,7 +119,7 @@ async onRegister() {
   this.registrationSuccess = null;
 
   // Extract all form field values from the reactive form
-  const { email, password, firstName, lastName, engineeringID, confirmPassword } = this.regForm.value;
+  const { email, password, firstName, lastName, engineeringID, confirmPassword, officeLatitude, officeLongitude } = this.regForm.value;
 
   // Log all extracted values to the console for debugging purposes
   console.log("Debug - Form Values:");
@@ -114,6 +129,8 @@ async onRegister() {
   console.log("First Name:", firstName);
   console.log("Last Name:", lastName);
   console.log("Engineering ID:", engineeringID);
+  console.log('Office Latitude:', officeLatitude);
+  console.log('Office Longitude:', officeLongitude);
   
   // Check if the user has selected a role (Engineer or User)
   // If not, set error message and exit early
@@ -143,6 +160,10 @@ async onRegister() {
     this.registrationError = 'PRC Number is required for Engineer role.';
     return;
   }
+
+  this.isRegistering = true;
+  await this.waitForUiPaint();
+
   try {
     // Call the auth service to register a new user with provided credentials
     // selectedRole already contains 'engineer' or 'user'
@@ -182,6 +203,10 @@ async onRegister() {
             prcNumber: engineeringID ?? '',
             email: email ?? '',
             role: this.selectedRole ?? 'user',
+            officeLocation: {
+              latitude: officeLatitude ?? null,
+              longitude: officeLongitude ?? null
+            },
             ifAdmin: false,
             createdAt: new Date(),
             status: 'pending',
@@ -208,7 +233,15 @@ async onRegister() {
 
     // If registration succeeds, set success message and navigate to login
     this.registrationSuccess = 'Account created successfully. You can now sign in.';
-    console.log('[RegistrationPage] account created', { email, firstName, lastName, engineeringID, role: this.selectedRole });
+    console.log('[RegistrationPage] account created', {
+      email,
+      firstName,
+      lastName,
+      engineeringID,
+      role: this.selectedRole,
+      officeLatitude,
+      officeLongitude
+    });
     // Give the success message a brief moment before redirecting to login
     // For engineer role show the admin-notice modal and wait for user confirmation
     if (this.selectedRole === 'engineer') {
@@ -224,6 +257,8 @@ async onRegister() {
     this.registrationError = err?.message || 'Registration failed';
     // Show the error message in an alert dialog
     alert(this.registrationError);
+  } finally {
+    this.isRegistering = false;
   }
 }
 
@@ -231,6 +266,33 @@ async onRegister() {
   /** Convenience getter for template error checks: `f['email']` etc. */
   get f() {
     return this.regForm.controls;
+  }
+
+  get officeLocationText(): string {
+    if (!this.officeLocationCoordinates) {
+      return 'Tap the map preview to choose your exact office location.';
+    }
+
+    return `Latitude ${this.officeLocationCoordinates.latitude.toFixed(6)}, Longitude ${this.officeLocationCoordinates.longitude.toFixed(6)}`;
+  }
+
+  onOfficeLocationSelected(location: RegistrationMapCoordinates): void {
+    this.officeLocationCoordinates = {
+      latitude: location.latitude,
+      longitude: location.longitude
+    };
+
+    this.regForm.patchValue({
+      officeLatitude: location.latitude,
+      officeLongitude: location.longitude
+    });
+    this.regForm.get('officeLatitude')?.markAsTouched();
+    this.regForm.get('officeLongitude')?.markAsTouched();
+
+    console.log('[RegistrationPage] Office location confirmed:', {
+      latitude: location.latitude,
+      longitude: location.longitude
+    });
   }
 
 
@@ -244,6 +306,10 @@ async onRegister() {
 //function to select role
 /** Track selected role; required for Engineer ID validation. */
 selectRole(role: string) {
+  if (this.isRegistering) {
+    return;
+  }
+
   this.selectedRole = role;
   console.log('Selected Role:', role);
 }
@@ -268,6 +334,10 @@ togglePasswordVisibility() {
    * to landing (fallback to navCtrl.back()).
    */
   onBack() {
+  if (this.isRegistering) {
+    return;
+  }
+
   // If a role is selected, deselect it. Otherwise navigate back to landing page.
   if (this.selectedRole) {
     this.selectedRole = null;

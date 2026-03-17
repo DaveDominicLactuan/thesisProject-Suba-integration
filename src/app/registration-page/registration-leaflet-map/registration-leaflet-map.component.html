@@ -1,0 +1,41 @@
+<div class="registration-map">
+  <div class="registration-map__preview">
+    <div #previewMapContainer class="registration-map__preview-map" role="region" aria-label="Office location preview"></div>
+
+    <button
+      class="registration-map__preview-trigger"
+      type="button"
+      (click)="openPicker()"
+      aria-label="Open office location picker map"
+    ></button>
+
+    <p class="registration-map__preview-text">{{ currentLocationText }}</p>
+  </div>
+
+  <div class="registration-map__overlay" *ngIf="isPickerOpen" (click)="closePicker()">
+    <div class="registration-map__panel" (click)="$event.stopPropagation()">
+      <h4>Choose office location</h4>
+      <p class="registration-map__panel-hint">
+        Click on the map to place a marker, then confirm if the selected point is correct.
+      </p>
+
+      <div #pickerMapContainer class="registration-map__picker-map" role="region" aria-label="Office location picker"></div>
+
+      <p class="registration-map__coords">{{ pendingLocationText }}</p>
+
+      <div class="registration-map__confirm-window" *ngIf="pendingLocation">
+        <p>Is this office location correct?</p>
+
+        <div class="registration-map__actions">
+          <button class="registration-map__button registration-map__button--secondary" type="button" (click)="closePicker()">
+            Cancel
+          </button>
+
+          <button class="registration-map__button" type="button" (click)="confirmLocation()">
+            Confirm location
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>

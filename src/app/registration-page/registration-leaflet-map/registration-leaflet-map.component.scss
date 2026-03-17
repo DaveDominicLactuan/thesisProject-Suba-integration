@@ -1,0 +1,161 @@
+:host {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.registration-map {
+  width: 100%;
+  height: 100%;
+  min-height: 190px;
+}
+
+.registration-map__preview {
+  position: relative;
+  width: 100%;
+  min-height: 190px;
+  border-radius: 18px;
+  overflow: hidden;
+  border: 1px solid rgba(242, 101, 34, 0.2);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.75);
+  background: #f8f8f8;
+}
+
+.registration-map__preview-map {
+  width: 100%;
+  min-height: 190px;
+  height: 100%;
+}
+
+.registration-map__preview-trigger {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.registration-map__preview-text {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 12px;
+  margin: 0;
+  border-radius: 12px;
+  padding: 8px 10px;
+  background: rgba(255, 255, 255, 0.92);
+  color: #1f1f1f;
+  font-size: 0.8rem;
+  font-weight: 600;
+  line-height: 1.35;
+  pointer-events: none;
+}
+
+.registration-map__overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(16, 16, 16, 0.42);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 18px;
+  z-index: 11000;
+}
+
+.registration-map__panel {
+  width: min(760px, 100%);
+  max-height: 88vh;
+  overflow: auto;
+  border-radius: 18px;
+  background: #ffffff;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.25);
+  padding: 18px;
+}
+
+.registration-map__panel h4 {
+  margin: 0;
+  font-size: 1.2rem;
+  color: #111;
+}
+
+.registration-map__panel-hint {
+  margin: 6px 0 14px;
+  color: #606060;
+  font-size: 0.9rem;
+  line-height: 1.4;
+}
+
+.registration-map__picker-map {
+  width: 100%;
+  height: 360px;
+  border-radius: 14px;
+  overflow: hidden;
+  border: 1px solid rgba(242, 101, 34, 0.22);
+  background: #f5f5f5;
+}
+
+.registration-map__coords {
+  margin: 12px 0 0;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(242, 101, 34, 0.08);
+  color: #8e4216;
+  font-size: 0.86rem;
+  font-weight: 700;
+}
+
+.registration-map__confirm-window {
+  margin-top: 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(242, 101, 34, 0.22);
+  background: #fff8f2;
+  padding: 12px;
+}
+
+.registration-map__confirm-window p {
+  margin: 0 0 10px;
+  font-size: 0.95rem;
+  color: #222;
+  font-weight: 700;
+}
+
+.registration-map__actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+.registration-map__button {
+  border: 0;
+  border-radius: 10px;
+  padding: 10px 14px;
+  color: #fff;
+  background: linear-gradient(to right, #ff512f, #f09819);
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+.registration-map__button--secondary {
+  background: #f2f2f2;
+  color: #252525;
+}
+
+@media (max-width: 640px) {
+  .registration-map__panel {
+    padding: 14px;
+    border-radius: 14px;
+  }
+
+  .registration-map__picker-map {
+    height: 300px;
+  }
+
+  .registration-map__actions {
+    flex-direction: column;
+  }
+
+  .registration-map__button {
+    width: 100%;
+  }
+}

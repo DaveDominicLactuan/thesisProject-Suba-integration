@@ -59,6 +59,10 @@ form {
 
 .step-actions {
   width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 14px;
 }
 
 * {
@@ -129,8 +133,9 @@ max-width: 90%;
 width: 500px;
   // min-height: 420px;
   // height: 450px;.
-  max-height: 110%;
-  height: 400px;
+  max-height: none;
+  min-height: 400px;
+  height: auto;
   // height: 90%;
 
   margin: auto;
@@ -146,6 +151,8 @@ width: 500px;
   z-index: 2;
   align-items: center;
   justify-content: center;
+  box-sizing: border-box;
+  overflow: visible;
   
 }
 
@@ -154,8 +161,9 @@ width: 500px;
 width: 500px;
   // min-height: 420px;
   // height: 450px;.
-  max-height: 110%;
-  height: 900px;
+  max-height: none;
+  min-height: 900px;
+  height: auto;
   // height: 90%;
 
   margin: auto;
@@ -171,8 +179,31 @@ width: 500px;
   z-index: 2;
   align-items: center;
   justify-content: center;
+  box-sizing: border-box;
+  overflow: visible;
   // top: 12%;
   // margin-bottom: 50px;
+}
+
+/* Per-state position overrides for the registration card */
+.login-form.no-role-selected {
+  top: 2%;
+}
+
+.login-form.step-1-active {
+  top: 20%;
+}
+
+.login-form.step-2-active {
+  top: 22%;
+}
+
+.login-form.step-3-active {
+  top: 24%;
+}
+
+.login-form.step-4-active {
+  top: 25%;
 }
 
 .back-btn {
@@ -185,6 +216,11 @@ width: 500px;
   color: #008799;
   cursor: pointer;
   z-index: 3;
+}
+
+.back-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .back-icon {
@@ -259,9 +295,15 @@ width: 500px;
     display: flex;
     flex-direction: column;
     align-items: center;
+    justify-content: center;
     cursor: pointer;
     padding: 5px;
     width: 100px;
+    min-height: 112px;
+    position: relative;
+    overflow: hidden;
+    border-radius: 16px;
+    transition: transform 0.2s ease, opacity 0.2s ease;
 
     img {
       width: 65px;
@@ -278,9 +320,44 @@ width: 500px;
       color: #000000;
     }
 
+    &.disabled {
+      pointer-events: none;
+    }
+
+    &.loading img,
+    &.loading > span {
+      opacity: 0.2;
+    }
+
     &.selected img {
       border-color: #ffca28;
       box-shadow: 0 0 10px rgba(255, 202, 40, 0.6);
+    }
+
+    .role-loading {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      background: rgba(255, 255, 255, 0.9);
+      border-radius: 16px;
+      z-index: 1;
+
+      ion-spinner {
+        width: 24px;
+        height: 24px;
+        color: #f26522;
+      }
+
+      span {
+        margin-top: 0;
+        font-size: 12px;
+        font-weight: 700;
+        color: #f26522;
+      }
     }
   }
 }
@@ -327,6 +404,80 @@ width: 500px;
   padding-left: 6px;
 }
 
+.location-preview-section {
+  margin: 18px 0 6px;
+  padding: 16px;
+  border-radius: 18px;
+  background: linear-gradient(180deg, rgba(255, 249, 245, 0.98), rgba(255, 255, 255, 0.98));
+  border: 1px solid rgba(242, 101, 34, 0.12);
+  box-shadow: 0 10px 24px rgba(242, 101, 34, 0.08);
+}
+
+.location-preview-copy {
+  h4 {
+    margin: 0 0 6px;
+    font-size: 1rem;
+    font-weight: 700;
+    color: #111;
+  }
+
+  p {
+    margin: 0;
+    font-size: 0.86rem;
+    line-height: 1.45;
+    color: #666;
+  }
+}
+
+.location-preview-chip {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 14px;
+  margin-bottom: 14px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(242, 101, 34, 0.08);
+  color: #9a4b1a;
+
+  ion-icon {
+    font-size: 20px;
+    color: #f26522;
+    flex-shrink: 0;
+  }
+
+  span {
+    margin-top: 0;
+    font-size: 0.88rem;
+    font-weight: 600;
+    color: #7a3b14;
+  }
+}
+
+.location-map-placeholder {
+  position: relative;
+  min-height: 220px;
+  border-radius: 18px;
+  overflow: hidden;
+  border: 1px solid rgba(242, 101, 34, 0.2);
+  background:
+    radial-gradient(circle at 20% 20%, rgba(255, 185, 106, 0.14), transparent 25%),
+    radial-gradient(circle at 80% 25%, rgba(255, 81, 47, 0.1), transparent 22%),
+    linear-gradient(135deg, rgba(255, 240, 228, 0.6), rgba(255, 255, 255, 0.9));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.75);
+
+  app-registration-leaflet-map {
+    display: block;
+    min-height: 220px;
+    height: 100%;
+  }
+
+  &.invalid {
+    border-color: #e74c3c;
+    box-shadow: 0 0 0 3px rgba(231, 76, 60, 0.12);
+  }
+}
+
 .signup-btn[disabled] {
   opacity: 0.6;
   cursor: not-allowed;
@@ -345,6 +496,16 @@ width: 500px;
   border: none;
   margin-top: 10px;
   cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+}
+
+.signup-btn ion-spinner {
+  width: 20px;
+  height: 20px;
+  color: #fff;
 }
 
 .login-link {
@@ -362,6 +523,50 @@ width: 500px;
 }
 
 @media (max-width: 480px) {
+  .login-form,
+  .login-form.role-selected {
+    width: calc(100vw - 32px);
+    max-width: calc(100vw - 32px);
+    margin-bottom: 40px;
+  }
+
+  .login-form.role-selected {
+    min-height: auto;
+    top: 16%;
+  }
+
+  .login-form.no-role-selected {
+    top: -15%;
+  }
+
+  .login-form.step-1-active {
+    top: 10%;
+  }
+
+  .login-form.step-2-active {
+    top: 12%;
+  }
+
+  .login-form.step-3-active {
+    top: 14%;
+  }
+
+  .login-form.step-4-active {
+    top: 16%;
+  }
+
+  .location-preview-section {
+    padding: 14px;
+  }
+
+  .location-map-placeholder {
+    min-height: 190px;
+
+    app-registration-leaflet-map {
+      min-height: 190px;
+    }
+  }
+
   .role-selector {
     flex-direction: row;
     gap: 16px;

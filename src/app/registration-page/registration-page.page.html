@@ -15,10 +15,20 @@
   </div>
 
   
-<div class="login-form" [ngClass]="{'role-selected': selectedRole}">
+<div
+  class="login-form"
+  [ngClass]="{
+    'role-selected': !!selectedRole,
+    'no-role-selected': !selectedRole,
+    'step-1-active': !!selectedRole && step === 1,
+    'step-2-active': !!selectedRole && step === 2,
+    'step-3-active': !!selectedRole && step === 3,
+    'step-4-active': !!selectedRole && step === 4
+  }"
+>
 
 
-  <button class="back-btn" type="button" (click)="onBack()">
+  <button class="back-btn" type="button" (click)="onBack()" [disabled]="isRegistering">
     <img src="assets/back.png" alt="Back" class="back-icon" />
   </button>
   
@@ -34,19 +44,31 @@
       class="role-option"
       *ngIf="!selectedRole || selectedRole === 'engineer'"
       [class.selected]="selectedRole === 'engineer'"
+      [class.loading]="isRegistering && selectedRole === 'engineer'"
+      [class.disabled]="isRegistering"
       (click)="selectRole('engineer')"
     >
       <img src="assets/engIcon.png" alt="Engineer Icon" />
       <span>Engineer</span>
+      <div class="role-loading" *ngIf="isRegistering && selectedRole === 'engineer'">
+        <ion-spinner name="crescent"></ion-spinner>
+        <span>Registering...</span>
+      </div>
     </div>
     <div
       class="role-option"
       *ngIf="!selectedRole || selectedRole === 'user'"
       [class.selected]="selectedRole === 'user'"
+      [class.loading]="isRegistering && selectedRole === 'user'"
+      [class.disabled]="isRegistering"
       (click)="selectRole('user')"
     >
       <img src="assets/useIcon.png" alt="User Icon" />
       <span>User</span>
+      <div class="role-loading" *ngIf="isRegistering && selectedRole === 'user'">
+        <ion-spinner name="crescent"></ion-spinner>
+        <span>Registering...</span>
+      </div>
     </div>
   </div>
 
@@ -92,7 +114,7 @@
           <div *ngIf="(f['confirmPassword'].invalid && (f['confirmPassword'].touched || submitted))" class="field-error">Confirm password is required.</div>
           <div *ngIf="regForm.errors?.['mismatch'] && submitted" class="field-error">Passwords do not match.</div>
 
-          <button class="signup-btn" type="button" (click)="nextStep()" [disabled]="f['email'].invalid || f['password'].invalid || f['confirmPassword'].invalid || regForm.errors?.['mismatch']">Next</button>
+          <button class="signup-btn" type="button" (click)="nextStep()" [disabled]="isRegistering || f['email'].invalid || f['password'].invalid || f['confirmPassword'].invalid || regForm.errors?.['mismatch']">Next</button>
         </div>
 
         <!-- Step 2: User Info -->
@@ -116,9 +138,8 @@
             </div>
             <div *ngIf="f['engineeringID'].invalid && (f['engineeringID'].touched || submitted)" class="field-error">PRC Number is required for Engineer role.</div>
           </div>
-
-          <button class="signup-btn" type="button" (click)="prevStep()">Back</button>
-          <button class="signup-btn" type="button" (click)="nextStep()" [disabled]="f['firstName'].invalid || f['lastName'].invalid || (selectedRole === 'engineer' && f['engineeringID'].invalid)">Next</button>
+          <button class="signup-btn" type="button" (click)="nextStep()" [disabled]="isRegistering || f['firstName'].invalid || f['lastName'].invalid || (selectedRole === 'engineer' && f['engineeringID'].invalid)">Next</button>
+          <button class="signup-btn" type="button" (click)="prevStep()" [disabled]="isRegistering">Back</button>
         </div>
 
         <!-- Step 3: Contact Info -->
@@ -135,8 +156,36 @@
           </div>
           <div *ngIf="f['location']?.invalid && (f['location']?.touched || submitted)" class="field-error">Location is required.</div>
 
-          <button class="signup-btn" type="button" (click)="prevStep()">Back</button>
-          <button class="signup-btn" type="button" (click)="nextStep()" [disabled]="f['phoneNumber']?.invalid || f['location']?.invalid">Next</button>
+          <div class="location-preview-section">
+            <div class="location-preview-copy">
+              <h4>Location Preview</h4>
+              <p>
+                Choose your exact office location on the map. Tap the preview to open a bigger map and confirm the marker.
+              </p>
+            </div>
+
+            <div class="location-preview-chip">
+              <ion-icon name="navigate-circle-outline"></ion-icon>
+              <span>{{ officeLocationText }}</span>
+            </div>
+
+            <div
+              class="location-map-placeholder"
+              [class.invalid]="(f['officeLatitude']?.invalid || f['officeLongitude']?.invalid) && (f['officeLatitude']?.touched || submitted)"
+            >
+              <app-registration-leaflet-map
+                [selectedLocation]="officeLocationCoordinates"
+                (locationSelected)="onOfficeLocationSelected($event)"
+              ></app-registration-leaflet-map>
+            </div>
+
+            <div *ngIf="(f['officeLatitude']?.invalid || f['officeLongitude']?.invalid) && (f['officeLatitude']?.touched || submitted)" class="field-error">
+              Please confirm your office location from the map.
+            </div>
+          </div>
+          
+           <button class="signup-btn" type="button" (click)="nextStep()" [disabled]="isRegistering || f['phoneNumber']?.invalid || f['location']?.invalid || f['officeLatitude']?.invalid || f['officeLongitude']?.invalid">Next</button>
+          <button class="signup-btn" type="button" (click)="prevStep()" [disabled]="isRegistering">Back</button>
         </div>
 
         <!-- Step 4: Confirm Details -->
@@ -149,12 +198,16 @@
             <div class="confirm-row"><span>Email:</span> <span>{{ regForm.value.email }}</span></div>
             <div class="confirm-row"><span>Phone Number:</span> <span>{{ regForm.value.phoneNumber }}</span></div>
             <div class="confirm-row"><span>Location:</span> <span>{{ regForm.value.location }}</span></div>
+            <div class="confirm-row"><span>Office Coordinates:</span> <span>{{ regForm.value.officeLatitude | number: '1.6-6' }}, {{ regForm.value.officeLongitude | number: '1.6-6' }}</span></div>
             <div class="confirm-row"><span>Password:</span> <span>••••••••</span></div>
             <div class="confirm-row"><span>Role:</span> <span>{{ selectedRole | titlecase }}</span></div>
           </div>
           <div class="step-actions">
-            <button class="signup-btn" type="button" (click)="prevStep()">Back</button>
-            <button class="signup-btn" type="submit" [disabled]="regForm.invalid || !selectedRole">Confirm & Sign Up</button>
+            <button class="signup-btn" type="button" (click)="prevStep()" [disabled]="isRegistering">Back</button>
+            <button class="signup-btn" type="submit" [disabled]="isRegistering || regForm.invalid || !selectedRole">
+              <ion-spinner *ngIf="isRegistering" name="crescent"></ion-spinner>
+              <span>{{ isRegistering ? 'Creating account...' : 'Confirm & Sign Up' }}</span>
+            </button>
           </div>
         </div>
       </div>
