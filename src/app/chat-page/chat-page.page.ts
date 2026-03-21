@@ -14,6 +14,14 @@ import { App } from '@capacitor/app';
 import { Geolocation } from '@capacitor/geolocation';
 // Leaflet map library
 import * as L from 'leaflet';
+
+interface OfficeLocationMarkerData {
+  id: string;
+  latitude: number;
+  longitude: number;
+  payload: Record<string, unknown>;
+}
+
 @Component({
   selector: 'app-chat-page',
   templateUrl: './chat-page.page.html',
@@ -226,6 +234,11 @@ export class ChatPagePage implements OnInit, OnDestroy {
   private mapTapOverlayElement?: HTMLDivElement;
   private markerSelectionSquare?: L.Rectangle;
   private readonly markerSquareHalfSideMeters = 120;
+  private officeLocationMarkerData: OfficeLocationMarkerData[] = [];
+  private officeLocationLeafletMarkers: L.Marker[] = [];
+  private markerUserProfileMap: Map<L.Marker, any> = new Map();
+  private mapRefreshTimerId?: ReturnType<typeof setInterval>;
+  private readonly mapRefreshIntervalMs = 30000; // 30 seconds
 
   private dismissMapTapOverlay(): void {
     if (!this.mapTapOverlayElement) return;
@@ -1473,7 +1486,8 @@ onMsgBubbleTap(message: Message): void {
     wrap.appendChild(panel);
     overlay.appendChild(wrap);
 
-    document.body.appendChild(overlay);
+    // Append the overlay to the body and keep a reference for future checks/removal.
+    // document.body.appendChild(overlay);
     this.markerSelectionOverlayElement = overlay;
 
     const rect = panel.getBoundingClientRect();
@@ -1593,6 +1607,7 @@ onMsgBubbleTap(message: Message): void {
       this.isSearching = false;
       this.dismissMapTapOverlay();
       this.destroyMapInstance();
+      this.stopMapRefreshTimer();
     }
 
     // Selecting location will show the Map view (ensure no chat overlay is open)
@@ -1600,9 +1615,12 @@ onMsgBubbleTap(message: Message): void {
       this.isSearching = false;
       this.handleMapResizeOnReentry();
       this.scheduleMapInitialization();
+      // Start periodic map refresh when entering location tab
+      this.startMapRefreshTimer();
     } else if (tab === 'settings' || tab === 'profile') {
       this.dismissMapTapOverlay();
       this.destroyMapInstance();
+      this.stopMapRefreshTimer();
     }
   }
 
@@ -1616,6 +1634,7 @@ onMsgBubbleTap(message: Message): void {
     this.markerSelectionSquare = undefined;
     this.map = null;
     this.userLocationMarker = undefined;
+    this.officeLocationLeafletMarkers = [];
   }
 
   private bindMarkerSelectionTrigger(marker: L.Marker, titleText: string): void {
@@ -1624,7 +1643,9 @@ onMsgBubbleTap(message: Message): void {
 
     const openOverlay = (trigger: 'click' | 'touchend') => {
       // Activate the Google Maps-style bottom sheet with the marker's data
-      const markerData = { name: titleText };
+      // Use cached user profile if available, otherwise fall back to title
+      const cachedUserProfile = this.markerUserProfileMap.get(marker);
+      const markerData = cachedUserProfile || { name: titleText };
       this.openMapMarkerBottomSheet(markerData);
       console.log('[ChatPage.markerSelection] Marker interaction detected', { trigger, titleText });
       try {
@@ -1966,6 +1987,346 @@ onMsgBubbleTap(message: Message): void {
     }
   }
 
+  private toFiniteNumber(value: unknown): number | null {
+    if (typeof value === 'number' && Number.isFinite(value)) return value;
+    if (typeof value === 'string') {
+      const parsed = Number.parseFloat(value);
+      if (Number.isFinite(parsed)) return parsed;
+    }
+    return null;
+  }
+
+  private resolveOfficeMarkerCoordinates(payload: Record<string, unknown>): { latitude: number; longitude: number } | null {
+    const directLatitude = this.toFiniteNumber(payload['latitude'] ?? payload['lat']);
+    const directLongitude = this.toFiniteNumber(payload['longitude'] ?? payload['lng'] ?? payload['lon'] ?? payload['long']);
+
+    if (
+      directLatitude !== null &&
+      directLongitude !== null &&
+      Math.abs(directLatitude) <= 90 &&
+      Math.abs(directLongitude) <= 180
+    ) {
+      return { latitude: directLatitude, longitude: directLongitude };
+    }
+
+    const nestedLocationCandidates = [payload['location'], payload['officeLocation'], payload['coordinates']];
+    for (const locationField of nestedLocationCandidates) {
+      if (!locationField || typeof locationField !== 'object') continue;
+
+      const locationRecord = locationField as Record<string, unknown>;
+      const nestedLatitude = this.toFiniteNumber(locationRecord['latitude'] ?? locationRecord['lat'] ?? locationRecord['_lat']);
+      const nestedLongitude = this.toFiniteNumber(locationRecord['longitude'] ?? locationRecord['lng'] ?? locationRecord['lon'] ?? locationRecord['_long']);
+
+      if (
+        nestedLatitude !== null &&
+        nestedLongitude !== null &&
+        Math.abs(nestedLatitude) <= 90 &&
+        Math.abs(nestedLongitude) <= 180
+      ) {
+        return { latitude: nestedLatitude, longitude: nestedLongitude };
+      }
+    }
+
+    return null;
+  }
+
+  private buildOfficeMarkerTitle(markerData: OfficeLocationMarkerData): string {
+    const nameValue = markerData.payload['name'];
+    if (typeof nameValue === 'string' && nameValue.trim()) return nameValue.trim();
+
+    const titleValue = markerData.payload['title'];
+    if (typeof titleValue === 'string' && titleValue.trim()) return titleValue.trim();
+
+    return `Office Marker ${markerData.id}`;
+  }
+
+  private clearOfficeLocationMapMarkers(): void {
+    if (!this.officeLocationLeafletMarkers.length) return;
+
+    for (const marker of this.officeLocationLeafletMarkers) {
+      try {
+        marker.remove();
+      } catch {}
+      this.markerUserProfileMap.delete(marker);
+    }
+
+    this.officeLocationLeafletMarkers = [];
+  }
+
+  private async fetchUserProfileByUserId(userId: string): Promise<any> {
+    if (!userId) return null;
+    
+    // Check cache first
+    if (this.userProfileCache.has(userId)) {
+      console.log('[ChatPage.userProfile] User profile found in cache', { userId });
+      return this.userProfileCache.get(userId);
+    }
+
+    try {
+      console.log('[ChatPage.userProfile] Fetching user profile from Firestore', { userId });
+      const userDocRef = doc(this.firestore, 'users', userId);
+      const userDocSnapshot = await getDoc(userDocRef);
+      
+      if (userDocSnapshot.exists()) {
+        const userData = userDocSnapshot.data() as any;
+        this.userProfileCache.set(userId, userData);
+        console.log('[ChatPage.userProfile] User profile fetched and cached', { userId, userData });
+        return userData;
+      } else {
+        console.warn('[ChatPage.userProfile] User document does not exist', { userId });
+        return null;
+      }
+    } catch (error) {
+      console.error('[ChatPage.userProfile] Error fetching user profile', { userId, error });
+      return null;
+    }
+  }
+
+  private async fetchOfficeLocationMarkerData(): Promise<void> {
+    const authedUser = this.auth3.getCurrentUser() ?? await this.auth3.waitForAuthUser(5000).catch(() => null);
+    if (!authedUser?.uid) {
+      console.warn('[ChatPage.userOfficeLocationMarker] Skipping collection fetch because Firebase auth user is not ready.');
+      // Try to load from localStorage as a fallback
+      this.officeLocationMarkerData = this.loadOfficeMarkerDataFromLocalStorage();
+      return;
+    }
+
+    try {
+      const markerCollectionRef = collection(this.firestore, 'userOfficeLocationMarker');
+      const markerSnapshot = await getDocs(markerCollectionRef);
+      const parsedMarkers: OfficeLocationMarkerData[] = [];
+
+      markerSnapshot.forEach((markerDoc) => {
+        const payload = (markerDoc.data() as Record<string, unknown>) ?? {};
+        const coordinates = this.resolveOfficeMarkerCoordinates(payload);
+
+        if (!coordinates) {
+          console.warn('[ChatPage.userOfficeLocationMarker] Skipping document with invalid coordinates.', {
+            docId: markerDoc.id,
+            payload
+          });
+          return;
+        }
+
+        parsedMarkers.push({
+          id: markerDoc.id,
+          latitude: coordinates.latitude,
+          longitude: coordinates.longitude,
+          payload
+        });
+      });
+
+      this.officeLocationMarkerData = parsedMarkers;
+      // Save to localStorage after successful fetch
+      this.saveOfficeMarkerDataToLocalStorage();
+      console.log('[ChatPage.userOfficeLocationMarker] Collection data loaded and stored.', {
+        totalDocuments: markerSnapshot.size,
+        markersStored: parsedMarkers.length,
+        markersSkipped: markerSnapshot.size - parsedMarkers.length
+      });
+    } catch (error) {
+      const errorCode = (error as { code?: string } | null)?.code ?? 'unknown';
+      if (errorCode === 'permission-denied') {
+        console.error('[ChatPage.userOfficeLocationMarker] Permission denied while reading full collection. Check firestore.rules for list/get read access on /userOfficeLocationMarker.', error);
+      } else {
+        console.error('[ChatPage.userOfficeLocationMarker] Failed to fetch collection data.', error);
+      }
+      // Fall back to localStorage data if Firestore fetch fails
+      this.officeLocationMarkerData = this.loadOfficeMarkerDataFromLocalStorage();
+    }
+  }
+
+  private renderStoredOfficeLocationMarkers(): void {
+    const mapInstance = this.map;
+    if (!mapInstance) {
+      console.warn('[ChatPage.userOfficeLocationMarker] Render skipped because map is not initialized.');
+      return;
+    }
+
+    this.clearOfficeLocationMapMarkers();
+
+    if (!this.officeLocationMarkerData.length) {
+      console.log('[ChatPage.userOfficeLocationMarker] No stored marker data available for rendering.');
+      return;
+    }
+
+    for (const markerData of this.officeLocationMarkerData) {
+      try {
+        const markerTitle = this.buildOfficeMarkerTitle(markerData);
+        const marker = L.marker([markerData.latitude, markerData.longitude], { icon: this.testMarkerIcon })
+          .addTo(mapInstance)
+          .bindPopup(`<strong>${markerTitle}</strong>`);
+
+        // Fetch and cache user profile for this marker's userID
+        const locationUserId = (markerData.payload['userId'] || markerData.payload['uid'] || markerData.payload['userID']) as string | undefined;
+        if (locationUserId) {
+          this.fetchUserProfileByUserId(locationUserId)
+            .then((userProfile) => {
+              if (userProfile) {
+                this.markerUserProfileMap.set(marker, userProfile);
+                console.log('[ChatPage.userOfficeLocationMarker] User profile cached for marker', {
+                  userId: locationUserId,
+                  firstName: userProfile.firstName,
+                  lastName: userProfile.lastName
+                });
+              }
+            })
+            .catch((err) => {
+              console.error('[ChatPage.userOfficeLocationMarker] Failed to fetch user profile', { locationUserId, err });
+            });
+        }
+
+        this.bindMarkerSelectionTrigger(marker, markerTitle);
+
+        const logMarkerPayload = (trigger: 'click' | 'touchend') => {
+          console.log('[ChatPage.userOfficeLocationMarker] Marker tapped.', {
+            trigger,
+            id: markerData.id,
+            latitude: markerData.latitude,
+            longitude: markerData.longitude,
+            payload: markerData.payload,
+            name: markerData.payload['name'],
+            title: markerData.payload['title'],
+            description: markerData.payload['description'],
+            availableTime: markerData.payload['availableTime'],
+            unAvailableTime: markerData.payload['unavailableTime'],
+            contactInfo: markerData.payload['contactInfo'],
+            address: markerData.payload['address'],
+            email: markerData.payload['email'],
+            locationuserid: markerData.payload['userId'] || markerData.payload['uid'] || markerData.payload['userID']
+          });
+        };
+
+        marker.on('click', () => logMarkerPayload('click'));
+        marker.on('touchend', () => logMarkerPayload('touchend'));
+        this.officeLocationLeafletMarkers.push(marker);
+      } catch (error) {
+        console.error('[ChatPage.userOfficeLocationMarker] Failed to render a marker from stored data.', {
+          markerData,
+          error
+        });
+      }
+    }
+
+    console.log('[ChatPage.userOfficeLocationMarker] Stored markers rendered on map.', {
+      markerCount: this.officeLocationLeafletMarkers.length
+    });
+  }
+
+  private async loadAndRenderOfficeLocationMarkers(): Promise<void> {
+    await this.fetchOfficeLocationMarkerData();
+    this.renderStoredOfficeLocationMarkers();
+  }
+
+  /**
+   * Get the localStorage key for storing office location marker data.
+   * Scoped to the current user to avoid cross-user data leaks.
+   */
+  private getOfficeMarkerStorageKey(): string {
+    const userId = this.auth3.getCurrentUser()?.uid || this.userID || 'unknown';
+    return `office-location-markers-${userId}`;
+  }
+
+  /**
+   * Save the current office location marker data to localStorage.
+   * This provides a fallback cache in case Firestore is unavailable.
+   */
+  private saveOfficeMarkerDataToLocalStorage(): void {
+    try {
+      const key = this.getOfficeMarkerStorageKey();
+      const dataToStore = JSON.stringify(this.officeLocationMarkerData);
+      localStorage.setItem(key, dataToStore);
+      console.log('[ChatPage.markerStorage] Marker data saved to localStorage.', {
+        markerCount: this.officeLocationMarkerData.length,
+        storageKey: key
+      });
+    } catch (error) {
+      console.error('[ChatPage.markerStorage] Failed to save marker data to localStorage.', error);
+    }
+  }
+
+  /**
+   * Load office location marker data from localStorage.
+   * Returns empty array if no data is found or if loading fails.
+   */
+  private loadOfficeMarkerDataFromLocalStorage(): OfficeLocationMarkerData[] {
+    try {
+      const key = this.getOfficeMarkerStorageKey();
+      const storedData = localStorage.getItem(key);
+      if (!storedData) {
+        console.log('[ChatPage.markerStorage] No cached marker data found in localStorage.');
+        return [];
+      }
+      const parsedData = JSON.parse(storedData) as OfficeLocationMarkerData[];
+      console.log('[ChatPage.markerStorage] Marker data loaded from localStorage.', {
+        markerCount: parsedData.length
+      });
+      return Array.isArray(parsedData) ? parsedData : [];
+    } catch (error) {
+      console.error('[ChatPage.markerStorage] Failed to load marker data from localStorage.', error);
+      return [];
+    }
+  }
+
+  /**
+   * Start a periodic timer that refreshes the map and marker data.
+   * This ensures the map stays up-to-date even after inactivity or display issues.
+   * Only starts one timer; subsequent calls are ignored if timer is already running.
+   */
+  private startMapRefreshTimer(): void {
+    if (this.mapRefreshTimerId) {
+      console.log('[ChatPage.mapRefresh] Map refresh timer already running.');
+      return;
+    }
+
+    this.mapRefreshTimerId = setInterval(async () => {
+      console.log('[ChatPage.mapRefresh] Periodic map refresh triggered.');
+      try {
+        // Fetch latest marker data from Firestore
+        await this.fetchOfficeLocationMarkerData();
+        // Save to local storage for offline access
+        this.saveOfficeMarkerDataToLocalStorage();
+        // Re-render on the map
+        this.renderStoredOfficeLocationMarkers();
+        console.log('[ChatPage.mapRefresh] Map refresh completed successfully.');
+      } catch (error) {
+        console.error('[ChatPage.mapRefresh] Error during periodic map refresh:', error);
+      }
+    }, this.mapRefreshIntervalMs);
+
+    console.log('[ChatPage.mapRefresh] Map refresh timer started.', {
+      intervalMs: this.mapRefreshIntervalMs
+    });
+  }
+
+  /**
+   * Stop the periodic map refresh timer.
+   * Safe to call even if the timer is not running.
+   */
+  private stopMapRefreshTimer(): void {
+    if (this.mapRefreshTimerId) {
+      clearInterval(this.mapRefreshTimerId);
+      this.mapRefreshTimerId = undefined;
+      console.log('[ChatPage.mapRefresh] Map refresh timer stopped.');
+    }
+  }
+
+  /**
+   * Manually trigger a map refresh (fetch, save, and render).
+   * Useful for on-demand updates without waiting for the periodic timer.
+   */
+  async manualMapRefresh(): Promise<void> {
+    console.log('[ChatPage.mapRefresh] Manual map refresh triggered.');
+    try {
+      await this.fetchOfficeLocationMarkerData();
+      this.saveOfficeMarkerDataToLocalStorage();
+      this.renderStoredOfficeLocationMarkers();
+      console.log('[ChatPage.mapRefresh] Manual map refresh completed successfully.');
+    } catch (error) {
+      console.error('[ChatPage.mapRefresh] Error during manual map refresh:', error);
+    }
+  }
+
   /** Initialize Leaflet map in the `map` element. Safe to call multiple times. */
   private async initMap(): Promise<void> {
     console.log('[ChatPage.initMap] Initializing map...');
@@ -1998,6 +2359,7 @@ onMsgBubbleTap(message: Message): void {
         this.bindMapTapCapture();
         this.map.setView(center, 15);
         await this.markUserLocation(this.map, coordinates);
+        await this.loadAndRenderOfficeLocationMarkers();
         return;
       }
 
@@ -2015,6 +2377,7 @@ onMsgBubbleTap(message: Message): void {
       this.bindMapTapCapture();
 
       await this.markUserLocation(this.map, coordinates);
+      await this.loadAndRenderOfficeLocationMarkers();
       console.log('[ChatPage.initMap] User location marker handling complete.');
     } catch (err) {
       console.warn('[ChatPage.initMap] Initialization failed', err);
@@ -2100,6 +2463,7 @@ private readonly userLocationIcon = L.icon({
 
   ionViewDidLeave(): void {
     this.destroyMapInstance();
+    this.stopMapRefreshTimer();
     if (this.markerOverlayElement) {
       try { document.body.removeChild(this.markerOverlayElement); } catch {}
       this.markerOverlayElement = undefined;
@@ -2139,6 +2503,8 @@ private readonly userLocationIcon = L.icon({
       clearTimeout(this.mapResizeTimeoutId);
       this.mapResizeTimeoutId = undefined;
     }
+    // Stop periodic map refresh timer
+    this.stopMapRefreshTimer();
     try { this.messagesSub?.unsubscribe(); } catch {}
     this.messagesSub = undefined;
     // optional: set offline on destroy if desired

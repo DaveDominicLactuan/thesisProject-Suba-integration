@@ -119,7 +119,7 @@ async onRegister() {
   this.registrationSuccess = null;
 
   // Extract all form field values from the reactive form
-  const { email, password, firstName, lastName, engineeringID, confirmPassword, officeLatitude, officeLongitude } = this.regForm.value;
+  const { email, password, firstName, lastName, engineeringID, confirmPassword, phoneNumber, location, officeLatitude, officeLongitude } = this.regForm.value;
 
   // Log all extracted values to the console for debugging purposes
   console.log("Debug - Form Values:");
@@ -216,6 +216,23 @@ async onRegister() {
           console.log('[RegistrationPage] Pending account payload:', pendingPayload);
           await setDoc(doc(this.firestore, 'pendingAccounts', uid), pendingPayload);
           console.log(`[RegistrationPage] Pending account record written for uid: ${uid}`);
+
+          // Save office location to the 'officeLocations' collection
+          try {
+            await this.auth3.saveOfficeLocation(uid, {
+              email: email ?? '',
+              firstName: firstName ?? '',
+              lastName: lastName ?? '',
+              phoneNumber: phoneNumber ?? '',
+              officeAddress: location ?? '',
+              latitude: officeLatitude ?? 0,
+              longitude: officeLongitude ?? 0,
+              role: this.selectedRole ?? 'user',
+            });
+            console.log(`[RegistrationPage] Office location saved for uid: ${uid}`);
+          } catch (locationErr) {
+            console.warn('[RegistrationPage] Failed to save office location:', locationErr);
+          }
         } catch (pendingErr) {
           console.warn('[RegistrationPage] Failed to write pending account record:', pendingErr);
           console.warn('[RegistrationPage] Pending account write failed details:', {

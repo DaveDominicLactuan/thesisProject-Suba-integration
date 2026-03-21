@@ -3,6 +3,16 @@ import { Auth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signO
 import { Firestore, setDoc, serverTimestamp, doc, getDoc, collection, query, where, getDocs } from '@angular/fire/firestore';
 import { onAuthStateChanged, User } from 'firebase/auth';
 
+export type OfficeLocationPayload = {
+  email: string;
+  firstName: string;
+  lastName: string;
+  phoneNumber: string;
+  officeAddress: string;
+  latitude: number;
+  longitude: number;
+  role: string;
+};
 
 @Injectable({
   providedIn: 'root'
@@ -135,6 +145,38 @@ async register(
         resolve(user ?? null);
       });
     });
+  }
+
+  /**
+   * Save or update the user's office location in the 'officeLocations' Firestore collection.
+   */
+  async saveOfficeLocation(userId: string, payload: OfficeLocationPayload): Promise<void> {
+    if (!userId) {
+      throw new Error('User id is required to save office location.');
+    }
+
+    if (!Number.isFinite(payload.latitude) || !Number.isFinite(payload.longitude)) {
+      throw new Error('Valid office latitude and longitude are required.');
+    }
+
+    const officeLocationPayload = {
+      userID: userId,
+      email: payload.email,
+      firstName: payload.firstName,
+      lastName: payload.lastName,
+      phoneNumber: payload.phoneNumber,
+      officeAddress: payload.officeAddress,
+      role: payload.role,
+      officeLocation: {
+        latitude: payload.latitude,
+        longitude: payload.longitude,
+      },
+      createdAt: serverTimestamp(),
+    };
+
+    console.log('[Auth3Service] Writing office location payload:', officeLocationPayload);
+    await setDoc(doc(this.firestore, 'officeLocations', userId), officeLocationPayload);
+    console.log('[Auth3Service] Office location saved for uid:', userId);
   }
 
   // ✅ Get user profile from Firestore (uses native Firebase SDK to avoid injection warnings)

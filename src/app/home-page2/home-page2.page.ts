@@ -9,6 +9,14 @@ import { ImageStorageService } from '../services/image-storage.service';
 import { App } from '@capacitor/app';
 import { jsPDF } from 'jspdf';
 import * as L from 'leaflet';
+import { Firestore, collection, getDocs } from '@angular/fire/firestore';
+
+interface OfficeLocationMarkerData {
+  id: string;
+  latitude: number;
+  longitude: number;
+  payload: Record<string, unknown>;
+}
 
 @Component({
   selector: 'app-home-page2',
@@ -40,9 +48,10 @@ export class HomePage2Page implements OnInit, OnDestroy {
   isSidebarOpen: boolean = false;
   syncStatusText: string = 'Not synced';
   syncStatusState: 'idle' | 'syncing' | 'completed' | 'error' = 'idle';
+  private officeLocationMarkerData: OfficeLocationMarkerData[] = [];
 
   /** Inject auth, router, and image storage services for navigation and data. */
-  constructor(private formBuilder: FormBuilder, private router: Router, private authService: AuthService, private navCtrl: NavController, private auth3: Auth3Service, private imageStorage: ImageStorageService, private platform: Platform) {
+  constructor(private formBuilder: FormBuilder, private router: Router, private authService: AuthService, private navCtrl: NavController, private auth3: Auth3Service, private imageStorage: ImageStorageService, private platform: Platform, private firestore: Firestore) {
 
   }
 
@@ -102,6 +111,14 @@ private async initialize(): Promise<void> {
     this.userID = resolvedUserId || this.userID;
     this.loadPersistedSyncStatus(resolvedUserId);
     this.loadPersistedLocation(resolvedUserId);
+    
+    // Fetch office location markers early in app flow for offline fallback
+    try {
+      await this.fetchOfficeLocationMarkerData();
+    } catch (err) {
+      console.error('[HomePage2.initialize] Failed to fetch office location markers:', err);
+    }
+    
     console.log('[HomePage2.initialize] Starting initial background sync check for user:', resolvedUserId || 'none');
     this.startUserSyncInBackground(resolvedUserId, true);
 
@@ -201,6 +218,10 @@ private async initialize(): Promise<void> {
       this.loadPersistedSyncStatus(uid);
       this.loadPersistedLocation(uid);
     }
+    // Refresh office location markers from Firestore on page entry
+    this.fetchOfficeLocationMarkerData().catch((err) => {
+      console.error('[HomePage2.ionViewWillEnter] Failed to refresh markers:', err);
+    });
     this.requestLocationAccessOnEnter();
   }
 
@@ -1360,6 +1381,129 @@ private async initialize(): Promise<void> {
 
   closeSidebar() {
     this.isSidebarOpen = false;
+  }
+
+  /**
+   * Get the localStorage key for storing office location marker data.
+   * Scoped to the current user to avoid cross-user data leaks.
+   */
+  private getOfficeMarkerStorageKey(): string {
+    const userId = this.auth3.getCurrentUser()?.uid || this.userID || 'unknown';
+    return `office-location-markers-${userId}`;
+  }
+
+  /**
+   * Save the current office location marker data to localStorage.
+   * This provides a fallback cache in case Firestore is unavailable.
+   */
+  private saveOfficeMarkerDataToLocalStorage(): void {
+    try {
+      const key = this.getOfficeMarkerStorageKey();
+      const dataToStore = JSON.stringify(this.officeLocationMarkerData);
+      localStorage.setItem(key, dataToStore);
+      console.log('[HomePage2.markerStorage] Marker data saved to localStorage.', {
+        markerCount: this.officeLocationMarkerData.length,
+        storageKey: key
+      });
+    } catch (error) {
+      console.error('[HomePage2.markerStorage] Failed to save marker data to localStorage.', error);
+    }
+  }
+
+  /**
+   * Load office location marker data from localStorage.
+   * Returns empty array if no data is found or if loading fails.
+   */
+  private loadOfficeMarkerDataFromLocalStorage(): OfficeLocationMarkerData[] {
+    try {
+      const key = this.getOfficeMarkerStorageKey();
+      const storedData = localStorage.getItem(key);
+      if (!storedData) {
+        console.log('[HomePage2.markerStorage] No cached marker data found in localStorage.');
+        return [];
+      }
+      const parsedData = JSON.parse(storedData) as OfficeLocationMarkerData[];
+      console.log('[HomePage2.markerStorage] Marker data loaded from localStorage.', {
+        markerCount: parsedData.length
+      });
+      return Array.isArray(parsedData) ? parsedData : [];
+    } catch (error) {
+      console.error('[HomePage2.markerStorage] Failed to load marker data from localStorage.', error);
+      return [];
+    }
+  }
+
+  /**
+   * Fetch office location marker data from Firestore collection.
+   * Falls back to localStorage if Firestore is unavailable.
+   */
+  private async fetchOfficeLocationMarkerData(): Promise<void> {
+    const authedUser = this.auth3.getCurrentUser() ?? await this.auth3.waitForAuthUser(5000).catch(() => null);
+    if (!authedUser?.uid) {
+      console.warn('[HomePage2.userOfficeLocationMarker] Skipping collection fetch because Firebase auth user is not ready.');
+      // Try to load from localStorage as a fallback
+      this.officeLocationMarkerData = this.loadOfficeMarkerDataFromLocalStorage();
+      return;
+    }
+
+    try {
+      const markerCollectionRef = collection(this.firestore, 'userOfficeLocationMarker');
+      const markerSnapshot = await getDocs(markerCollectionRef);
+      const parsedMarkers: OfficeLocationMarkerData[] = [];
+
+      markerSnapshot.forEach((markerDoc) => {
+        const payload = (markerDoc.data() as Record<string, unknown>) ?? {};
+        const coordinates = this.resolveOfficeMarkerCoordinates(payload);
+
+        if (!coordinates) {
+          console.warn('[HomePage2.userOfficeLocationMarker] Skipping document with invalid coordinates.', {
+            docId: markerDoc.id,
+            payload
+          });
+          return;
+        }
+
+        parsedMarkers.push({
+          id: markerDoc.id,
+          latitude: coordinates.latitude,
+          longitude: coordinates.longitude,
+          payload
+        });
+      });
+
+      this.officeLocationMarkerData = parsedMarkers;
+      // Save to localStorage after successful fetch
+      this.saveOfficeMarkerDataToLocalStorage();
+      console.log('[HomePage2.userOfficeLocationMarker] Collection data loaded and stored.', {
+        totalDocuments: markerSnapshot.size,
+        markersStored: parsedMarkers.length,
+        markersSkipped: markerSnapshot.size - parsedMarkers.length
+      });
+    } catch (error) {
+      const errorCode = (error as { code?: string } | null)?.code ?? 'unknown';
+      if (errorCode === 'permission-denied') {
+        console.error('[HomePage2.userOfficeLocationMarker] Permission denied while reading full collection. Check firestore.rules for list/get read access on /userOfficeLocationMarker.', error);
+      } else {
+        console.error('[HomePage2.userOfficeLocationMarker] Failed to fetch collection data.', error);
+      }
+      // Fall back to localStorage data if Firestore fetch fails
+      this.officeLocationMarkerData = this.loadOfficeMarkerDataFromLocalStorage();
+    }
+  }
+
+  /**
+   * Resolve marker coordinates from the payload object.
+   * Supports multiple coordinate field naming conventions.
+   */
+  private resolveOfficeMarkerCoordinates(payload: Record<string, unknown>): { latitude: number; longitude: number } | null {
+    const latitude = payload['latitude'] ?? payload['lat'] ?? null;
+    const longitude = payload['longitude'] ?? payload['lng'] ?? null;
+
+    if (typeof latitude === 'number' && typeof longitude === 'number') {
+      return { latitude, longitude };
+    }
+
+    return null;
   }
 
   async markUserLocation(map: any) {

@@ -136,6 +136,13 @@ service cloud.firestore {
       allow update, delete: if isSignedIn() && request.auth.token.admin == true;
     }
 
+    // ========== OFFICE LOCATION MARKERS ==========
+    // Chat map reads the full collection for all signed-in users.
+    match /userOfficeLocationMarker/{markerId} {
+      allow get, list: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
     // ========== DENY ALL OTHER ACCESS ==========
     match /{document=**} {
       allow read, write: if false;

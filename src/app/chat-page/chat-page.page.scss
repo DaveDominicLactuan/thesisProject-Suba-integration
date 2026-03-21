@@ -1017,7 +1017,7 @@ $sheet-transition: transform 0.32s cubic-bezier(0.4, 0, 0.2, 1);
 	width: 42px;
 	height: 42px;
 	border-radius: 50%;
-	background: linear-gradient(135deg, #6b46ff 0%, #a855f7 100%);
+	background: linear-gradient(135deg, #ff512f 0%, #f09819 100%);
 	display: flex;
 	align-items: center;
 	justify-content: center;
@@ -1111,7 +1111,7 @@ $sheet-transition: transform 0.32s cubic-bezier(0.4, 0, 0.2, 1);
 	color: #555;
 	ion-icon {
 		font-size: 1rem;
-		color: #6b46ff;
+		color: #ff512f;
 		flex-shrink: 0;
 	}
 }
@@ -1124,9 +1124,9 @@ $sheet-transition: transform 0.32s cubic-bezier(0.4, 0, 0.2, 1);
 	margin-top: 10px;
 	padding: 10px 32px;
 	background: #fff;
-	border: 1.5px solid #6b46ff;
+	border: 1.5px solid #ff512f;
 	border-radius: 24px;
-	color: #6b46ff;
+	color: #ff512f;
 	font-size: 0.95rem;
 	font-weight: 600;
 	cursor: pointer;
@@ -1151,7 +1151,7 @@ $sheet-transition: transform 0.32s cubic-bezier(0.4, 0, 0.2, 1);
 	flex: 1;
 	height: 90px;
 	border-radius: 12px;
-	background: #f0eefc;
+	background: #f58d2cdb;
 	display: flex;
 	align-items: center;
 	justify-content: center;
@@ -1160,7 +1160,7 @@ $sheet-transition: transform 0.32s cubic-bezier(0.4, 0, 0.2, 1);
 
 .map-sheet-photo-icon {
 	font-size: 2.2rem;
-	color: #b0a0f0;
+	color: #f58d2cdb;
 }
 
 .map-menu-btn {
