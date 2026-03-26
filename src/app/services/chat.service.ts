@@ -1,5 +1,5 @@
 import { Injectable } from '@angular/core';
-import { Firestore, collection, doc, setDoc, serverTimestamp, writeBatch, query, where, orderBy, collectionData, docData, getDoc } from '@angular/fire/firestore';
+import { Firestore, collection, doc, setDoc, serverTimestamp, writeBatch, query, where, orderBy, collectionData, docData, getDoc, updateDoc } from '@angular/fire/firestore';
 import { Observable } from 'rxjs';
 
 export interface Chat {
@@ -7,6 +7,7 @@ export interface Chat {
   participants: string[];
   lastMessage?: string;
   timestamp?: any;
+  clearedBy?: Record<string, any>;
 }
 
 export interface Message {
@@ -64,6 +65,16 @@ export class ChatService {
   observeChat(chatId: string): Observable<Chat | undefined> {
     const chatRef = doc(this.firestore, 'chats', chatId);
     return docData(chatRef, { idField: 'chatId' }) as Observable<Chat | undefined>;
+  }
+
+  // Hide a chat for one user without deleting it for other participants.
+  async clearChatForUser(chatId: string, userId: string): Promise<void> {
+    if (!chatId || !userId) return;
+
+    const chatRef = doc(this.firestore, 'chats', chatId);
+    await updateDoc(chatRef, {
+      [`clearedBy.${userId}`]: serverTimestamp()
+    });
   }
 
   // Observe messages for a chat in realtime (ordered)

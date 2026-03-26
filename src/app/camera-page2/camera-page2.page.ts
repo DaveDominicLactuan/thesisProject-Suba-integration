@@ -67,9 +67,23 @@ export class CameraPage2Page implements AfterViewInit {
   // Cooldown and flash UI for capture
   isCooldown: boolean = false;
   showFlash: boolean = false;
+  isFlashEnabled: boolean = false;
+  isLevelEnabled: boolean = false;
+  isPhoneLeveled: boolean = false;
+  levelRollDeg: number = 0;
+  private levelThresholdDeg: number = 2.5;
   flashDurationMs: number = 120; // visual flash length
   cooldownMs: number = 500; // minimum time between pictures
   private backButtonSub: any; // hardware back handler
+  private orientationHandler = (event: DeviceOrientationEvent) => {
+    if (!this.isLevelEnabled) return;
+    if (typeof event.gamma !== 'number') return;
+
+    const rawRoll = event.gamma;
+    const clampedRoll = Math.max(-45, Math.min(45, rawRoll));
+    this.levelRollDeg = clampedRoll;
+    this.isPhoneLeveled = Math.abs(rawRoll) <= this.levelThresholdDeg;
+  };
   // session management
   sessions: any[] = [];
   selectedSessionId: string | null = null;
@@ -791,9 +805,69 @@ export class CameraPage2Page implements AfterViewInit {
   /**
    * Stub for flash toggle; logs only. Real flash requires native plugin.
    */
-  toggleFlash() {
-    // stub — native flash control would require plugin access
-    console.log('toggleFlash pressed (stub)');
+  async toggleFlash() {
+    const targetState = !this.isFlashEnabled;
+    const applied = await this.applyTorchState(targetState);
+    if (!applied && targetState) {
+      alert('Torch/flash is not available on this camera.');
+    }
+  }
+
+  private async applyTorchState(enabled: boolean): Promise<boolean> {
+    try {
+      if (!this.mediaStream) return false;
+      const track = this.mediaStream.getVideoTracks()[0] as MediaStreamTrack | undefined;
+      if (!track || typeof (track as any).applyConstraints !== 'function') return false;
+
+      const capabilities = typeof (track as any).getCapabilities === 'function'
+        ? (track as any).getCapabilities()
+        : null;
+
+      if (!capabilities || !capabilities.torch) return false;
+
+      await (track as any).applyConstraints({ advanced: [{ torch: enabled }] });
+      this.isFlashEnabled = enabled;
+      return true;
+    } catch (e) {
+      console.warn('[CameraPage2] applyTorchState failed', e);
+      // Revert toggle state in UI when constraints fail.
+      this.isFlashEnabled = false;
+      return false;
+    }
+  }
+
+  async toggleLevelGuide() {
+    if (this.isLevelEnabled) {
+      this.disableLevelGuide();
+      return;
+    }
+
+    try {
+      const orientationAny: any = DeviceOrientationEvent as any;
+      if (orientationAny && typeof orientationAny.requestPermission === 'function') {
+        const permission = await orientationAny.requestPermission();
+        if (permission !== 'granted') {
+          alert('Motion permission denied. Unable to enable level guide.');
+          return;
+        }
+      }
+
+      this.isLevelEnabled = true;
+      this.isPhoneLeveled = false;
+      this.levelRollDeg = 0;
+      window.addEventListener('deviceorientation', this.orientationHandler, true);
+    } catch (e) {
+      console.warn('[CameraPage2] toggleLevelGuide failed', e);
+      this.disableLevelGuide();
+      alert('Unable to start level guide on this device.');
+    }
+  }
+
+  private disableLevelGuide() {
+    this.isLevelEnabled = false;
+    this.isPhoneLeveled = false;
+    this.levelRollDeg = 0;
+    window.removeEventListener('deviceorientation', this.orientationHandler, true);
   }
 
   /**
@@ -1423,6 +1497,7 @@ export class CameraPage2Page implements AfterViewInit {
   //prune empty session, if session is empty
   ngOnDestroy() {
     this.mediaStream?.getTracks().forEach(track => track.stop());
+    this.disableLevelGuide();
     this.pruneEmptySession();
     try { if (this.backButtonSub && typeof this.backButtonSub.unsubscribe === 'function') this.backButtonSub.unsubscribe(); } catch {}
   }

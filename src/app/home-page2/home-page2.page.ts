@@ -10,6 +10,7 @@ import { App } from '@capacitor/app';
 import { jsPDF } from 'jspdf';
 import * as L from 'leaflet';
 import { Firestore, collection, getDocs } from '@angular/fire/firestore';
+import { UserPrefetchCacheService } from '../services/user-prefetch-cache.service';
 
 interface OfficeLocationMarkerData {
   id: string;
@@ -47,11 +48,12 @@ export class HomePage2Page implements OnInit, OnDestroy {
   userRole: string | null = null;
   isSidebarOpen: boolean = false;
   syncStatusText: string = 'Not synced';
+  cacheWarmStatusText: string = 'Not synced';
   syncStatusState: 'idle' | 'syncing' | 'completed' | 'error' = 'idle';
   private officeLocationMarkerData: OfficeLocationMarkerData[] = [];
 
   /** Inject auth, router, and image storage services for navigation and data. */
-  constructor(private formBuilder: FormBuilder, private router: Router, private authService: AuthService, private navCtrl: NavController, private auth3: Auth3Service, private imageStorage: ImageStorageService, private platform: Platform, private firestore: Firestore) {
+  constructor(private formBuilder: FormBuilder, private router: Router, private authService: AuthService, private navCtrl: NavController, private auth3: Auth3Service, private imageStorage: ImageStorageService, private platform: Platform, private firestore: Firestore, private userPrefetchCache: UserPrefetchCacheService) {
 
   }
 
@@ -68,6 +70,23 @@ private async initialize(): Promise<void> {
   try {
     console.log('[HomePage2.initialize] ===== INITIALIZE START =====');
     console.log('[HomePage2.initialize] Auth currentUser at initialize start:', this.auth3.getCurrentUser()?.uid || 'null');
+
+    const cachedUid = this.resolveCachedUid();
+    if (cachedUid) {
+      this.refreshCacheWarmStatus(cachedUid);
+
+      const cachedProfile = this.userPrefetchCache.getCachedUserProfile(cachedUid);
+      if (cachedProfile) {
+        this.firstName = cachedProfile.firstName || this.firstName;
+        this.lastName = cachedProfile.lastName || this.lastName;
+        this.email = cachedProfile.email || this.email;
+        this.userID = cachedProfile.userID || cachedProfile.uid || this.userID;
+      }
+      await this.hydrateLocalImageStorageFromCache(cachedUid);
+      this.userPrefetchCache.warmUserDataInBackground(cachedUid, 'home-page2-initialize').finally(() => {
+        this.refreshCacheWarmStatus(cachedUid);
+      });
+    }
     
     // Ensure Firebase auth state is ready before fetching profile
     // wait for up to 8 seconds for auth from firebase and current user profile from firestore
@@ -111,6 +130,12 @@ private async initialize(): Promise<void> {
     this.userID = resolvedUserId || this.userID;
     this.loadPersistedSyncStatus(resolvedUserId);
     this.loadPersistedLocation(resolvedUserId);
+    if (resolvedUserId) {
+      this.refreshCacheWarmStatus(resolvedUserId);
+      this.userPrefetchCache.warmUserDataInBackground(resolvedUserId, 'home-page2-profile-ready').finally(() => {
+        this.refreshCacheWarmStatus(resolvedUserId);
+      });
+    }
     
     // Fetch office location markers early in app flow for offline fallback
     try {
@@ -173,6 +198,71 @@ private async initialize(): Promise<void> {
     console.log('[HomePage2.initialize] ===== INITIALIZE END (with error) =====');
   }
 }
+
+  private resolveCachedUid(): string {
+    const currentUid = this.auth3.getCurrentUser()?.uid || this.userID || '';
+    if (currentUid) return currentUid;
+
+    try {
+      const userDataRaw = localStorage.getItem('userData');
+      if (!userDataRaw) return '';
+      const userData = JSON.parse(userDataRaw);
+      return userData?.userID || '';
+    } catch {
+      return '';
+    }
+  }
+
+  private refreshCacheWarmStatus(userId: string): void {
+    if (!userId) {
+      this.cacheWarmStatusText = 'Not synced';
+      return;
+    }
+
+    this.cacheWarmStatusText = this.userPrefetchCache.getLastWarmLabel(userId);
+  }
+
+  private async hydrateLocalImageStorageFromCache(userId: string): Promise<void> {
+    if (!userId) return;
+
+    try {
+      const cachedSessions = this.userPrefetchCache.getCachedSessions(userId);
+      for (const session of cachedSessions) {
+        try {
+          this.imageStorage.addSessionIfNotExists({
+            id: session.id,
+            name: session.name || 'Untitled Session',
+            imageKeys: Array.isArray(session.imageKeys) ? session.imageKeys : [],
+            created: session.created || new Date().toISOString(),
+            userId
+          });
+        } catch {}
+      }
+
+      const cachedImages = this.userPrefetchCache.getCachedImages(userId);
+      for (const image of cachedImages) {
+        try {
+          await this.imageStorage.addImageIfNotExists({
+            original: image.original || '',
+            withBoxes: image.withBoxes || image.original || '',
+            boxes: Array.isArray(image.boxes) ? image.boxes : [],
+            faceDetected: !!image.faceDetected,
+            faceData: Array.isArray(image.faceData) ? image.faceData : [],
+            timestamp: image.timestamp || new Date().toISOString(),
+            filename: image.filename || image.id || '',
+            prediction: image.prediction,
+            hasPrediction: !!image.hasPrediction,
+            statusMessage: image.statusMessage || '',
+            detectionMessage: image.detectionMessage || '',
+            userId,
+            sessionId: image.sessionId || undefined
+          } as any, image.sessionId || undefined);
+        } catch {}
+      }
+    } catch (error) {
+      console.warn('[HomePage2] Failed to hydrate ImageStorageService from prefetched cache', error);
+    }
+  }
 
   // Wait for Firebase auth to emit a user or timeout
   private waitForUserAuth(timeoutMs: number = 8000): Promise<User | null> {
@@ -815,6 +905,7 @@ private async initialize(): Promise<void> {
     this.locationErrorText = '';
     this.syncStatusState = 'idle';
     this.syncStatusText = 'Not synced';
+    this.cacheWarmStatusText = 'Not synced';
     try {
       await this.auth3.logout();
     } catch {}
@@ -1523,6 +1614,11 @@ private async initialize(): Promise<void> {
     } catch (error) {
       console.error('Failed to mark user location:', error);
     }
+  }
+
+   goNetworkPage() {
+    this.router.navigate(['/network-page2']);
+    console.log('network page 2');
   }
 
 }

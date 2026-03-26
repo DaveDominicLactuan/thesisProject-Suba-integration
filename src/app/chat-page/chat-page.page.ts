@@ -9,6 +9,7 @@ import { Firestore, collection, doc, getDoc, query, where, getDocs } from '@angu
 import { ImageStorageService } from '../services/image-storage.service';
 import { Chat, ChatService, Message, TypingState } from '../services/chat.service';
 import { PresenceService } from '../services/presence.service';
+import { UserPrefetchCacheService } from '../services/user-prefetch-cache.service';
 import { Subscription } from 'rxjs';
 import { App } from '@capacitor/app';
 import { Geolocation } from '@capacitor/geolocation';
@@ -20,6 +21,21 @@ interface OfficeLocationMarkerData {
   latitude: number;
   longitude: number;
   payload: Record<string, unknown>;
+}
+
+interface RadiusOption {
+  label: string;
+  value: number;
+}
+
+interface RadiusSquareBounds {
+  center: { latitude: number; longitude: number };
+  top: { latitude: number; longitude: number };
+  bottom: { latitude: number; longitude: number };
+  left: { latitude: number; longitude: number };
+  right: { latitude: number; longitude: number };
+  southWest: { latitude: number; longitude: number };
+  northEast: { latitude: number; longitude: number };
 }
 
 @Component({
@@ -101,23 +117,45 @@ export class ChatPagePage implements OnInit, OnDestroy {
       return 0;
     }
 
-    closeChatOptionsOverlay() {
+    async closeChatOptionsOverlay(removeSelectedChat: boolean = false): Promise<void> {
+      const selectedChat = this.chatOptionsSelectedChat;
       this.showChatOptionsOverlay = false;
       this.chatOptionsOverlayY = 0;
       this.chatOptionsSelectedChat = null;
       this.chatOptionsDragStartY = null;
       this.chatOptionsDragCurrentY = null;
       this.chatOptionsDragActive = false;
+
+      if (!removeSelectedChat || !selectedChat?.chatId) {
+        return;
+      }
+
+      const currentUid = await this.resolveCurrentUid();
+      if (!currentUid) {
+        console.warn('[ChatPage] Unable to delete selected chat preview: missing current uid.');
+        return;
+      }
+
+      try {
+        await this.chatService.clearChatForUser(selectedChat.chatId, currentUid);
+        this.chats = this.chats.filter((chat) => chat?.chatId !== selectedChat.chatId);
+
+        if (this.currentChatId === selectedChat.chatId) {
+          this.closeChat();
+        }
+      } catch (error) {
+        console.error('[ChatPage] Failed to delete selected chat preview:', error);
+        alert('Unable to delete this conversation right now. Please try again.');
+      }
     }
 
     // Placeholder logic for options
     onDeleteChatOption() {
-      alert('Delete option pressed (placeholder).');
-      this.closeChatOptionsOverlay();
+      void this.closeChatOptionsOverlay(true);
     }
     onNotifyChatOption() {
       alert('Notify option pressed (placeholder).');
-      this.closeChatOptionsOverlay();
+      void this.closeChatOptionsOverlay();
     }
 
   // --- Map Bottom Sheet State ---
@@ -204,6 +242,7 @@ export class ChatPagePage implements OnInit, OnDestroy {
   userRole: string | null = null;
   isSidebarOpen: boolean = false;
   syncStatusText: string = 'Not synced';
+  cacheWarmStatusText: string = 'Not synced';
   syncStatusState: 'idle' | 'syncing' | 'completed' | 'error' = 'idle';
   // UI: toggles between preview list and active chat conversation
   isChatOpen: boolean = false;
@@ -233,7 +272,22 @@ export class ChatPagePage implements OnInit, OnDestroy {
   private markerSelectionOverlayElement?: HTMLDivElement;
   private mapTapOverlayElement?: HTMLDivElement;
   private markerSelectionSquare?: L.Rectangle;
-  private readonly markerSquareHalfSideMeters = 120;
+  private markerSquareHalfSideMeters = 440;
+  isRadiusSelectionOverlayOpen = false;
+  readonly markerRadiusOptions: RadiusOption[] = [
+    { label: '500m', value: 440 },
+    { label: '1km', value: 880 },
+    { label: '1.5km', value: 1320 },
+    { label: '2km', value: 1760 },
+    { label: '2.5km', value: 2200 }
+  ];
+  selectedRadiusHalfSideMeters = this.markerSquareHalfSideMeters;
+  aggregatedRadiusMarkerData: Array<OfficeLocationMarkerData & { distanceFromCenterMeters: number }> = [];
+  private lastRadiusAggregationBounds?: RadiusSquareBounds;
+  private readonly defaultRadiusAggregationCenter = {
+    latitude: 10.302051,
+    longitude: 123.902243
+  };
   private officeLocationMarkerData: OfficeLocationMarkerData[] = [];
   private officeLocationLeafletMarkers: L.Marker[] = [];
   private markerUserProfileMap: Map<L.Marker, any> = new Map();
@@ -620,7 +674,7 @@ export class ChatPagePage implements OnInit, OnDestroy {
   stories: any[] = [];
 
   /** Inject auth, router, and image storage services for navigation and data. */
-  constructor(private formBuilder: FormBuilder, private router: Router, private authService: AuthService, private navCtrl: NavController, public auth3: Auth3Service, private imageStorage: ImageStorageService, private platform: Platform, private firestore: Firestore, private chatService: ChatService, private presenceService: PresenceService) {
+  constructor(private formBuilder: FormBuilder, private router: Router, private authService: AuthService, private navCtrl: NavController, public auth3: Auth3Service, private imageStorage: ImageStorageService, private platform: Platform, private firestore: Firestore, private chatService: ChatService, private presenceService: PresenceService, private userPrefetchCache: UserPrefetchCacheService) {
 
   }
 
@@ -628,6 +682,33 @@ export class ChatPagePage implements OnInit, OnDestroy {
 ngOnInit(): void {
   console.log('[HomePage2.ngOnInit] ===== PAGE INIT START (ngOnInit called) =====');
   console.log('[HomePage2.ngOnInit] Auth currentUser on ngOnInit:', this.auth3.getCurrentUser()?.uid || 'null');
+
+  const cachedUid = this.resolveCachedUid();
+  if (cachedUid) {
+    this.refreshCacheWarmStatus(cachedUid);
+
+    const cachedProfile = this.userPrefetchCache.getCachedUserProfile(cachedUid);
+    if (cachedProfile) {
+      this.firstName = cachedProfile.firstName || this.firstName;
+      this.lastName = cachedProfile.lastName || this.lastName;
+      this.email = cachedProfile.email || this.email;
+    }
+
+    const cachedChats = this.userPrefetchCache.getCachedChats(cachedUid);
+    if (cachedChats.length > 0) {
+      this.chats = [...cachedChats];
+    }
+
+    const cachedEngineers = this.userPrefetchCache.getCachedEngineers(cachedUid);
+    if (cachedEngineers.length > 0) {
+      this.engineers = [...cachedEngineers];
+    }
+
+    this.userPrefetchCache.warmUserDataInBackground(cachedUid, 'chat-page-ngOnInit').finally(() => {
+      this.refreshCacheWarmStatus(cachedUid);
+    });
+  }
+
   this.initialize();
   this.startUserChatsSubscription().catch((err) => {
     console.warn('[ChatPage.ngOnInit] Unable to start chat list subscription:', err);
@@ -645,6 +726,13 @@ private async initialize(): Promise<void> {
     this.email = profile?.email || this.email;
     this.userID = this.auth3.getCurrentUser()?.uid || this.userID || (profile && (profile.userID || profile.uid));
 
+    if (this.userID) {
+      this.refreshCacheWarmStatus(this.userID);
+      this.userPrefetchCache.warmUserDataInBackground(this.userID, 'chat-page-initialize').finally(() => {
+        this.refreshCacheWarmStatus(this.userID || '');
+      });
+    }
+
     if (!this.chatsSub) {
       this.startUserChatsSubscription().catch((err) => {
         console.warn('[ChatPage.initialize] Deferred chat list subscription failed:', err);
@@ -656,6 +744,31 @@ private async initialize(): Promise<void> {
   } catch (err) {
     console.warn('[ChatPage] initialize error', err);
   }
+}
+
+private resolveCachedUid(): string {
+  const currentUid = this.auth3.getCurrentUser()?.uid || this.userID || '';
+  if (currentUid) {
+    return currentUid;
+  }
+
+  try {
+    const userDataRaw = localStorage.getItem('userData');
+    if (!userDataRaw) return '';
+    const userData = JSON.parse(userDataRaw);
+    return userData?.userID || '';
+  } catch {
+    return '';
+  }
+}
+
+private refreshCacheWarmStatus(userId: string): void {
+  if (!userId) {
+    this.cacheWarmStatusText = 'Not synced';
+    return;
+  }
+
+  this.cacheWarmStatusText = this.userPrefetchCache.getLastWarmLabel(userId);
 }
 
 private async resolveCurrentUid(timeoutMs: number = 8000): Promise<string | null> {
@@ -689,6 +802,8 @@ private async startUserChatsSubscription(): Promise<void> {
   this.chatsSub = this.chatService.getUserChats(uid).subscribe(async (chats) => {
     const hydratedChats = await this.hydrateChatsForDisplay(chats || [], uid);
     this.chats = hydratedChats;
+    this.userPrefetchCache.storeChats(uid, hydratedChats as any);
+    this.refreshCacheWarmStatus(uid);
 
     // Keep the open header in sync when profile/presence changes in Firestore.
     if (this.activeChat?.chatId) {
@@ -740,6 +855,12 @@ private async getUserProfileById(userId: string): Promise<any | null> {
 private async hydrateChatsForDisplay(rawChats: Chat[], currentUid: string): Promise<any[]> {
   const hydrated = await Promise.all(
     (rawChats || []).map(async (chat: any) => {
+      const clearedAtMillis = this.resolveTimestampToMillis(chat?.clearedBy?.[currentUid]);
+      const lastActivityMillis = this.resolveTimestampToMillis(chat?.timestamp);
+      if (clearedAtMillis > 0 && lastActivityMillis <= clearedAtMillis) {
+        return null;
+      }
+
       const participants = Array.isArray(chat?.participants) ? chat.participants : [];
       const otherParticipantId = participants.find((participantId: string) => participantId && participantId !== currentUid) || null;
       const otherProfile = otherParticipantId ? await this.getUserProfileById(otherParticipantId) : null;
@@ -758,7 +879,7 @@ private async hydrateChatsForDisplay(rawChats: Chat[], currentUid: string): Prom
     })
   );
 
-  return hydrated.sort((a, b) => {
+  return hydrated.filter((chat) => Boolean(chat)).sort((a, b) => {
     const tA = this.resolveTimestampToMillis(a?.timestamp);
     const tB = this.resolveTimestampToMillis(b?.timestamp);
     return tB - tA;
@@ -916,6 +1037,14 @@ onMsgBubbleTap(message: Message): void {
 
   /** Query Firestore for users where role == 'engineer' and populate `engineers` */
   async fetchEngineers(): Promise<void> {
+    const cacheUid = this.resolveCachedUid();
+    if (cacheUid && this.engineers.length === 0) {
+      const cachedEngineers = this.userPrefetchCache.getCachedEngineers(cacheUid);
+      if (cachedEngineers.length > 0) {
+        this.engineers = [...cachedEngineers];
+      }
+    }
+
     try {
       const usersCol = collection(this.firestore, 'users');
       const q = query(usersCol, where('role', '==', 'engineer'));
@@ -926,6 +1055,10 @@ onMsgBubbleTap(message: Message): void {
         arr.push(data);
       });
       this.engineers = arr;
+      if (cacheUid) {
+        this.userPrefetchCache.storeEngineers(cacheUid, arr);
+        this.refreshCacheWarmStatus(cacheUid);
+      }
       console.log('[ChatPage] Engineers fetched from Firestore:', this.engineers);
     } catch (err) {
       console.error('[ChatPage] Error fetching engineers:', err);
@@ -1096,6 +1229,7 @@ onMsgBubbleTap(message: Message): void {
     if (currentUid) this.clearSyncStateForUser(currentUid);
     this.syncStatusState = 'idle';
     this.syncStatusText = 'Not synced';
+    this.cacheWarmStatusText = 'Not synced';
     try {
       await this.auth3.logout();
     } catch {}
@@ -1161,6 +1295,158 @@ onMsgBubbleTap(message: Message): void {
   
   openMenu(menuId: string) {
     this.isSidebarOpen = !this.isSidebarOpen;
+  }
+
+  openRadiusSelectionOverlay(): void {
+    this.selectedRadiusHalfSideMeters = this.markerSquareHalfSideMeters;
+    this.isRadiusSelectionOverlayOpen = true;
+  }
+
+  closeRadiusSelectionOverlay(): void {
+    this.isRadiusSelectionOverlayOpen = false;
+  }
+
+  async confirmRadiusSelection(): Promise<void> {
+    const selectedHalfSideMeters = Number(this.selectedRadiusHalfSideMeters);
+    if (!Number.isFinite(selectedHalfSideMeters) || selectedHalfSideMeters <= 0) {
+      alert('Please select a valid radius size.');
+      return;
+    }
+
+    this.markerSquareHalfSideMeters = selectedHalfSideMeters;
+    this.isRadiusSelectionOverlayOpen = false;
+    await this.aggregateMarkersWithinSelectedRadius();
+  }
+
+  private resolveRadiusAggregationCenter(): { latitude: number; longitude: number; source: 'selected-engineer' | 'map-center' | 'default-center' } {
+    if (this.selectedMapEngineer && typeof this.selectedMapEngineer === 'object') {
+      const selectedCenter = this.resolveOfficeMarkerCoordinates(this.selectedMapEngineer as Record<string, unknown>);
+      if (selectedCenter) {
+        return {
+          ...selectedCenter,
+          source: 'selected-engineer'
+        };
+      }
+    }
+
+    if (this.map) {
+      const mapCenter = this.map.getCenter();
+      return {
+        latitude: mapCenter.lat,
+        longitude: mapCenter.lng,
+        source: 'map-center'
+      };
+    }
+
+    return {
+      ...this.defaultRadiusAggregationCenter,
+      source: 'default-center'
+    };
+  }
+
+  private buildRadiusSquareBounds(centerLatitude: number, centerLongitude: number, halfSideMeters: number): RadiusSquareBounds {
+    const metersPerDegreeLat = 111_320;
+    const cosLat = Math.cos((centerLatitude * Math.PI) / 180);
+    const metersPerDegreeLng = Math.max(1, Math.abs(cosLat) * 111_320);
+
+    const deltaLat = halfSideMeters / metersPerDegreeLat;
+    const deltaLng = halfSideMeters / metersPerDegreeLng;
+
+    const top = { latitude: centerLatitude + deltaLat, longitude: centerLongitude };
+    const bottom = { latitude: centerLatitude - deltaLat, longitude: centerLongitude };
+    const left = { latitude: centerLatitude, longitude: centerLongitude - deltaLng };
+    const right = { latitude: centerLatitude, longitude: centerLongitude + deltaLng };
+
+    return {
+      center: { latitude: centerLatitude, longitude: centerLongitude },
+      top,
+      bottom,
+      left,
+      right,
+      southWest: { latitude: bottom.latitude, longitude: left.longitude },
+      northEast: { latitude: top.latitude, longitude: right.longitude }
+    };
+  }
+
+  private calculateDistanceMeters(
+    startLatitude: number,
+    startLongitude: number,
+    endLatitude: number,
+    endLongitude: number
+  ): number {
+    const toRadians = (value: number): number => (value * Math.PI) / 180;
+    const earthRadiusMeters = 6_371_000;
+    const deltaLat = toRadians(endLatitude - startLatitude);
+    const deltaLng = toRadians(endLongitude - startLongitude);
+    const lat1 = toRadians(startLatitude);
+    const lat2 = toRadians(endLatitude);
+
+    const haversine =
+      Math.sin(deltaLat / 2) * Math.sin(deltaLat / 2) +
+      Math.cos(lat1) * Math.cos(lat2) * Math.sin(deltaLng / 2) * Math.sin(deltaLng / 2);
+    const arc = 2 * Math.atan2(Math.sqrt(haversine), Math.sqrt(1 - haversine));
+    return earthRadiusMeters * arc;
+  }
+
+  async aggregateMarkersWithinSelectedRadius(): Promise<void> {
+    await this.fetchOfficeLocationMarkerData();
+
+    const center = this.resolveRadiusAggregationCenter();
+    const bounds = this.buildRadiusSquareBounds(center.latitude, center.longitude, this.markerSquareHalfSideMeters);
+
+    const markersInsideBounds = this.officeLocationMarkerData.filter((marker) => (
+      marker.latitude <= bounds.top.latitude &&
+      marker.latitude >= bounds.bottom.latitude &&
+      marker.longitude >= bounds.left.longitude &&
+      marker.longitude <= bounds.right.longitude
+    ));
+
+    this.aggregatedRadiusMarkerData = markersInsideBounds.map((marker) => ({
+      ...marker,
+      distanceFromCenterMeters: this.calculateDistanceMeters(
+        center.latitude,
+        center.longitude,
+        marker.latitude,
+        marker.longitude
+      )
+    }));
+    this.lastRadiusAggregationBounds = bounds;
+
+    if (this.map) {
+      this.drawMarkerCenteredSquare(L.latLng(center.latitude, center.longitude), 'story-item', 'Radius Selection Area');
+    }
+
+    console.log('[ChatPage.radiusAggregation] Aggregated markers inside selected radius bounds', {
+      center,
+      selectedHalfSideMeters: this.markerSquareHalfSideMeters,
+      top: {
+        latitude: Number(bounds.top.latitude.toFixed(6)),
+        longitude: Number(bounds.top.longitude.toFixed(6))
+      },
+      bottom: {
+        latitude: Number(bounds.bottom.latitude.toFixed(6)),
+        longitude: Number(bounds.bottom.longitude.toFixed(6))
+      },
+      left: {
+        latitude: Number(bounds.left.latitude.toFixed(6)),
+        longitude: Number(bounds.left.longitude.toFixed(6))
+      },
+      right: {
+        latitude: Number(bounds.right.latitude.toFixed(6)),
+        longitude: Number(bounds.right.longitude.toFixed(6))
+      },
+      totalMarkersLoaded: this.officeLocationMarkerData.length,
+      aggregatedMarkersCount: this.aggregatedRadiusMarkerData.length,
+      aggregatedMarkers: this.aggregatedRadiusMarkerData.map((marker) => ({
+        id: marker.id,
+        latitude: marker.latitude,
+        longitude: marker.longitude,
+        distanceFromCenterMeters: Number(marker.distanceFromCenterMeters.toFixed(2)),
+        payload: marker.payload
+      }))
+    });
+
+    alert(`Radius updated to ${this.markerSquareHalfSideMeters}m. Aggregated ${this.aggregatedRadiusMarkerData.length} marker(s) inside the selected area.`);
   }
 
   openMarkerCreationOverlay(): void {
@@ -1279,7 +1565,7 @@ onMsgBubbleTap(message: Message): void {
       }
     });
 
-    document.body.appendChild(overlay);
+    // document.body.appendChild(overlay);
     this.markerOverlayElement = overlay;
     latInput.focus();
   }
@@ -1858,7 +2144,7 @@ onMsgBubbleTap(message: Message): void {
       }
     });
 
-    document.body.appendChild(overlay);
+    // document.body.appendChild(overlay);
     this.mapTapOverlayElement = overlay;
     console.log('[ChatPage.mapTapOverlay] Overlay opened successfully.');
     console.log('[ChatPage.mapTapOverlay] Overlay visibility snapshot:', {

@@ -4,6 +4,7 @@ import { FormBuilder, FormGroup, Validators } from '@angular/forms';
 import { AuthService } from '../services/auth.service';
 import { NavController } from '@ionic/angular';
 import { Auth3Service } from '../services/auth3.service';
+import { UserPrefetchCacheService } from '../services/user-prefetch-cache.service';
 
 
 @Component({
@@ -33,7 +34,7 @@ signupForm: FormGroup;
 
   /** Inject auth/router; build a minimal form for demonstration, 
    * for login with authentication from auth 3 and fetches and stores basic profile data. using field for username and password */
-  constructor(private formBuilder: FormBuilder, private router: Router, private auth: AuthService, private navCtrl: NavController, private auth3: Auth3Service) {
+  constructor(private formBuilder: FormBuilder, private router: Router, private auth: AuthService, private navCtrl: NavController, private auth3: Auth3Service, private userPrefetchCache: UserPrefetchCacheService) {
     this.signupForm = this.formBuilder.group({
       username: ['', Validators.required],
       password: ['', Validators.required],
@@ -56,6 +57,10 @@ signupForm: FormGroup;
       const authedUser = await this.auth3.waitForAuthUser(15000);
       console.log('[LoginPage] Auth currentUser after login', authedUser?.uid || null);
       console.log('[LoginPage.login] After waitForAuthUser - returned user:', authedUser?.uid || 'null', 'email:', authedUser?.email || 'null');
+      if (authedUser?.uid) {
+        this.userPrefetchCache.warmUserDataInBackground(authedUser.uid, 'login-success');
+      }
+
       // After successful login, persist login state and basic user data
       try {
         // Fetch user profile from Firestore using the login credentials of Auth3Service

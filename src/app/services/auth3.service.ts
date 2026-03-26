@@ -2,6 +2,7 @@ import { Injectable } from '@angular/core';
 import { Auth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut } from '@angular/fire/auth';
 import { Firestore, setDoc, serverTimestamp, doc, getDoc, collection, query, where, getDocs } from '@angular/fire/firestore';
 import { onAuthStateChanged, User } from 'firebase/auth';
+import { UserPrefetchCacheService } from './user-prefetch-cache.service';
 
 export type OfficeLocationPayload = {
   email: string;
@@ -20,7 +21,7 @@ export type OfficeLocationPayload = {
 export class Auth3Service {
   private firstName = '';
   private lastName = '';
-  constructor(private auth: Auth, private firestore: Firestore) {}
+  constructor(private auth: Auth, private firestore: Firestore, private userPrefetchCache: UserPrefetchCacheService) {}
 
 async login(email: string, password: string) {
   if (!email) {
@@ -101,7 +102,22 @@ async register(
   //   }
 
   async logout() {
+    const currentUid = this.getCurrentUser()?.uid || this.resolveCachedUid();
+    if (currentUid) {
+      this.userPrefetchCache.clearUserCache(currentUid);
+    }
     return await signOut(this.auth);
+  }
+
+  private resolveCachedUid(): string {
+    try {
+      const raw = localStorage.getItem('userData');
+      if (!raw) return '';
+      const data = JSON.parse(raw);
+      return data?.userID || '';
+    } catch {
+      return '';
+    }
   }
 
   onAuthChange(callback: (user: User | null) => void) {

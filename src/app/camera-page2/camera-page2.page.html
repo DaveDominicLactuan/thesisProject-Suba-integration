@@ -10,6 +10,15 @@
   <!-- 🎨 Hidden Canvas for Capturing -->
   <canvas #canvas hidden></canvas>
 
+  <!-- Horizontal level guide (white when off-level, green when level) -->
+  <div *ngIf="isLevelEnabled" class="level-guide-overlay">
+    <div
+      class="level-line"
+      [class.level-ok]="isPhoneLeveled"
+      [style.transform]="'translate(-50%, -50%) rotate(' + (-levelRollDeg) + 'deg)'"
+    ></div>
+  </div>
+
 
   <!-- 🔝 Top Bar -->
     <div class="top-bar">
@@ -36,6 +45,23 @@
       <button class="function-btn" (click)="goToFeedBackPage()">Finish Session <img src="assets/check2.png" alt="Finish" class="action-icon" /></button> -->
       <button class="function-btn" (click)="pickImagesMobile()">
         <img src="assets/Upload_Image_White.png" alt="Upload" class="action-icon" />
+      </button>
+
+      <button
+        class="function-btn toggle-btn"
+        [class.toggle-on]="isFlashEnabled"
+        (click)="toggleFlash()"
+      >
+        <img src="assets/pngwing.com.png" alt="Flash" class="action-icon" />
+      </button>
+
+      <button
+        class="function-btn toggle-btn"
+        [class.level-on]="isLevelEnabled && isPhoneLeveled"
+        [class.level-off]="isLevelEnabled && !isPhoneLeveled"
+        (click)="toggleLevelGuide()"
+      >
+        <img src="assets/levelIcon.png" alt="Level" class="action-icon" />
       </button>
 <!-- 
        <button class="function-btn" (click)="showTestOverlay()">

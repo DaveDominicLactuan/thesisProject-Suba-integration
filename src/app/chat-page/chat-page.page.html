@@ -33,6 +33,10 @@
         <ion-icon name="notifications-outline"></ion-icon>
         <span>Notifications</span>
       </li>
+      <li class="menu-item">
+        <ion-icon name="cloud-done-outline"></ion-icon>
+        <span>{{ cacheWarmStatusText }}</span>
+      </li>
       <li class="menu-item" (click)="goToHomePage()">
         <ion-icon name="home-outline"></ion-icon>
         <span>Home</span>
@@ -101,9 +105,9 @@
         <h2>Chat</h2>
       </div>
       <div class="right">
-        <div class="new-chat-btn" (click)="openNewChat()">
+        <!-- <div class="new-chat-btn" (click)="openNewChat()">
           <ion-icon name="create-outline"></ion-icon>
-        </div>
+        </div> -->
       </div>
     </div>
     <div class="stories-bar" role="list">
@@ -331,7 +335,7 @@
     <div class="map-view">
       <div id="map" class="map-container" role="region" aria-label="Map view">
         <!-- <div class="menu-btn2 map-menu-btn" (click)="openMenu('sidebarMenu')"> -->
-          <div class="menu-btn2 map-menu-btn" (click)="openMarkerCreationOverlay()">
+          <div class="menu-btn2 map-menu-btn" (click)="openRadiusSelectionOverlay()">
           <img src="assets/moreIcon.png" alt="Menu" />
         </div>
       </div>
@@ -388,14 +392,29 @@
           </div>
 
           <!-- Placeholder office / location photos -->
-          <div class="map-sheet-photos">
+          <!-- <div class="map-sheet-photos">
             <div class="map-sheet-photo" aria-label="Office photo 1">
               <ion-icon name="business-outline" class="map-sheet-photo-icon"></ion-icon>
             </div>
             <div class="map-sheet-photo" aria-label="Office photo 2">
               <ion-icon name="map-outline" class="map-sheet-photo-icon"></ion-icon>
             </div>
+          </div> -->
+        </div>
+      </div>
+
+      <div *ngIf="isRadiusSelectionOverlayOpen" class="radius-selection-overlay" (click)="closeRadiusSelectionOverlay()">
+        <div class="radius-selection-panel" (click)="$event.stopPropagation()">
+          <div class="radius-selection-row">
+            <label class="radius-selection-label" for="radius-size-select">Set size for maximum</label>
+            <select id="radius-size-select" class="radius-selection-select" [(ngModel)]="selectedRadiusHalfSideMeters">
+              <option *ngFor="let option of markerRadiusOptions" [ngValue]="option.value">{{ option.label }}</option>
+            </select>
           </div>
+
+          <button class="radius-selection-confirm" type="button" (click)="confirmRadiusSelection()">
+            CONFIRM
+          </button>
         </div>
       </div>
 
@@ -465,9 +484,9 @@
   <!--  Settings view placeholder -->
 
   <div class="bottom-nav">
-    <button class="nav-btn" (click)="setNav('profile')" [class.active]="activeTab === 'profile'">
+    <!-- <button class="nav-btn" (click)="setNav('profile')" [class.active]="activeTab === 'profile'">
       <img src="assets/userIcon.png" alt="User" style="width: 27px; height: 27px;" />
-    </button>
+    </button> -->
     <button class="nav-btn" (click)="setNav('people')" [class.active]="activeTab === 'people'">
       <!-- <ion-icon name="people-outline"></ion-icon> -->
        <img src="assets/people.png" alt="User" style="width: 27px; height: 27px;" /> 
