@@ -21,6 +21,92 @@
   </div>
   <ul class="menu-items scrollable-menu">
     <div class="menu-section">
+      <li class="menu-item" (click)="goToHomePage()">
+        <ion-icon name="home-outline"></ion-icon>
+        <span>Home</span>
+      </li>
+    </div>
+    <!-- <div class="menu-section">
+      <div class="menu-header">Activity</div>
+         <li class="menu-item" (click)="goSessionPage()">
+        <ion-icon name="bookmark-outline"></ion-icon>
+        <span>Show Current Sessions</span>
+        <span class="sync-status-pill" [ngClass]="syncStatusState">{{ syncStatusText }}</span>
+      </li>
+         <li class="menu-item" (click)="goNetworkPage()">
+        <ion-icon name="wifi-outline"></ion-icon>
+        <span>Network Page</span>
+        <span class="sync-status-pill" [ngClass]="syncStatusState">{{ syncStatusText }}</span>
+      </li>
+      <li class="menu-item">
+        <ion-icon name="cloud-done-outline"></ion-icon>
+        <span>{{ cacheWarmStatusText }}</span>
+      </li>
+    </div>
+    <div class="menu-section">
+      <div class="menu-header">Location</div>
+        <li class="menu-item" (click)="requestLocationPermissionFromMenu()">
+        <ion-icon name="create-outline"></ion-icon>
+        <span>Request Location Permission</span>
+      </li>
+      <li class="menu-item" (click)="getAndStoreCurrentLocation()">
+        <ion-icon name="locate-outline"></ion-icon>
+        <span>Get Current Location</span>
+      </li>
+      <li class="menu-item" (click)="showLocationOverlay()">
+        <ion-icon name="information-circle-outline"></ion-icon>
+        <span>Show Location Details</span>
+      </li>
+      <li class="menu-item" *ngIf="currentLocation">
+        <ion-icon name="location-outline"></ion-icon>
+        <span>Lat {{ currentLocation.latitude | number:'1.4-4' }}, Lng {{ currentLocation.longitude | number:'1.4-4' }}</span>
+      </li>
+      <li class="menu-item">
+        <ion-icon name="time-outline"></ion-icon>
+        <span>{{ locationStatusText }}</span>
+      </li>
+      <li class="menu-item" *ngIf="locationErrorText">
+        <ion-icon name="alert-circle-outline"></ion-icon>
+        <span>{{ locationErrorText }}</span>
+      </li>
+    </div> -->
+      <div class="menu-section">
+      <!-- <div class="menu-header">User</div> -->
+       <div class="menu-header">Users</div>
+       <li class="menu-item">
+        <ion-icon name="checkmark-circle"></ion-icon>
+        <span>Availability</span>
+      </li>
+          <li class="menu-item">
+        <ion-icon name="create-outline"></ion-icon>
+        <span>Set Status Message</span>
+      </li>
+      <li class="menu-item">
+        <ion-icon name="notifications-outline"></ion-icon>
+        <span>Notifications</span>
+      </li>
+    </div>
+     <div class="menu-section">
+      <!-- <div class="menu-header">Settings</div> -->
+        <div class="menu-header">Settings</div>
+      <li class="menu-item">
+        <ion-icon name="settings-outline"></ion-icon>
+        <span>Settings</span>
+      </li>
+      <li class="menu-item">
+        <ion-icon name="person-outline"></ion-icon>
+        <span>About Us</span>
+      </li>
+      <li class="menu-item">
+        <ion-icon name="help-circle-outline"></ion-icon>
+        <span>Help</span>
+      </li>
+      <li class="menu-item" (click)="logout()">
+        <ion-icon name="log-out-outline"></ion-icon>
+        <span>Log Out</span>
+      </li>
+    </div>
+    <!-- <div class="menu-section">
       <li class="menu-item">
         <ion-icon name="checkmark-circle"></ion-icon>
         <span>Availability</span>
@@ -77,7 +163,7 @@
         <ion-icon name="log-out-outline"></ion-icon>
         <span>Log Out</span>
       </li>
-    </div>
+    </div> -->
   </ul>
 </div>
 
@@ -354,14 +440,14 @@
         <!-- Inactive peek row (always rendered, hidden in active via CSS) -->
         <div class="map-sheet-peek" (click)="toggleMapBottomSheet()">
           <div class="map-sheet-peek-avatar">
-            <span>{{ selectedMapEngineer ? getInitials(selectedMapEngineer.firstName ? (selectedMapEngineer.firstName + ' ' + (selectedMapEngineer.lastName || '')) : selectedMapEngineer.name) : '?' }}</span>
+            <span>{{ selectedMapEngineer ? getMapSheetEngineerInitials(selectedMapEngineer) : '?' }}</span>
           </div>
           <div class="map-sheet-peek-text">
             <div class="map-sheet-peek-name">
-              {{ selectedMapEngineer ? (selectedMapEngineer.firstName ? (selectedMapEngineer.firstName + ' ' + (selectedMapEngineer.lastName || '')) : selectedMapEngineer.name) : 'Tap a marker to view' }}
+              {{ selectedMapEngineer ? getMapSheetEngineerName(selectedMapEngineer) : 'Tap a marker to view' }}
             </div>
             <div class="map-sheet-peek-sub">
-              {{ selectedMapEngineer ? '★ 4.0 · Office Address' : 'Drag up or tap to explore' }}
+              {{ mapSheetViewMode === 'list' ? (mapSheetAggregatedEngineers.length + ' nearby marker(s) found') : (selectedMapEngineer ? (getMapSheetEngineerDistanceLabel(selectedMapEngineer) || '★ 4.0 · Office Address') : 'Drag up or tap to explore') }}
             </div>
           </div>
           <ion-icon name="chevron-up-outline" class="map-sheet-peek-chevron" [ngClass]="{'rotated': isMapBottomSheetActive}"></ion-icon>
@@ -369,27 +455,63 @@
 
         <!-- Active expanded body -->
         <div class="map-sheet-body">
-          <div class="map-sheet-engineer-header">
-            <h2 class="map-sheet-name">
-              {{ selectedMapEngineer ? (selectedMapEngineer.firstName ? (selectedMapEngineer.firstName + ' ' + (selectedMapEngineer.lastName || '')) : selectedMapEngineer.name) : 'Engineer Name Here' }}
-            </h2>
-            <div class="map-sheet-rating-row">
-              <span class="map-sheet-stars">★★★★☆</span>
-              <span class="map-sheet-rating-val">4.0</span>
+          <ng-container *ngIf="mapSheetViewMode === 'list'; else mapSheetDetailTemplate">
+            <div class="map-sheet-body-list">
+              <div class="map-sheet-list-header">
+                <h3>Nearby Markers</h3>
+                <span>{{ mapSheetAggregatedEngineers.length }}</span>
+              </div>
+
+              <button
+                type="button"
+                class="map-sheet-list-item"
+                *ngFor="let engineer of mapSheetAggregatedEngineers"
+                (click)="openMapSheetEngineerDetail(engineer, $event)">
+                <div class="map-sheet-list-avatar">
+                  <img *ngIf="engineer.photoURL || engineer.avatar" [src]="engineer.photoURL || engineer.avatar" alt="Engineer avatar" />
+                  <span *ngIf="!(engineer.photoURL || engineer.avatar)">{{ getMapSheetEngineerInitials(engineer) }}</span>
+                </div>
+                <div class="map-sheet-list-info">
+                  <div class="map-sheet-list-name">{{ getMapSheetEngineerName(engineer) }}</div>
+                  <div class="map-sheet-list-sub">{{ getMapSheetEngineerSubtitle(engineer) }}</div>
+                </div>
+                <div class="map-sheet-list-distance">{{ getMapSheetEngineerDistanceLabel(engineer) }}</div>
+              </button>
             </div>
-            <div class="map-sheet-address">
-              <ion-icon name="location-outline"></ion-icon>
-              <span>Office Address</span>
+          </ng-container>
+
+          <ng-template #mapSheetDetailTemplate>
+            <div class="map-sheet-engineer-header">
+              <button
+                *ngIf="mapSheetAggregatedEngineers.length > 1"
+                type="button"
+                class="map-sheet-back-to-list"
+                (click)="backToMapSheetList($event)">
+                <ion-icon name="chevron-back-outline"></ion-icon>
+                Back to list
+              </button>
+
+              <h2 class="map-sheet-name">
+                {{ selectedMapEngineer ? getMapSheetEngineerName(selectedMapEngineer) : 'Engineer Name Here' }}
+              </h2>
+              <div class="map-sheet-rating-row">
+                <span class="map-sheet-stars">★★★★☆</span>
+                <span class="map-sheet-rating-val">4.0</span>
+              </div>
+              <div class="map-sheet-address">
+                <ion-icon name="location-outline"></ion-icon>
+                <span>{{ selectedMapEngineer?.address || selectedMapEngineer?.markerPayload?.address || 'Office Address' }}</span>
+              </div>
+              <div class="map-sheet-avail">
+                <ion-icon name="time-outline"></ion-icon>
+                <span>{{ selectedMapEngineer?.availableTime || selectedMapEngineer?.markerPayload?.availableTime || 'Available: 8AM Tue' }}</span>
+              </div>
+              <button class="map-sheet-chat-btn" (click)="openChatFromMapSheet($event)">
+                <ion-icon name="chatbubble-outline"></ion-icon>
+                Chat
+              </button>
             </div>
-            <div class="map-sheet-avail">
-              <ion-icon name="time-outline"></ion-icon>
-              <span>Available: 8AM Tue</span>
-            </div>
-            <button class="map-sheet-chat-btn" (click)="openChatFromMapSheet($event)">
-              <ion-icon name="chatbubble-outline"></ion-icon>
-              Chat
-            </button>
-          </div>
+          </ng-template>
 
           <!-- Placeholder office / location photos -->
           <!-- <div class="map-sheet-photos">

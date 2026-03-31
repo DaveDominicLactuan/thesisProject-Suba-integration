@@ -160,6 +160,8 @@ export class ChatPagePage implements OnInit, OnDestroy {
 
   // --- Map Bottom Sheet State ---
   isMapBottomSheetActive = false;
+  mapSheetViewMode: 'detail' | 'list' = 'detail';
+  mapSheetAggregatedEngineers: any[] = [];
   selectedMapEngineer: any = null;
   private mapSheetDragStartY: number | null = null;
   private readonly mapSheetDragThreshold = 55;
@@ -213,6 +215,8 @@ export class ChatPagePage implements OnInit, OnDestroy {
   }
 
   openMapMarkerBottomSheet(markerData: any): void {
+    this.mapSheetViewMode = 'detail';
+    this.mapSheetAggregatedEngineers = markerData ? [markerData] : [];
     this.selectedMapEngineer = markerData;
     this.isMapBottomSheetActive = true;
     console.log('[ChatPage.mapBottomSheet] Marker clicked. State: Active', { engineer: markerData });
@@ -220,9 +224,63 @@ export class ChatPagePage implements OnInit, OnDestroy {
 
   openChatFromMapSheet(event: MouseEvent): void {
     event.stopPropagation();
+    if (!this.selectedMapEngineer) return;
+
+    const selectedId = this.selectedMapEngineer?.id || this.selectedMapEngineer?.uid || this.selectedMapEngineer?.userID || this.selectedMapEngineer?.email;
+    if (!selectedId) {
+      alert('Unable to open chat for this marker because no linked user account was found.');
+      return;
+    }
+
     if (this.selectedMapEngineer) {
       void this.selectEngineer(this.selectedMapEngineer);
     }
+  }
+
+  openMapSheetEngineerDetail(engineer: any, event?: Event): void {
+    event?.stopPropagation();
+    this.selectedMapEngineer = engineer;
+    this.mapSheetViewMode = 'detail';
+    this.isMapBottomSheetActive = true;
+  }
+
+  backToMapSheetList(event?: Event): void {
+    event?.stopPropagation();
+    if (this.mapSheetAggregatedEngineers.length > 1) {
+      this.mapSheetViewMode = 'list';
+    }
+  }
+
+  getMapSheetEngineerName(engineer: any): string {
+    if (!engineer || typeof engineer !== 'object') return 'Unknown User';
+    const firstName = typeof engineer.firstName === 'string' ? engineer.firstName.trim() : '';
+    const lastName = typeof engineer.lastName === 'string' ? engineer.lastName.trim() : '';
+    const fullName = `${firstName} ${lastName}`.trim();
+    if (fullName) return fullName;
+    if (typeof engineer.name === 'string' && engineer.name.trim()) return engineer.name.trim();
+    if (typeof engineer.email === 'string' && engineer.email.trim()) return engineer.email.trim();
+    if (typeof engineer.markerTitle === 'string' && engineer.markerTitle.trim()) return engineer.markerTitle.trim();
+    return 'Unknown User';
+  }
+
+  getMapSheetEngineerSubtitle(engineer: any): string {
+    if (!engineer || typeof engineer !== 'object') return '';
+    const contact = engineer.phoneNumber || engineer.phone || engineer.contactNumber || engineer.mobile || engineer.mobileNumber || engineer.contact;
+    if (typeof contact === 'string' && contact.trim()) return contact.trim();
+    if (typeof engineer.email === 'string' && engineer.email.trim()) return engineer.email.trim();
+    if (typeof engineer.address === 'string' && engineer.address.trim()) return engineer.address.trim();
+    return 'No contact info';
+  }
+
+  getMapSheetEngineerDistanceLabel(engineer: any): string {
+    const distance = Number(engineer?.distanceFromCenterMeters);
+    if (!Number.isFinite(distance) || distance < 0) return '';
+    if (distance >= 1000) return `${(distance / 1000).toFixed(2)} km away`;
+    return `${Math.round(distance)} m away`;
+  }
+
+  getMapSheetEngineerInitials(engineer: any): string {
+    return this.getInitials(this.getMapSheetEngineerName(engineer));
   }
 
   private static userSyncTasks: Map<string, Promise<void>> = new Map();
@@ -282,7 +340,12 @@ export class ChatPagePage implements OnInit, OnDestroy {
     { label: '2.5km', value: 2200 }
   ];
   selectedRadiusHalfSideMeters = this.markerSquareHalfSideMeters;
-  aggregatedRadiusMarkerData: Array<OfficeLocationMarkerData & { distanceFromCenterMeters: number }> = [];
+  aggregatedRadiusMarkerData: Array<OfficeLocationMarkerData & {
+    distanceFromCenterMeters: number;
+    associatedUser: any | null;
+    resolvedUserId: string | null;
+    markerTitle: string;
+  }> = [];
   private lastRadiusAggregationBounds?: RadiusSquareBounds;
   private readonly defaultRadiusAggregationCenter = {
     latitude: 10.302051,
@@ -1388,12 +1451,36 @@ onMsgBubbleTap(message: Message): void {
     return earthRadiusMeters * arc;
   }
 
-  async aggregateMarkersWithinSelectedRadius(): Promise<void> {
+  private getOfficeMarkerUserId(marker: OfficeLocationMarkerData): string | null {
+    const markerUserIdRaw = marker.payload['userId'] || marker.payload['uid'] || marker.payload['userID'];
+    if (typeof markerUserIdRaw !== 'string') return null;
+    const trimmed = markerUserIdRaw.trim();
+    return trimmed || null;
+  }
+
+  private mergeMarkerAndUserForMapSheet(
+    marker: OfficeLocationMarkerData & { distanceFromCenterMeters: number; markerTitle: string },
+    associatedUser: any,
+    resolvedUserId: string | null
+  ): any {
+    return {
+      ...(associatedUser && typeof associatedUser === 'object' ? associatedUser : {}),
+      id: associatedUser?.id || associatedUser?.uid || associatedUser?.userID || resolvedUserId || undefined,
+      uid: associatedUser?.uid || associatedUser?.id || associatedUser?.userID || resolvedUserId || undefined,
+      userID: associatedUser?.userID || associatedUser?.uid || associatedUser?.id || resolvedUserId || undefined,
+      markerId: marker.id,
+      markerPayload: marker.payload,
+      markerTitle: marker.markerTitle,
+      latitude: marker.latitude,
+      longitude: marker.longitude,
+      distanceFromCenterMeters: marker.distanceFromCenterMeters
+    };
+  }
+
+  private async aggregateMarkersForMapSheet(centerLatitude: number, centerLongitude: number): Promise<any[]> {
     await this.fetchOfficeLocationMarkerData();
 
-    const center = this.resolveRadiusAggregationCenter();
-    const bounds = this.buildRadiusSquareBounds(center.latitude, center.longitude, this.markerSquareHalfSideMeters);
-
+    const bounds = this.buildRadiusSquareBounds(centerLatitude, centerLongitude, this.markerSquareHalfSideMeters);
     const markersInsideBounds = this.officeLocationMarkerData.filter((marker) => (
       marker.latitude <= bounds.top.latitude &&
       marker.latitude >= bounds.bottom.latitude &&
@@ -1401,40 +1488,114 @@ onMsgBubbleTap(message: Message): void {
       marker.longitude <= bounds.right.longitude
     ));
 
-    this.aggregatedRadiusMarkerData = markersInsideBounds.map((marker) => ({
-      ...marker,
-      distanceFromCenterMeters: this.calculateDistanceMeters(
-        center.latitude,
-        center.longitude,
-        marker.latitude,
-        marker.longitude
-      )
+    const enrichedMarkers = await Promise.all(markersInsideBounds.map(async (marker) => {
+      const resolvedUserId = this.getOfficeMarkerUserId(marker);
+      const associatedUser = resolvedUserId ? await this.fetchUserProfileByUserId(resolvedUserId) : null;
+      return {
+        ...marker,
+        markerTitle: this.buildOfficeMarkerTitle(marker),
+        associatedUser,
+        resolvedUserId,
+        distanceFromCenterMeters: this.calculateDistanceMeters(
+          centerLatitude,
+          centerLongitude,
+          marker.latitude,
+          marker.longitude
+        )
+      };
     }));
+
+    this.aggregatedRadiusMarkerData = enrichedMarkers;
     this.lastRadiusAggregationBounds = bounds;
+
+    return enrichedMarkers.map((marker) => this.mergeMarkerAndUserForMapSheet(marker, marker.associatedUser, marker.resolvedUserId));
+  }
+
+  private async onOfficeMarkerSelectedForMapSheet(marker: L.Marker, titleText: string, trigger: 'click' | 'touchend'): Promise<void> {
+    const markerCenter = marker.getLatLng();
+
+    try {
+      this.drawMarkerCenteredSquare(markerCenter, trigger, titleText);
+    } catch (squareError) {
+      console.error('[ChatPage.markerSquare] Failed to draw marker square', {
+        trigger,
+        titleText,
+        squareError
+      });
+    }
+
+    const markerUserProfile = this.markerUserProfileMap.get(marker) || null;
+    const markerFallback = {
+      ...(markerUserProfile || {}),
+      name: markerUserProfile?.name || titleText,
+      markerTitle: titleText,
+      latitude: markerCenter.lat,
+      longitude: markerCenter.lng
+    };
+
+    const aggregatedMapSheetItems = await this.aggregateMarkersForMapSheet(markerCenter.lat, markerCenter.lng);
+    this.mapSheetAggregatedEngineers = aggregatedMapSheetItems;
+
+    if (aggregatedMapSheetItems.length > 1) {
+      this.selectedMapEngineer = aggregatedMapSheetItems[0];
+      this.mapSheetViewMode = 'list';
+      this.isMapBottomSheetActive = true;
+      console.log('[ChatPage.mapBottomSheet] Marker selected with multiple nearby engineers. Opening list view.', {
+        trigger,
+        titleText,
+        aggregatedCount: aggregatedMapSheetItems.length
+      });
+      return;
+    }
+
+    this.mapSheetViewMode = 'detail';
+    this.openMapMarkerBottomSheet(aggregatedMapSheetItems[0] || markerFallback);
+    console.log('[ChatPage.mapBottomSheet] Marker selected with single/no nearby engineer. Opening detail view.', {
+      trigger,
+      titleText,
+      aggregatedCount: aggregatedMapSheetItems.length
+    });
+  }
+
+  async aggregateMarkersWithinSelectedRadius(): Promise<void> {
+    const center = this.resolveRadiusAggregationCenter();
+    const aggregatedMapSheetItems = await this.aggregateMarkersForMapSheet(center.latitude, center.longitude);
 
     if (this.map) {
       this.drawMarkerCenteredSquare(L.latLng(center.latitude, center.longitude), 'story-item', 'Radius Selection Area');
     }
 
+    this.mapSheetAggregatedEngineers = aggregatedMapSheetItems;
+    if (aggregatedMapSheetItems.length > 1) {
+      this.mapSheetViewMode = 'list';
+      this.selectedMapEngineer = aggregatedMapSheetItems[0];
+      this.isMapBottomSheetActive = true;
+    } else if (aggregatedMapSheetItems.length === 1) {
+      this.mapSheetViewMode = 'detail';
+      this.selectedMapEngineer = aggregatedMapSheetItems[0];
+      this.isMapBottomSheetActive = true;
+    }
+
     console.log('[ChatPage.radiusAggregation] Aggregated markers inside selected radius bounds', {
       center,
+      centerSource: center.source,
       selectedHalfSideMeters: this.markerSquareHalfSideMeters,
-      top: {
-        latitude: Number(bounds.top.latitude.toFixed(6)),
-        longitude: Number(bounds.top.longitude.toFixed(6))
-      },
-      bottom: {
-        latitude: Number(bounds.bottom.latitude.toFixed(6)),
-        longitude: Number(bounds.bottom.longitude.toFixed(6))
-      },
-      left: {
-        latitude: Number(bounds.left.latitude.toFixed(6)),
-        longitude: Number(bounds.left.longitude.toFixed(6))
-      },
-      right: {
-        latitude: Number(bounds.right.latitude.toFixed(6)),
-        longitude: Number(bounds.right.longitude.toFixed(6))
-      },
+      top: this.lastRadiusAggregationBounds ? {
+        latitude: Number(this.lastRadiusAggregationBounds.top.latitude.toFixed(6)),
+        longitude: Number(this.lastRadiusAggregationBounds.top.longitude.toFixed(6))
+      } : null,
+      bottom: this.lastRadiusAggregationBounds ? {
+        latitude: Number(this.lastRadiusAggregationBounds.bottom.latitude.toFixed(6)),
+        longitude: Number(this.lastRadiusAggregationBounds.bottom.longitude.toFixed(6))
+      } : null,
+      left: this.lastRadiusAggregationBounds ? {
+        latitude: Number(this.lastRadiusAggregationBounds.left.latitude.toFixed(6)),
+        longitude: Number(this.lastRadiusAggregationBounds.left.longitude.toFixed(6))
+      } : null,
+      right: this.lastRadiusAggregationBounds ? {
+        latitude: Number(this.lastRadiusAggregationBounds.right.latitude.toFixed(6)),
+        longitude: Number(this.lastRadiusAggregationBounds.right.longitude.toFixed(6))
+      } : null,
       totalMarkersLoaded: this.officeLocationMarkerData.length,
       aggregatedMarkersCount: this.aggregatedRadiusMarkerData.length,
       aggregatedMarkers: this.aggregatedRadiusMarkerData.map((marker) => ({
@@ -1442,6 +1603,7 @@ onMsgBubbleTap(message: Message): void {
         latitude: marker.latitude,
         longitude: marker.longitude,
         distanceFromCenterMeters: Number(marker.distanceFromCenterMeters.toFixed(2)),
+        resolvedUserId: marker.resolvedUserId,
         payload: marker.payload
       }))
     });
@@ -1928,34 +2090,17 @@ onMsgBubbleTap(message: Message): void {
     marker.off('touchend');
 
     const openOverlay = (trigger: 'click' | 'touchend') => {
-      // Activate the Google Maps-style bottom sheet with the marker's data
-      // Use cached user profile if available, otherwise fall back to title
-      const cachedUserProfile = this.markerUserProfileMap.get(marker);
-      const markerData = cachedUserProfile || { name: titleText };
-      this.openMapMarkerBottomSheet(markerData);
-      console.log('[ChatPage.markerSelection] Marker interaction detected', { trigger, titleText });
-      try {
-        this.drawMarkerCenteredSquare(marker.getLatLng(), trigger, titleText);
-      } catch (squareError) {
-        console.error('[ChatPage.markerSquare] Failed to draw marker square', {
-          trigger,
-          titleText,
-          squareError
-        });
-      }
-      setTimeout(() => {
-        void this.openMarkerSelectionOverlay(titleText)
-          .then(() => {
-            console.log('[ChatPage.markerSelection] openMarkerSelectionOverlay resolved', { trigger, titleText });
-          })
-          .catch((err) => {
-            console.error('[ChatPage.markerSelection] openMarkerSelectionOverlay failed', {
-              trigger,
-              titleText,
-              err
-            });
+      void this.onOfficeMarkerSelectedForMapSheet(marker, titleText, trigger)
+        .then(() => {
+          console.log('[ChatPage.markerSelection] Marker interaction processed for map sheet', { trigger, titleText });
+        })
+        .catch((err) => {
+          console.error('[ChatPage.markerSelection] Marker interaction failed for map sheet', {
+            trigger,
+            titleText,
+            err
           });
-      }, 0);
+        });
     };
 
     marker.on('click', () => openOverlay('click'));
