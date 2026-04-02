@@ -1,4 +1,4 @@
-import { Component, OnInit, OnDestroy } from '@angular/core';
+import { Component, OnInit, OnDestroy, NgZone } from '@angular/core';
 import { Router } from '@angular/router';
 import { FormBuilder, FormGroup, Validators } from '@angular/forms';
 import { AuthService } from '../services/auth.service';
@@ -10,6 +10,8 @@ import { ImageStorageService } from '../services/image-storage.service';
 import { Chat, ChatService, Message, TypingState } from '../services/chat.service';
 import { PresenceService } from '../services/presence.service';
 import { UserPrefetchCacheService } from '../services/user-prefetch-cache.service';
+import { OfflineLeafletTileLayer } from '../services/offline-leaflet-tile-layer';
+import { OfflineMapAreaMetadata, OfflineMapTileService } from '../services/offline-map-tile.service';
 import { Subscription } from 'rxjs';
 import { App } from '@capacitor/app';
 import { Geolocation } from '@capacitor/geolocation';
@@ -321,8 +323,31 @@ export class ChatPagePage implements OnInit, OnDestroy {
   // active bottom navigation tab: 'person' | 'people' | 'location' | 'settings'
   activeTab: 'person' | 'people' | 'location' | 'settings' | 'profile' = 'people';
   private map?: L.Map | null = null;
+  private baseTileLayer?: OfflineLeafletTileLayer;
   private userLocationMarker?: L.Marker;
   private readonly fallbackCoordinates = { latitude: 10.324849, longitude: 123.849164 };
+  private readonly osmTileTemplate = 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
+  private readonly offlineTileSubdomains = ['a', 'b', 'c'];
+  offlineModeEnabled = false;
+  offlineDownloadInProgress = false;
+  offlineDownloadProgressPct = 0;
+  offlineDownloadStatusText = 'No offline download started.';
+  offlineMinZoom = 13;
+  offlineMaxZoom = 17;
+  offlineMaxTilesPerDownload = 1600;
+  offlineAreaName = '';
+  downloadedOfflineAreas: OfflineMapAreaMetadata[] = [];
+  private connectivityOnline = true;
+  private mapBootstrapSequence = 0;
+  private readonly mapOnlineProbeDelayMs = 1400;
+  private readonly mapOnlineProbeTimeoutMs = 2200;
+  private readonly mapOnlineMarkerRefreshDelayMs = 1400;
+  private readonly mapLocationActivationGraceMs = 1200;
+  private locationPromptShownOnce = false;
+  mapBootstrapStatusVisible = false;
+  mapBootstrapStatusText = '';
+  mapBootstrapStatusTone: 'loading' | 'success' | 'offline' | 'warning' = 'loading';
+  private mapBootstrapStatusHideTimeoutId?: ReturnType<typeof setTimeout>;
   private mapInitAttempts = 0;
   private readonly maxMapInitAttempts = 8;
   private mapResizeTimeoutId?: ReturnType<typeof setTimeout>;
@@ -331,6 +356,7 @@ export class ChatPagePage implements OnInit, OnDestroy {
   private mapTapOverlayElement?: HTMLDivElement;
   private markerSelectionSquare?: L.Rectangle;
   private markerSquareHalfSideMeters = 440;
+// private markerSquareHalfSideMeters = 8050; //1 mile radius
   isRadiusSelectionOverlayOpen = false;
   readonly markerRadiusOptions: RadiusOption[] = [
     { label: '500m', value: 440 },
@@ -356,6 +382,15 @@ export class ChatPagePage implements OnInit, OnDestroy {
   private markerUserProfileMap: Map<L.Marker, any> = new Map();
   private mapRefreshTimerId?: ReturnType<typeof setInterval>;
   private readonly mapRefreshIntervalMs = 30000; // 30 seconds
+  // Background location-based marker fetching
+  private currentUserLocation: {
+    latitude: number;
+    longitude: number;
+    accuracy: number;
+    timestamp: string;
+  } | null = null;
+  private isBackgroundLocationFetchActive = false;
+  private backgroundLocationFetchInterval?: ReturnType<typeof setInterval>;
 
   private dismissMapTapOverlay(): void {
     if (!this.mapTapOverlayElement) return;
@@ -737,14 +772,14 @@ export class ChatPagePage implements OnInit, OnDestroy {
   stories: any[] = [];
 
   /** Inject auth, router, and image storage services for navigation and data. */
-  constructor(private formBuilder: FormBuilder, private router: Router, private authService: AuthService, private navCtrl: NavController, public auth3: Auth3Service, private imageStorage: ImageStorageService, private platform: Platform, private firestore: Firestore, private chatService: ChatService, private presenceService: PresenceService, private userPrefetchCache: UserPrefetchCacheService) {
+  constructor(private formBuilder: FormBuilder, private router: Router, private authService: AuthService, private navCtrl: NavController, public auth3: Auth3Service, private imageStorage: ImageStorageService, private platform: Platform, private firestore: Firestore, private chatService: ChatService, private presenceService: PresenceService, private userPrefetchCache: UserPrefetchCacheService, private offlineMapTileService: OfflineMapTileService, private ngZone: NgZone) {
 
   }
 
 
 ngOnInit(): void {
-  console.log('[HomePage2.ngOnInit] ===== PAGE INIT START (ngOnInit called) =====');
-  console.log('[HomePage2.ngOnInit] Auth currentUser on ngOnInit:', this.auth3.getCurrentUser()?.uid || 'null');
+  console.log('[ChatPage.ngOnInit] ===== PAGE INIT START (ngOnInit called) =====');
+  console.log('[ChatPage.ngOnInit] Auth currentUser on ngOnInit:', this.auth3.getCurrentUser()?.uid || 'null');
 
   const cachedUid = this.resolveCachedUid();
   if (cachedUid) {
@@ -770,12 +805,274 @@ ngOnInit(): void {
     this.userPrefetchCache.warmUserDataInBackground(cachedUid, 'chat-page-ngOnInit').finally(() => {
       this.refreshCacheWarmStatus(cachedUid);
     });
+
+    // Load user location from storage and start background marker fetch
+    this.loadUserLocationAndStartBackgroundFetch(cachedUid);
   }
 
   this.initialize();
+  this.refreshOfflineAreaList();
   this.startUserChatsSubscription().catch((err) => {
     console.warn('[ChatPage.ngOnInit] Unable to start chat list subscription:', err);
   });
+}
+
+getCurrentMapBoundsBBox(): { west: number; south: number; east: number; north: number } | null {
+  if (!this.map) {
+    return null;
+  }
+
+  const bounds = this.map.getBounds();
+  return {
+    west: bounds.getWest(),
+    south: bounds.getSouth(),
+    east: bounds.getEast(),
+    north: bounds.getNorth()
+  };
+}
+
+toggleOfflineMode(): void {
+  this.offlineModeEnabled = !this.offlineModeEnabled;
+  this.applyEffectiveTileLayerMode();
+  this.offlineDownloadStatusText = this.offlineModeEnabled
+    ? 'Offline mode enabled. Only cached tiles will render.'
+    : 'Offline mode disabled. Online fallback enabled.';
+}
+
+  async downloadVisibleMapAreaOffline(): Promise<void> {
+    if (!this.map) {
+      alert('Map is not ready yet. Open the Location tab and try again.');
+      return;
+    }
+
+    const minZoom = Math.floor(this.offlineMinZoom);
+    const maxZoom = Math.floor(this.offlineMaxZoom);
+    if (maxZoom < minZoom) {
+      alert('Invalid zoom range: max zoom must be greater than or equal to min zoom.');
+      return;
+    }
+
+    const bounds = this.map.getBounds();
+    this.offlineDownloadInProgress = true;
+    this.offlineDownloadProgressPct = 0;
+    this.offlineDownloadStatusText = 'Preparing offline tile download...';
+
+    try {
+      const summary = await this.offlineMapTileService.downloadTilesForBounds({
+        bounds,
+        minZoom,
+        maxZoom,
+        urlTemplate: this.osmTileTemplate,
+        subdomains: this.offlineTileSubdomains,
+        maxTiles: this.offlineMaxTilesPerDownload,
+        concurrency: 6,
+        areaName: (this.offlineAreaName || '').trim() || `Area ${new Date().toLocaleString()}`,
+        onProgress: (progress) => {
+          // Ensure progress updates trigger Angular change detection
+          this.ngZone.run(() => {
+            this.offlineDownloadProgressPct = progress.percentage;
+            this.offlineDownloadStatusText = `Downloading tiles: ${progress.completed}/${progress.total} (${progress.percentage}%)`;
+          });
+        }
+      });
+
+      this.offlineDownloadStatusText = `Offline tiles ready. Downloaded: ${summary.downloaded}, cached: ${summary.cached}, failed: ${summary.failed}.`;
+      this.refreshOfflineAreaList();
+      this.baseTileLayer?.redraw();
+    } catch (error) {
+      const message = (error as { message?: string } | null)?.message || 'Offline tile download failed.';
+      this.offlineDownloadStatusText = message;
+      console.error('[ChatPage] Offline tile download error:', error);
+      alert(message);
+    } finally {
+      this.offlineDownloadInProgress = false;
+    }
+  }
+
+async clearOfflineMapCache(): Promise<void> {
+  const confirmed = confirm('Clear all offline map tiles? This cannot be undone.');
+  if (!confirmed) {
+    return;
+  }
+
+  try {
+    await this.offlineMapTileService.clearAllTiles();
+    this.refreshOfflineAreaList();
+    this.offlineDownloadProgressPct = 0;
+    this.offlineDownloadStatusText = 'Offline map cache cleared.';
+    this.baseTileLayer?.redraw();
+  } catch (error) {
+    console.error('[ChatPage.offlineMap] Failed to clear offline tile cache.', error);
+    alert('Failed to clear offline map cache. See console for details.');
+  }
+}
+
+private refreshOfflineAreaList(): void {
+  this.downloadedOfflineAreas = this.offlineMapTileService.listOfflineAreas();
+}
+
+private getEffectiveOfflineMode(): boolean {
+  return this.offlineModeEnabled || !this.connectivityOnline;
+}
+
+private applyEffectiveTileLayerMode(): void {
+  this.baseTileLayer?.setOfflineMode(this.getEffectiveOfflineMode());
+}
+
+private async waitMs(durationMs: number): Promise<void> {
+  await new Promise<void>((resolve) => {
+    setTimeout(resolve, Math.max(0, durationMs));
+  });
+}
+
+private setMapBootstrapStatus(
+  message: string,
+  autoHideAfterMs?: number,
+  tone: 'loading' | 'success' | 'offline' | 'warning' = 'loading'
+): void {
+  this.mapBootstrapStatusText = message;
+  this.mapBootstrapStatusTone = tone;
+  this.mapBootstrapStatusVisible = true;
+
+  if (this.mapBootstrapStatusHideTimeoutId) {
+    clearTimeout(this.mapBootstrapStatusHideTimeoutId);
+    this.mapBootstrapStatusHideTimeoutId = undefined;
+  }
+
+  if (autoHideAfterMs && autoHideAfterMs > 0) {
+    this.mapBootstrapStatusHideTimeoutId = setTimeout(() => {
+      this.mapBootstrapStatusVisible = false;
+      this.mapBootstrapStatusHideTimeoutId = undefined;
+    }, autoHideAfterMs);
+  }
+}
+
+private hideMapBootstrapStatus(): void {
+  if (this.mapBootstrapStatusHideTimeoutId) {
+    clearTimeout(this.mapBootstrapStatusHideTimeoutId);
+    this.mapBootstrapStatusHideTimeoutId = undefined;
+  }
+  this.mapBootstrapStatusVisible = false;
+}
+
+getMapBootstrapToneIcon(): string {
+  switch (this.mapBootstrapStatusTone) {
+    case 'success':
+      return 'checkmark-circle';
+    case 'offline':
+      return 'cloud-offline';
+    case 'warning':
+      return 'warning';
+    case 'loading':
+    default:
+      return 'sync';
+  }
+}
+
+private async maybePromptForLocationActivation(): Promise<void> {
+  try {
+    const permission = await Geolocation.checkPermissions();
+    const fineGranted = permission.location === 'granted';
+    const coarseGranted = permission.coarseLocation === 'granted';
+    if (fineGranted || coarseGranted) {
+      return;
+    }
+  } catch {
+    return;
+  }
+
+  if (!this.locationPromptShownOnce) {
+    alert('Please activate location for best map accuracy. The map will continue with cached data while waiting.');
+    this.locationPromptShownOnce = true;
+  }
+
+  await this.waitMs(this.mapLocationActivationGraceMs);
+}
+
+private async getInitialCoordinatesWithTimeout(timeoutMs: number = 4500): Promise<{ latitude: number; longitude: number } | null> {
+  try {
+    const coordinates = await Promise.race<
+      { latitude: number; longitude: number } | null
+    >([
+      this.getCurrentCoordinates(),
+      this.waitMs(timeoutMs).then(() => null)
+    ]);
+    return coordinates;
+  } catch {
+    return null;
+  }
+}
+
+private renderLocalMarkerCacheImmediately(): void {
+  this.officeLocationMarkerData = this.loadOfficeMarkerDataFromLocalStorage();
+  this.renderStoredOfficeLocationMarkers();
+  this.setMapBootstrapStatus(`Loaded ${this.officeLocationMarkerData.length} local marker(s).`, undefined, 'success');
+}
+
+private async probeOnlineAfterStaggerWindow(): Promise<boolean> {
+  this.setMapBootstrapStatus('Checking network availability...', undefined, 'loading');
+  await this.waitMs(this.mapOnlineProbeDelayMs);
+
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+    return false;
+  }
+
+  try {
+    const probeUrl = this.offlineMapTileService.buildTileUrl(this.osmTileTemplate, 1, 1, 1, this.offlineTileSubdomains);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), this.mapOnlineProbeTimeoutMs);
+    try {
+      await fetch(probeUrl, {
+        method: 'GET',
+        mode: 'no-cors',
+        cache: 'no-store',
+        signal: controller.signal
+      });
+    } finally {
+      clearTimeout(timer);
+    }
+
+    return true;
+  } catch {
+    return typeof navigator !== 'undefined' ? navigator.onLine !== false : false;
+  }
+}
+
+private async runStaggeredOnlineBootstrap(bootstrapId: number): Promise<void> {
+  const isOnline = await this.probeOnlineAfterStaggerWindow();
+  if (bootstrapId !== this.mapBootstrapSequence) {
+    return;
+  }
+
+  this.connectivityOnline = isOnline;
+  this.applyEffectiveTileLayerMode();
+
+  if (!isOnline) {
+    this.offlineDownloadStatusText = 'Offline detected. Using locally stored tiles and markers.';
+    this.setMapBootstrapStatus('Offline mode active. Using local map cache.', 2600, 'offline');
+    return;
+  }
+
+  this.offlineDownloadStatusText = 'Online detected. Refreshing markers shortly...';
+  this.setMapBootstrapStatus('Online detected. Refreshing map markers...', undefined, 'loading');
+  await this.waitMs(this.mapOnlineMarkerRefreshDelayMs);
+  if (bootstrapId !== this.mapBootstrapSequence) {
+    return;
+  }
+
+  try {
+    await this.fetchOfficeLocationMarkerData();
+    if (bootstrapId !== this.mapBootstrapSequence) {
+      return;
+    }
+    this.renderStoredOfficeLocationMarkers();
+    this.offlineDownloadStatusText = 'Map refreshed from online source after stagger window.';
+    this.setMapBootstrapStatus('Online markers loaded.', 2200, 'success');
+  } catch (error) {
+    console.warn('[ChatPage.mapBootstrap] Online refresh failed after stagger window; keeping local markers.', error);
+    this.offlineDownloadStatusText = 'Online refresh failed. Using local marker cache.';
+    this.setMapBootstrapStatus('Online refresh failed. Staying on local cache.', 2600, 'warning');
+  }
 }
 
 
@@ -1451,6 +1748,133 @@ onMsgBubbleTap(message: Message): void {
     return earthRadiusMeters * arc;
   }
 
+  /**
+   * Load user location from localStorage and start background fetching of markers.
+   * Checks if user has location enabled and fetches markers within radius bounds.
+   */
+  private loadUserLocationAndStartBackgroundFetch(userId: string): void {
+    try {
+      const locationKey = `user_sidebar_location_${userId}`;
+      const storedLocation = localStorage.getItem(locationKey);
+
+      if (!storedLocation) {
+        console.log('[ChatPage.backgroundFetch] No stored user location found.', { locationKey });
+        return;
+      }
+
+      this.currentUserLocation = JSON.parse(storedLocation);
+      console.log('[ChatPage.backgroundFetch] User location loaded from storage:', {
+        latitude: this.currentUserLocation?.latitude,
+        longitude: this.currentUserLocation?.longitude
+      });
+
+      // Start background fetch interval
+      this.startBackgroundMarkerFetch();
+    } catch (error) {
+      console.error('[ChatPage.backgroundFetch] Failed to load user location:', error);
+    }
+  }
+
+  /**
+   * Start a background interval to fetch markers within the user's location radius.
+   * Runs every 10 seconds if user location is available.
+   * Automatically stops when location is not available.
+   */
+  private startBackgroundMarkerFetch(): void {
+    if (this.isBackgroundLocationFetchActive) {
+      console.log('[ChatPage.backgroundFetch] Background fetch already active.');
+      return;
+    }
+
+    if (!this.currentUserLocation) {
+      console.warn('[ChatPage.backgroundFetch] Cannot start background fetch without user location.');
+      return;
+    }
+
+    this.isBackgroundLocationFetchActive = true;
+    console.log('[ChatPage.backgroundFetch] Starting background marker fetch interval (every 10 seconds)');
+
+    this.backgroundLocationFetchInterval = setInterval(async () => {
+      if (!this.currentUserLocation) {
+        console.log('[ChatPage.backgroundFetch] User location no longer available. Stopping interval.');
+        this.stopBackgroundMarkerFetch();
+        return;
+      }
+
+      try {
+        await this.fetchMarkersWithinUserLocationRadius();
+      } catch (error) {
+        console.error('[ChatPage.backgroundFetch] Error fetching markers in background:', error);
+      }
+    }, 10000); // Fetch every 10 seconds
+  }
+
+  /**
+   * Stop the background marker fetch interval.
+   */
+  private stopBackgroundMarkerFetch(): void {
+    if (this.backgroundLocationFetchInterval) {
+      clearInterval(this.backgroundLocationFetchInterval);
+      this.backgroundLocationFetchInterval = undefined;
+      this.isBackgroundLocationFetchActive = false;
+      console.log('[ChatPage.backgroundFetch] Background marker fetch stopped.');
+    }
+  }
+
+  /**
+   * Fetch markers from Firestore that fall within the bounding box around the user's current location.
+   * Calculates top, bottom, left, right boundaries and filters markers based on these bounds.
+   * Results are stored in officeLocationMarkerData array.
+   */
+  private async fetchMarkersWithinUserLocationRadius(): Promise<void> {
+    if (!this.currentUserLocation) {
+      console.warn('[ChatPage.fetchMarkersWithinUserLocationRadius] No user location available.');
+      return;
+    }
+
+    const { latitude, longitude } = this.currentUserLocation;
+    console.log('[ChatPage.fetchMarkersWithinUserLocationRadius] Fetching markers for center position:', {
+      latitude,
+      longitude,
+      radiusMeters: this.markerSquareHalfSideMeters
+    });
+
+    try {
+      // Fetch all markers from Firestore
+      await this.fetchOfficeLocationMarkerData();
+
+      // Calculate bounding box around user location
+      const bounds = this.buildRadiusSquareBounds(latitude, longitude, this.markerSquareHalfSideMeters);
+
+      // Filter markers that fall within the calculated bounds
+      const markersWithinBounds = this.officeLocationMarkerData.filter((marker) => (
+        marker.latitude <= bounds.top.latitude &&
+        marker.latitude >= bounds.bottom.latitude &&
+        marker.longitude >= bounds.left.longitude &&
+        marker.longitude <= bounds.right.longitude
+      ));
+
+      console.log('[ChatPage.fetchMarkersWithinUserLocationRadius] Markers aggregated within radius bounds:', {
+        centerLatitude: latitude,
+        centerLongitude: longitude,
+        topBoundLatitude: bounds.top.latitude,
+        bottomBoundLatitude: bounds.bottom.latitude,
+        leftBoundLongitude: bounds.left.longitude,
+        rightBoundLongitude: bounds.right.longitude,
+        totalMarkersInRadius: markersWithinBounds.length,
+        totalMarkersLoaded: this.officeLocationMarkerData.length,
+        markersDetails: markersWithinBounds.map((marker) => ({
+          id: marker.id,
+          latitude: marker.latitude,
+          longitude: marker.longitude,
+          payload: marker.payload
+        }))
+      });
+    } catch (error) {
+      console.error('[ChatPage.fetchMarkersWithinUserLocationRadius] Failed to fetch markers:', error);
+    }
+  }
+
   private getOfficeMarkerUserId(marker: OfficeLocationMarkerData): string | null {
     const markerUserIdRaw = marker.payload['userId'] || marker.payload['uid'] || marker.payload['userID'];
     if (typeof markerUserIdRaw !== 'string') return null;
@@ -2074,6 +2498,9 @@ onMsgBubbleTap(message: Message): void {
 
   private destroyMapInstance(): void {
     if (!this.map) return;
+    this.mapBootstrapSequence += 1;
+    this.hideMapBootstrapStatus();
+    this.baseTileLayer = undefined;
     try {
       this.map.remove();
     } catch (error) {
@@ -2777,7 +3204,12 @@ onMsgBubbleTap(message: Message): void {
         }
       }
 
-      const coordinates = await this.getCurrentCoordinates();
+      this.mapBootstrapSequence += 1;
+      const bootstrapId = this.mapBootstrapSequence;
+      this.setMapBootstrapStatus('Preparing map...', undefined, 'loading');
+
+      await this.maybePromptForLocationActivation();
+      const coordinates = await this.getInitialCoordinatesWithTimeout();
       console.log('[ChatPage.initMap] Coordinates resolved for map:', coordinates);
       const center: [number, number] = coordinates
         ? [coordinates.latitude, coordinates.longitude]
@@ -2787,10 +3219,12 @@ onMsgBubbleTap(message: Message): void {
         console.log('[ChatPage.initMap] Map already initialized. Updating view and marker.');
         // already initialized: invalidate size in case container changed
         this.map.invalidateSize();
+        this.renderLocalMarkerCacheImmediately();
+        this.applyEffectiveTileLayerMode();
         this.bindMapTapCapture();
         this.map.setView(center, 15);
         await this.markUserLocation(this.map, coordinates);
-        await this.loadAndRenderOfficeLocationMarkers();
+        void this.runStaggeredOnlineBootstrap(bootstrapId);
         return;
       }
 
@@ -2799,16 +3233,22 @@ onMsgBubbleTap(message: Message): void {
       // place developer/test markers after map creation
       try { this.placeTestMarkers(); } catch (err) { console.error('[ChatPage.initMap] placeTestMarkers error', err); }
 
-      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      this.baseTileLayer = new OfflineLeafletTileLayer(this.osmTileTemplate, this.offlineMapTileService, {
         maxZoom: 19,
-        attribution: '&copy; OpenStreetMap contributors'
-      }).addTo(this.map);
+        attribution: '&copy; OpenStreetMap contributors',
+        subdomains: this.offlineTileSubdomains,
+        crossOrigin: true,
+        offlineMode: this.getEffectiveOfflineMode()
+      });
+      this.baseTileLayer.addTo(this.map);
       console.log('[ChatPage.initMap] Tile layer added.');
 
       this.bindMapTapCapture();
 
+      // Load marker cache first so map content appears immediately.
+      this.renderLocalMarkerCacheImmediately();
       await this.markUserLocation(this.map, coordinates);
-      await this.loadAndRenderOfficeLocationMarkers();
+      void this.runStaggeredOnlineBootstrap(bootstrapId);
       console.log('[ChatPage.initMap] User location marker handling complete.');
     } catch (err) {
       console.warn('[ChatPage.initMap] Initialization failed', err);
@@ -2904,6 +3344,7 @@ private readonly userLocationIcon = L.icon({
       this.markerSelectionOverlayElement = undefined;
     }
     this.dismissMapTapOverlay();
+    this.hideMapBootstrapStatus();
   }
 
   public editProfile() {
@@ -2911,6 +3352,8 @@ private readonly userLocationIcon = L.icon({
   }
 
   ngOnDestroy(): void {
+    // Clean up background fetch
+    this.stopBackgroundMarkerFetch();
     // Clean up chat subscription
     try { this.chatsSub?.unsubscribe(); } catch {}
     this.chatsSub = undefined;
@@ -2930,9 +3373,14 @@ private readonly userLocationIcon = L.icon({
       this.markerSelectionOverlayElement = undefined;
     }
     this.dismissMapTapOverlay();
+    this.hideMapBootstrapStatus();
     if (this.mapResizeTimeoutId) {
       clearTimeout(this.mapResizeTimeoutId);
       this.mapResizeTimeoutId = undefined;
+    }
+    if (this.mapBootstrapStatusHideTimeoutId) {
+      clearTimeout(this.mapBootstrapStatusHideTimeoutId);
+      this.mapBootstrapStatusHideTimeoutId = undefined;
     }
     // Stop periodic map refresh timer
     this.stopMapRefreshTimer();

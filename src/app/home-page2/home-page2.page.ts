@@ -51,6 +51,10 @@ export class HomePage2Page implements OnInit, OnDestroy {
   cacheWarmStatusText: string = 'Not synced';
   syncStatusState: 'idle' | 'syncing' | 'completed' | 'error' = 'idle';
   private officeLocationMarkerData: OfficeLocationMarkerData[] = [];
+  isLocationAvailable: boolean = false;
+  isLocationDataFetched: boolean = false;
+  private locationCheckInterval: any = null;
+  private hasPromptedForLocationOnEnter: boolean = false;
 
   /** Inject auth, router, and image storage services for navigation and data. */
   constructor(private formBuilder: FormBuilder, private router: Router, private authService: AuthService, private navCtrl: NavController, private auth3: Auth3Service, private imageStorage: ImageStorageService, private platform: Platform, private firestore: Firestore, private userPrefetchCache: UserPrefetchCacheService) {
@@ -307,6 +311,10 @@ private async initialize(): Promise<void> {
     if (uid) {
       this.loadPersistedSyncStatus(uid);
       this.loadPersistedLocation(uid);
+      // Prompt for location on first enter
+      this.promptForLocationOnFirstEnter();
+      // Start periodic location check
+      this.startLocationCheckInterval();
     }
     // Refresh office location markers from Firestore on page entry
     this.fetchOfficeLocationMarkerData().catch((err) => {
@@ -676,6 +684,7 @@ private async initialize(): Promise<void> {
    * so as to keep logic for exiting the app inside home-page and not affect other pages*/
   ionViewWillLeave() {
     this.removeBackButtonHandler();
+    this.stopLocationCheckInterval();
   }
 
   /** Load sessions from ImageStorageService and compute image counts. */
@@ -1461,7 +1470,72 @@ private async initialize(): Promise<void> {
   }
 
 
+  /**
+   * Prompt user the first time they enter the page to enable location.
+   * Shows a confirmation prompt asking to enable location for optimal app use.
+   */
+  private promptForLocationOnFirstEnter(): void {
+    // Only prompt once per session
+    if (this.hasPromptedForLocationOnEnter) {
+      return;
+    }
+    this.hasPromptedForLocationOnEnter = true;
+
+    const result = confirm('Enable location for optimum use of the application?\n\nThis allows us to show your current location and provide location-based features.');
+    if (result) {
+      console.log('[HomePage2.promptForLocationOnFirstEnter] User accepted location prompt');
+      this.isLocationAvailable = true;
+      // Immediately try to get location
+      this.getAndStoreCurrentLocation().catch((err) => {
+        console.warn('[HomePage2.promptForLocationOnFirstEnter] Failed to get location:', err);
+      });
+    } else {
+      console.log('[HomePage2.promptForLocationOnFirstEnter] User declined location prompt');
+      this.isLocationAvailable = false;
+    }
+  }
+
+  /**
+   * Start a periodic interval to check and fetch location every 5 seconds.
+   * Updates isLocationDataFetched status based on whether location was successfully obtained.
+   */
+  private startLocationCheckInterval(): void {
+    // Don't start multiple intervals
+    if (this.locationCheckInterval !== null) {
+      return;
+    }
+
+    console.log('[HomePage2.startLocationCheckInterval] Starting location check interval (every 5 seconds)');
+    this.locationCheckInterval = setInterval(async () => {
+      if (this.isLocationAvailable && !this.isLocationDataFetched) {
+        try {
+          await this.getAndStoreCurrentLocation();
+          // Check if location was successfully stored
+          if (this.currentLocation) {
+            this.isLocationDataFetched = true;
+            console.log('[HomePage2.startLocationCheckInterval] Location data fetched and stored successfully');
+          }
+        } catch (error) {
+          console.warn('[HomePage2.startLocationCheckInterval] Error fetching location:', error);
+        }
+      }
+    }, 5000); // Check every 5 seconds
+  }
+
+  /**
+   * Stop the periodic location check interval when leaving the page.
+   */
+  private stopLocationCheckInterval(): void {
+    if (this.locationCheckInterval !== null) {
+      clearInterval(this.locationCheckInterval);
+      this.locationCheckInterval = null;
+      console.log('[HomePage2.stopLocationCheckInterval] Location check interval stopped');
+    }
+  }
+
   ngOnDestroy(): void {
+    // Clean up location check interval
+    this.stopLocationCheckInterval();
     this.removeBackButtonHandler();
     this.removeLocationOverlay();
   }
