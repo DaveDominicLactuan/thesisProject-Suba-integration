@@ -72,6 +72,8 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
   sessionIsPristine: boolean = false; // Tracks if current session has had images added during this visit
   imagesUploadedThisSession: number = 0; // Track number of images uploaded during this page visit
   totalBoundingBoxesCreated: number = 0; // Counter for cumulative bounding boxes across all images
+  // Process Window state
+  isProcessWindowOpen: boolean = false;
   private backButtonSub: any; // hardware back handler
 
   get countdown() {
@@ -725,6 +727,20 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
 
   filterThumbnails(type: string) {
     //Optional: filtering logic by image origin
+  }
+
+  /**
+   * Open the Process Window modal showing Photos Taken, Photos Processed, and Cracks Detected
+   */
+  openProcessWindow() {
+    this.isProcessWindowOpen = true;
+  }
+
+  /**
+   * Close the Process Window modal
+   */
+  closeProcessWindow() {
+    this.isProcessWindowOpen = false;
   }
 
   goToFeedBackPage() {

@@ -29,6 +29,7 @@ error = '';
 engineeringID: string = '';
 userID: string = '';
 fullName: string = '';
+isLoggingIn: boolean = false;
 
 signupForm: FormGroup;
 
@@ -45,6 +46,7 @@ signupForm: FormGroup;
    * Perform login via Auth3Service, then navigate to Home on success.
    */
   async login() {
+    this.isLoggingIn = true;
     this.error = '';
     try {
       //tries login with email and password
@@ -104,6 +106,8 @@ signupForm: FormGroup;
 
     } catch (err: any) {
       this.error = err.message || 'Login failed';
+    } finally {
+      this.isLoggingIn = false;
     }
   }
 
@@ -135,8 +139,12 @@ togglePasswordVisibility() {
   this.showPassword = !this.showPassword;
 }
 
+/** Toggle spinner on/off for testing and styling purposes. */
+toggleSpinner() {
+  this.isLoggingIn = !this.isLoggingIn;
+}
 
-  /** Lifecycle: ready hook (no-op). */
+
   ngOnInit() {
   }
 

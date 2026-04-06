@@ -839,8 +839,16 @@ toggleOfflineMode(): void {
     : 'Offline mode disabled. Online fallback enabled.';
 }
 
+private isNativeDevice(): boolean {
+  return this.platform.is('android') || this.platform.is('ios');
+}
+
   async downloadVisibleMapAreaOffline(): Promise<void> {
+    console.log('[ChatPage.download] Function called');
+    console.log('[ChatPage.download] Platform:', this.isNativeDevice() ? 'NATIVE (Android/iOS)' : 'WEB/BROWSER');
+    
     if (!this.map) {
+      console.error('[ChatPage.download] Map not ready');
       alert('Map is not ready yet. Open the Location tab and try again.');
       return;
     }
@@ -848,17 +856,32 @@ toggleOfflineMode(): void {
     const minZoom = Math.floor(this.offlineMinZoom);
     const maxZoom = Math.floor(this.offlineMaxZoom);
     if (maxZoom < minZoom) {
+      console.error('[ChatPage.download] Invalid zoom range:', {minZoom, maxZoom});
       alert('Invalid zoom range: max zoom must be greater than or equal to min zoom.');
       return;
     }
 
     const bounds = this.map.getBounds();
+    console.log('[ChatPage.download] Map bounds:', bounds);
+    
     this.offlineDownloadInProgress = true;
     this.offlineDownloadProgressPct = 0;
     this.offlineDownloadStatusText = 'Preparing offline tile download...';
+    console.log('[ChatPage.download] Starting offline download with settings:', {
+      minZoom, maxZoom, maxTiles: this.offlineMaxTilesPerDownload
+    });
+
+    let lastProgressTime = Date.now();
+    let lastProgressPercentage = 0;
+    const progressCheckIntervalMs = 5000; // Check for progress every 5 seconds
+    const maxNoProgressTimeMs = 30000; // Timeout if no progress for 30 seconds
+    const isNative = this.isNativeDevice();
 
     try {
-      const summary = await this.offlineMapTileService.downloadTilesForBounds({
+      console.log('[ChatPage.download] Calling service.downloadTilesForBounds...');
+      
+      // Create a promise that races the download against a timeout
+      const downloadPromise = this.offlineMapTileService.downloadTilesForBounds({
         bounds,
         minZoom,
         maxZoom,
@@ -868,24 +891,96 @@ toggleOfflineMode(): void {
         concurrency: 6,
         areaName: (this.offlineAreaName || '').trim() || `Area ${new Date().toLocaleString()}`,
         onProgress: (progress) => {
-          // Ensure progress updates trigger Angular change detection
-          this.ngZone.run(() => {
-            this.offlineDownloadProgressPct = progress.percentage;
-            this.offlineDownloadStatusText = `Downloading tiles: ${progress.completed}/${progress.total} (${progress.percentage}%)`;
-          });
+          try {
+            const now = Date.now();
+            lastProgressTime = now;
+            lastProgressPercentage = progress.percentage;
+            
+            console.log('[ChatPage.progress] Callback received:', {
+              completed: progress.completed,
+              total: progress.total,
+              percentage: progress.percentage,
+              timeSinceLastProgress: 0
+            });
+            
+            // Ensure progress updates trigger Angular change detection
+            this.ngZone.run(() => {
+              this.offlineDownloadProgressPct = progress.percentage;
+              this.offlineDownloadStatusText = `Downloading tiles: ${progress.completed}/${progress.total} (${progress.percentage}%)`;
+              console.log('[ChatPage.progress] UI updated:', this.offlineDownloadStatusText);
+            });
+          } catch (callbackError) {
+            console.error('[ChatPage.progress] Error in progress callback:', callbackError);
+          }
         }
       });
 
+      // Monitor for stalled progress
+      const progressMonitor = setInterval(() => {
+        const timeSinceLastProgress = Date.now() - lastProgressTime;
+        console.log('[ChatPage.download] Progress check - timeSinceLastProgress:', timeSinceLastProgress, 'lastPercentage:', lastProgressPercentage);
+        
+        if (timeSinceLastProgress > maxNoProgressTimeMs && lastProgressPercentage < 100) {
+          console.warn('[ChatPage.download] Download appears stalled - no progress for', timeSinceLastProgress, 'ms');
+          clearInterval(progressMonitor);
+          // The race condition will handle this
+        }
+      }, progressCheckIntervalMs);
+
+      // Device-aware timeout calculation
+      // On native devices, operations are slower, so be more generous with timeouts
+      // NOTE: Storage now uses Web Cache API (instant), so timeout is primarily for network fetches
+      const estimatedTileCount = Math.min(this.offlineMaxTilesPerDownload, 200);
+      const baseTimeoutPerTile = isNative ? 300 : 200; // 300ms per tile on device (network only now), 200ms on web
+      const minTimeout = isNative ? 60000 : 45000; // 60s min on device, 45s on web
+      const timeoutMs = Math.max(minTimeout, estimatedTileCount * baseTimeoutPerTile);
+      
+      console.log('[ChatPage.download] Device-aware timeout settings (Cache API enabled):', {
+        isNative,
+        estimatedTileCount,
+        baseTimeoutPerTile,
+        minTimeout,
+        calculatedTimeoutMs: timeoutMs
+      });
+
+      const summary = await Promise.race([
+        downloadPromise,
+        new Promise<any>((_, reject) => {
+          setTimeout(() => {
+            clearInterval(progressMonitor);
+            const message = `Download timeout after ${timeoutMs}ms. Completed: ${lastProgressPercentage}%.${
+              isNative ? ' On device, try: 1) Reduce Max Tiles to 30-50, 2) Use lower zoom levels (10-15), 3) Check network connection.' 
+              : ' Check your network connection.'
+            }`;
+            reject(new Error(message));
+          }, timeoutMs);
+        })
+      ]);
+
+      clearInterval(progressMonitor);
+      
+      console.log('[ChatPage.download] Download completed with summary:', summary);
       this.offlineDownloadStatusText = `Offline tiles ready. Downloaded: ${summary.downloaded}, cached: ${summary.cached}, failed: ${summary.failed}.`;
       this.refreshOfflineAreaList();
       this.baseTileLayer?.redraw();
     } catch (error) {
-      const message = (error as { message?: string } | null)?.message || 'Offline tile download failed.';
-      this.offlineDownloadStatusText = message;
-      console.error('[ChatPage] Offline tile download error:', error);
-      alert(message);
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      const displayMessage = errorMsg.includes('timeout') 
+        ? `Download timeout. Try: 1) Lower zoom levels, 2) Reduce Max Tiles to 30, 3) Ensure good network connection. Details: ${errorMsg}`
+        : `Download failed: ${errorMsg}`;
+      
+      this.offlineDownloadStatusText = displayMessage;
+      console.error('[ChatPage.download] Download error:', error);
+      console.error('[ChatPage.download] Error details:', {
+        name: (error as any)?.name,
+        message: (error as any)?.message,
+        stack: (error as any)?.stack,
+        timeSinceStart: Date.now() - lastProgressTime
+      });
+      alert(displayMessage);
     } finally {
       this.offlineDownloadInProgress = false;
+      console.log('[ChatPage.download] Download finished. offlineDownloadInProgress set to false.');
     }
   }
 
@@ -1004,9 +1099,17 @@ private async getInitialCoordinatesWithTimeout(timeoutMs: number = 4500): Promis
 }
 
 private renderLocalMarkerCacheImmediately(): void {
+  // Load markers from localStorage synchronously - NO DELAYS
   this.officeLocationMarkerData = this.loadOfficeMarkerDataFromLocalStorage();
   this.renderStoredOfficeLocationMarkers();
-  this.setMapBootstrapStatus(`Loaded ${this.officeLocationMarkerData.length} local marker(s).`, undefined, 'success');
+  
+  const markerCount = this.officeLocationMarkerData.length;
+  if (markerCount > 0) {
+    this.setMapBootstrapStatus(`Loaded ${markerCount} local marker(s).`, undefined, 'success');
+    console.log('[ChatPage.markerCache] Local markers rendered immediately without waiting for internet.');
+  } else {
+    this.setMapBootstrapStatus('Loading markers from offline cache...', undefined, 'loading');
+  }
 }
 
 private async probeOnlineAfterStaggerWindow(): Promise<boolean> {
@@ -1039,6 +1142,9 @@ private async probeOnlineAfterStaggerWindow(): Promise<boolean> {
 }
 
 private async runStaggeredOnlineBootstrap(bootstrapId: number): Promise<void> {
+  // IMPORTANT: Local markers are ALREADY rendered at this point
+  // This method only handles online refresh in the background
+  
   const isOnline = await this.probeOnlineAfterStaggerWindow();
   if (bootstrapId !== this.mapBootstrapSequence) {
     return;
@@ -1050,28 +1156,61 @@ private async runStaggeredOnlineBootstrap(bootstrapId: number): Promise<void> {
   if (!isOnline) {
     this.offlineDownloadStatusText = 'Offline detected. Using locally stored tiles and markers.';
     this.setMapBootstrapStatus('Offline mode active. Using local map cache.', 2600, 'offline');
+    console.log('[ChatPage.mapBootstrap] Offline mode - local markers remain visible.');
     return;
   }
 
+  // Online detected: refresh markers in the background WITHOUT blocking the map
   this.offlineDownloadStatusText = 'Online detected. Refreshing markers shortly...';
   this.setMapBootstrapStatus('Online detected. Refreshing map markers...', undefined, 'loading');
+  
+  // Short delay before checking for fresh markers (let network stabilize)
   await this.waitMs(this.mapOnlineMarkerRefreshDelayMs);
   if (bootstrapId !== this.mapBootstrapSequence) {
     return;
   }
 
+  // Refresh markers in background - don't block UI
+  this.refreshMarkersFromOnlineInBackground(bootstrapId).catch((error) => {
+    console.warn('[ChatPage.mapBootstrap] Unexpected error in background refresh:', error);
+  });
+}
+
+private async refreshMarkersFromOnlineInBackground(bootstrapId: number): Promise<void> {
+  // This runs AFTER local markers are already displayed
+  // Refresh marker data from Firestore if online
+  console.log('[ChatPage.markerRefresh] Starting background marker refresh from Firestore');
+  
   try {
+    const previousMarkersCount = this.officeLocationMarkerData.length;
+    
+    // Fetch fresh markers from Firestore
     await this.fetchOfficeLocationMarkerData();
+    
+    // Verify the bootstrap is still current (map wasn't closed/recreated)
     if (bootstrapId !== this.mapBootstrapSequence) {
+      console.log('[ChatPage.markerRefresh] Bootstrap ID mismatch - skipping UI update due to map recreation.');
       return;
     }
+    
+    // Re-render markers on the map with fresh data
     this.renderStoredOfficeLocationMarkers();
-    this.offlineDownloadStatusText = 'Map refreshed from online source after stagger window.';
-    this.setMapBootstrapStatus('Online markers loaded.', 2200, 'success');
+    
+    const newMarkersCount = this.officeLocationMarkerData.length;
+    const markerUpdate = newMarkersCount === previousMarkersCount 
+      ? `${newMarkersCount} markers (unchanged)` 
+      : `${previousMarkersCount} → ${newMarkersCount} markers (updated)`;
+    
+    this.offlineDownloadStatusText = `Markers refreshed: ${markerUpdate}`;
+    this.setMapBootstrapStatus(`Online markers loaded: ${markerUpdate}`, 2200, 'success');
+    console.log('[ChatPage.markerRefresh] Background marker refresh completed successfully.', {
+      previousCount: previousMarkersCount,
+      newCount: newMarkersCount
+    });
   } catch (error) {
-    console.warn('[ChatPage.mapBootstrap] Online refresh failed after stagger window; keeping local markers.', error);
-    this.offlineDownloadStatusText = 'Online refresh failed. Using local marker cache.';
-    this.setMapBootstrapStatus('Online refresh failed. Staying on local cache.', 2600, 'warning');
+    console.warn('[ChatPage.markerRefresh] Background refresh failed - keeping locally cached markers.', error);
+    this.offlineDownloadStatusText = 'Online refresh failed. Keeping local marker cache.';
+    this.setMapBootstrapStatus('Online refresh failed. Using local cache.', 2600, 'warning');
   }
 }
 
@@ -3139,6 +3278,10 @@ onMsgBubbleTap(message: Message): void {
 
     this.mapRefreshTimerId = setInterval(async () => {
       console.log('[ChatPage.mapRefresh] Periodic map refresh triggered.');
+      if (this.activeTab !== 'location' || !this.map) {
+        return; // Don't refresh if user is not on location tab or map is not initialized
+      }
+
       try {
         // Fetch latest marker data from Firestore
         await this.fetchOfficeLocationMarkerData();
@@ -3146,7 +3289,7 @@ onMsgBubbleTap(message: Message): void {
         this.saveOfficeMarkerDataToLocalStorage();
         // Re-render on the map
         this.renderStoredOfficeLocationMarkers();
-        console.log('[ChatPage.mapRefresh] Map refresh completed successfully.');
+        console.log('[ChatPage.mapRefresh] Periodic map refresh completed successfully.');
       } catch (error) {
         console.error('[ChatPage.mapRefresh] Error during periodic map refresh:', error);
       }
@@ -3216,14 +3359,16 @@ onMsgBubbleTap(message: Message): void {
         : [this.fallbackCoordinates.latitude, this.fallbackCoordinates.longitude];
 
       if (this.map) {
-        console.log('[ChatPage.initMap] Map already initialized. Updating view and marker.');
+        console.log('[ChatPage.initMap] Map already initialized. Updating view and markers.');
         // already initialized: invalidate size in case container changed
         this.map.invalidateSize();
+        // IMPORTANT: Render local markers immediately WITHOUT waiting for anything
         this.renderLocalMarkerCacheImmediately();
         this.applyEffectiveTileLayerMode();
         this.bindMapTapCapture();
         this.map.setView(center, 15);
         await this.markUserLocation(this.map, coordinates);
+        // Start background online refresh (won't block map display)
         void this.runStaggeredOnlineBootstrap(bootstrapId);
         return;
       }
@@ -3245,11 +3390,16 @@ onMsgBubbleTap(message: Message): void {
 
       this.bindMapTapCapture();
 
-      // Load marker cache first so map content appears immediately.
+      // CRITICAL: Load and render local markers SYNCHRONOUSLY and immediately - this happens BEFORE internet checks
+      console.log('[ChatPage.initMap] Rendering local marker cache immediately (before any internet checks).');
       this.renderLocalMarkerCacheImmediately();
+      
       await this.markUserLocation(this.map, coordinates);
+      
+      // Start background online refresh (this won't block marker display since local markers are already rendered)
       void this.runStaggeredOnlineBootstrap(bootstrapId);
-      console.log('[ChatPage.initMap] User location marker handling complete.');
+      
+      console.log('[ChatPage.initMap] Map initialization complete with local markers visible.');
     } catch (err) {
       console.warn('[ChatPage.initMap] Initialization failed', err);
     }

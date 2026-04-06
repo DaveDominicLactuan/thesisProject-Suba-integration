@@ -18,6 +18,20 @@
   <button class="back-btn" type="button" (click)="onBack()">
     <img src="assets/back.png" alt="Back" class="back-icon" />
   </button>
+  
+  <!-- Spinner overlay during login -->
+  <div *ngIf="isLoggingIn" class="spinner-container-circle">
+    <svg class="circle-spinner" width="100" height="100" viewBox="0 0 100 100">
+      <defs>
+        <linearGradient id="spinnerGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" style="stop-color:#ff512f;stop-opacity:1" />
+          <stop offset="100%" style="stop-color:#f09819;stop-opacity:1" />
+        </linearGradient>
+      </defs>
+      <circle cx="50" cy="50" r="45" class="circle-spinner-path" />
+    </svg>
+  </div>
+
   <h2 class="login-title">Welcome back Engineer!</h2>
   <p class="login-subtitle">
     Hello, you must login first to be able to use the application and enjoy all the features in Calashop
@@ -62,6 +76,11 @@
   </div>
 
   <button class="sign-in-button" (click)="login()">Sign in</button>
+
+  <!-- Spinner toggle button for testing/styling -->
+  <!-- <button class="spinner-toggle-button" (click)="toggleSpinner()">
+    {{ isLoggingIn ? 'Stop Spinner' : 'Test Spinner' }}
+  </button> -->
   <!-- <button class="sign-in-button" (click)="goToHomePage()">HomePage</button>
   <button class="sign-in-button" (click)="goToHomePage2()">HomePage2</button> -->
 </div>

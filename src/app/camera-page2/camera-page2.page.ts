@@ -62,6 +62,8 @@ export class CameraPage2Page implements AfterViewInit {
   private _overlayTitleEl?: HTMLDivElement;
   private _overlayUpdateThumbs?: () => void;
   lastPrediction: { type: string; shape: string; severity: string } | null = null;
+  // Process Window state
+  isProcessWindowOpen: boolean = false;
 
   scaledBoxes = [];
   // Cooldown and flash UI for capture
@@ -71,7 +73,7 @@ export class CameraPage2Page implements AfterViewInit {
   isLevelEnabled: boolean = false;
   isPhoneLeveled: boolean = false;
   levelRollDeg: number = 0;
-  private levelThresholdDeg: number = 2.5;
+  private levelThresholdDeg: number = 1.0;
   flashDurationMs: number = 120; // visual flash length
   cooldownMs: number = 500; // minimum time between pictures
   private backButtonSub: any; // hardware back handler
@@ -868,6 +870,20 @@ export class CameraPage2Page implements AfterViewInit {
     this.isPhoneLeveled = false;
     this.levelRollDeg = 0;
     window.removeEventListener('deviceorientation', this.orientationHandler, true);
+  }
+
+  /**
+   * Open the Process Window modal showing Photos Taken, Photos Processed, and Cracks Detected
+   */
+  openProcessWindow() {
+    this.isProcessWindowOpen = true;
+  }
+
+  /**
+   * Close the Process Window modal
+   */
+  closeProcessWindow() {
+    this.isProcessWindowOpen = false;
   }
 
   /**

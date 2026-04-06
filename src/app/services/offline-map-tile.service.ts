@@ -171,22 +171,41 @@ export class OfflineMapTileService {
   }
 
   async downloadTilesForBounds(request: TileDownloadRequest): Promise<TileDownloadSummary> {
+    console.log('[OfflineMapService.downloadTilesForBounds] METHOD CALLED');
+    console.log('[OfflineMapService.downloadTilesForBounds] Request params:', {
+      minZoom: request.minZoom,
+      maxZoom: request.maxZoom,
+      maxTiles: request.maxTiles,
+      hasOnProgress: !!request.onProgress
+    });
+
     const minZoom = Math.floor(request.minZoom);
     const maxZoom = Math.floor(request.maxZoom);
     if (!Number.isFinite(minZoom) || !Number.isFinite(maxZoom) || maxZoom < minZoom) {
       throw new Error('Invalid zoom range.');
     }
 
-    const tileList = this.listTileCoordinatesForBounds(
-      request.bounds,
-      minZoom,
-      maxZoom,
-      request.maxTiles
-    );
+    console.log('[OfflineMapService.downloadTilesForBounds] Calling listTileCoordinatesForBounds...');
+    let tileList: TileCoordinate[] = [];
+    try {
+      tileList = this.listTileCoordinatesForBounds(
+        request.bounds,
+        minZoom,
+        maxZoom,
+        request.maxTiles
+      );
+      console.log('[OfflineMapService.downloadTilesForBounds] Got tile list:', tileList.length, 'tiles');
+    } catch (error) {
+      console.error('[OfflineMapService.downloadTilesForBounds] Error listing tiles:', error);
+      throw error;
+    }
 
     if (tileList.length === 0) {
       return { total: 0, downloaded: 0, cached: 0, failed: 0 };
     }
+
+    console.log(`[OfflineMapService] Starting download of ${tileList.length} tiles on ${this.isNativePlatform() ? 'NATIVE' : 'WEB'} platform`);
+    const isNative = this.isNativePlatform();
 
     const progress: TileDownloadProgress = {
       total: tileList.length,
@@ -196,86 +215,203 @@ export class OfflineMapTileService {
       percentage: 0
     };
 
-    // Reduce concurrency on native platforms to prevent filesystem bottlenecks
-    let concurrency = Math.max(1, Math.min(request.concurrency ?? 6, 12));
-    if (this.isNativePlatform()) {
-      // Use only 1-2 concurrent downloads on Android/iOS to avoid blocking the main thread
-      concurrency = 1;
-    }
-    
-    const queue = [...tileList];
+    // On native: use aggressive sequential processing with timeouts
+    // On web: use concurrent for speed
+    const useSequentialProcessing = isNative;
 
-    const runWorker = async (): Promise<void> => {
-      while (queue.length > 0) {
-        const tile = queue.shift();
-        if (!tile) {
-          break;
-        }
+    try {
+      if (useSequentialProcessing) {
+        console.log('[OfflineMapService] Using SEQUENTIAL processing with timeouts for Android stability');
+        
+        for (let i = 0; i < tileList.length; i++) {
+          const tile = tileList[i];
+          const key = this.buildTileKey(tile.z, tile.x, tile.y);
+          progress.currentKey = key;
 
-        const key = this.buildTileKey(tile.z, tile.x, tile.y);
-        progress.currentKey = key;
-
-        try {
-          const alreadyCached = await this.hasTile(key);
-          if (alreadyCached) {
-            progress.cached += 1;
-          } else {
-            const tileUrl = this.buildTileUrl(
-              request.urlTemplate,
-              tile.z,
-              tile.x,
-              tile.y,
-              request.subdomains
-            );
+          try {
+            console.log(`[OfflineMapService] Processing tile ${i + 1}/${tileList.length}: ${key}`);
             
-            // Add timeout to fetch operation (15 seconds)
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 15000);
+            // On Android, SKIP the hasTile check and always fetch
+            // This avoids expensive filesystem stat operations
+            // On web, we check cache first for speed
+            let alreadyCached = false;
             
-            try {
-              const response = await fetch(tileUrl, { signal: controller.signal });
-              clearTimeout(timeoutId);
-              
-              if (!response.ok) {
-                throw new Error(`HTTP ${response.status}`);
+            if (!isNative) {
+              // Web platform: check if cached (fast)
+              try {
+                alreadyCached = await this.hasTileWithTimeout(key, 5000);
+              } catch (error) {
+                console.warn(`[OfflineMapService] hasTile check failed for ${key}`, error);
+                alreadyCached = false;
               }
-              const tileBlob = await response.blob();
-              await this.storeTileBlob(key, tileBlob);
-            } catch (fetchError) {
-              clearTimeout(timeoutId);
-              throw fetchError;
+            }
+            // On Android: alreadyCached stays false, always fetch
+
+            if (alreadyCached) {
+              progress.cached += 1;
+              progress.completed += 1;
+              console.log(`[OfflineMapService] Tile ${i + 1}/${tileList.length}: cached`);
+            } else {
+              // Fetch from network (either web or Android)
+              const tileUrl = this.buildTileUrl(
+                request.urlTemplate,
+                tile.z,
+                tile.x,
+                tile.y,
+                request.subdomains
+              );
+
+              try {
+                console.log(`[OfflineMapService] Fetching tile ${key} from network...`);
+                // Shorter timeout on device to fail fast
+                const fetchTimeoutMs = isNative ? 20000 : 30000;
+                const tileBlob = await this.fetchTileWithTimeout(tileUrl, fetchTimeoutMs);
+                console.log(`[OfflineMapService] Downloaded tile ${key}, blob size: ${tileBlob.size} bytes`);
+                
+                // Fire progress IMMEDIATELY after fetch, before storing (to show UI feedback)
+                progress.completed += 1;
+                progress.percentage = Math.round((progress.completed / progress.total) * 100);
+                try {
+                  request.onProgress?.({ ...progress });
+                  console.log(`[OfflineMapService] Progress after fetch: ${progress.completed}/${progress.total} (${progress.percentage}%)`);
+                } catch (callbackError) {
+                  console.error('[OfflineMapService] Progress callback error after fetch:', callbackError);
+                }
+
+                // Now attempt to store with aggressive timeout (Cache API is fast, so 3s is plenty)
+                console.log(`[OfflineMapService] Storing tile ${key} with 3s timeout (using Cache API)...`);
+                try {
+                  await this.storeTileBlobWithTimeout(key, tileBlob, isNative ? 3000 : 3000);
+                  console.log(`[OfflineMapService] Tile ${i + 1}/${tileList.length}: downloaded and stored successfully`);
+                } catch (storeError) {
+                  console.warn(`[OfflineMapService] Tile ${i + 1}/${tileList.length} storage failed (after fetch succeeded):`, 
+                    storeError instanceof Error ? storeError.message : String(storeError));
+                  progress.failed += 1;
+                }
+              } catch (error) {
+                progress.completed += 1;
+                progress.failed += 1;
+                console.warn(`[OfflineMapService] Tile ${i + 1}/${tileList.length} fetch failed:`, 
+                  error instanceof Error ? error.message : String(error));
+                
+                // Fire progress even on fetch failure
+                progress.percentage = Math.round((progress.completed / progress.total) * 100);
+                try {
+                  request.onProgress?.({ ...progress });
+                  console.log(`[OfflineMapService] Progress after fetch failure: ${progress.completed}/${progress.total} (${progress.percentage}%)`);
+                } catch (callbackError) {
+                  console.error('[OfflineMapService] Progress callback error after fetch failure:', callbackError);
+                }
+              }
+            }
+          } catch (error) {
+            progress.completed += 1;
+            progress.failed += 1;
+            console.error(`[OfflineMapService] Unexpected error on tile ${i + 1}:`, error);
+            
+            // Fire progress even on unexpected error
+            progress.percentage = Math.round((progress.completed / progress.total) * 100);
+            try {
+              request.onProgress?.({ ...progress });
+            } catch (callbackError) {
+              console.error('[OfflineMapService] Progress callback error after unexpected error:', callbackError);
             }
           }
-        } catch (error) {
-          progress.failed += 1;
-          console.warn(`[OfflineMapService] Failed to download tile ${progress.currentKey}:`, error);
-        } finally {
-          progress.completed += 1;
+
+          // Update progress percentage
           progress.percentage = Math.round((progress.completed / progress.total) * 100);
-          request.onProgress?.({ ...progress });
           
-          // Add small delay on native platforms to prevent thread starvation
-          if (this.isNativePlatform() && queue.length > 0) {
+          // Fire final progress callback for this tile
+          try {
+            request.onProgress?.({ ...progress });
+            console.log(`[OfflineMapService] Final progress for tile ${i + 1}: ${progress.completed}/${progress.total} (${progress.percentage}%)`);
+          } catch (callbackError) {
+            console.error('[OfflineMapService] Final progress callback error:', callbackError);
+          }
+
+          // Slightly longer delay after each tile to allow UI updates
+          if (i % 3 === 0) {
             await this.delay(50);
           }
         }
+      } else {
+        // Concurrent: for browser testing (fast but less stable on Android)
+        const concurrency = 6;
+        const queue = [...tileList];
+
+        const runWorker = async (): Promise<void> => {
+          while (queue.length > 0) {
+            const tile = queue.shift();
+            if (!tile) break;
+
+            const key = this.buildTileKey(tile.z, tile.x, tile.y);
+            progress.currentKey = key;
+
+            try {
+              const alreadyCached = await this.hasTileWithTimeout(key, 5000);
+              if (alreadyCached) {
+                progress.cached += 1;
+              } else {
+                const tileUrl = this.buildTileUrl(
+                  request.urlTemplate,
+                  tile.z,
+                  tile.x,
+                  tile.y,
+                  request.subdomains
+                );
+
+                try {
+                  const tileBlob = await this.fetchTileWithTimeout(tileUrl, 30000);
+                  await this.storeTileBlobWithRetry(key, tileBlob, 1);
+                } catch (error) {
+                  progress.failed += 1;
+                  console.warn(`[OfflineMapService] Failed to download tile ${key}:`, 
+                    error instanceof Error ? error.message : String(error));
+                }
+              }
+            } catch (error) {
+              progress.failed += 1;
+              console.error(`[OfflineMapService] Unexpected error processing tile:`, error);
+            }
+
+            progress.completed += 1;
+            progress.percentage = Math.round((progress.completed / progress.total) * 100);
+            request.onProgress?.({ ...progress });
+          }
+        };
+
+        await Promise.all(Array.from({ length: concurrency }, () => runWorker()));
       }
-    };
+    } catch (error) {
+      console.error('[OfflineMapService] Critical error during tile download:', error);
+      throw error;
+    }
 
-    await Promise.all(Array.from({ length: concurrency }, () => runWorker()));
+    // Calculate final stats
+    const downloaded = progress.total - progress.cached - progress.failed;
 
-    const downloaded = progress.completed - progress.cached - progress.failed;
-    await this.persistAreaMetadata({
-      id: this.createMetadataId(),
-      name: (request.areaName || 'Offline area').trim() || 'Offline area',
-      createdAt: new Date().toISOString(),
-      bounds: this.toBoundsObject(request.bounds),
-      minZoom,
-      maxZoom,
-      totalTiles: progress.total,
-      downloadedTiles: downloaded + progress.cached,
-      failedTiles: progress.failed,
-      tileTemplate: request.urlTemplate
+    try {
+      await this.persistAreaMetadata({
+        id: this.createMetadataId(),
+        name: (request.areaName || 'Offline area').trim() || 'Offline area',
+        createdAt: new Date().toISOString(),
+        bounds: this.toBoundsObject(request.bounds),
+        minZoom,
+        maxZoom,
+        totalTiles: progress.total,
+        downloadedTiles: downloaded + progress.cached,
+        failedTiles: progress.failed,
+        tileTemplate: request.urlTemplate
+      });
+    } catch (metaError) {
+      console.error('[OfflineMapService] Failed to persist metadata:', metaError);
+    }
+
+    console.log('[OfflineMapService] Download complete:', {
+      total: progress.total,
+      downloaded,
+      cached: progress.cached,
+      failed: progress.failed
     });
 
     return {
@@ -284,6 +420,99 @@ export class OfflineMapTileService {
       cached: progress.cached,
       failed: progress.failed
     };
+  }
+
+  private async hasTileWithTimeout(key: string, timeoutMs: number): Promise<boolean> {
+    return new Promise((resolve) => {
+      const timeoutId = setTimeout(() => {
+        console.warn(`[OfflineMapService] hasTile timeout for ${key}`);
+        resolve(false); // Assume not cached if timeout
+      }, timeoutMs);
+
+      this.hasTile(key).then((result) => {
+        clearTimeout(timeoutId);
+        resolve(result);
+      }).catch((error) => {
+        clearTimeout(timeoutId);
+        console.warn(`[OfflineMapService] hasTile error for ${key}:`, error);
+        resolve(false);
+      });
+    });
+  }
+
+  private async fetchTileWithTimeout(url: string, timeoutMs: number): Promise<Blob> {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+    try {
+      const response = await fetch(url, { signal: controller.signal });
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+
+      return await response.blob();
+    } catch (error) {
+      clearTimeout(timeoutId);
+      throw error;
+    }
+  }
+
+  private async storeTileBlobWithRetry(key: string, blob: Blob, maxRetries: number = 1): Promise<void> {
+    let lastError: Error | null = null;
+
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      try {
+        await this.storeTileBlob(key, blob);
+        return; // Success
+      } catch (error) {
+        lastError = error as Error;
+        if (attempt < maxRetries - 1) {
+          await this.delay(100); // Wait before retry (shorter delay)
+        }
+      }
+    }
+
+    throw lastError || new Error('Failed to store tile after retries');
+  }
+
+  private async storeTileBlobWithTimeout(key: string, blob: Blob, timeoutMs: number): Promise<void> {
+    try {
+      console.log(`[OfflineMapService] storeTileBlobWithTimeout: starting with ${timeoutMs}ms timeout for ${key}`);
+      
+      const result = await Promise.race([
+        this.storeTileBlobWithRetry(key, blob, 1),
+        new Promise<void>((_, reject) => {
+          setTimeout(() => {
+            console.error(`[OfflineMapService] storeTileBlobWithTimeout: TIMEOUT after ${timeoutMs}ms for ${key}`);
+            reject(new Error(`Filesystem write timeout after ${timeoutMs}ms for tile ${key}`));
+          }, timeoutMs);
+        })
+      ]);
+      
+      console.log(`[OfflineMapService] storeTileBlobWithTimeout: successfully stored ${key}`);
+      return result;
+    } catch (error) {
+      console.error(`[OfflineMapService] storeTileBlobWithTimeout failed for ${key}:`, error);
+      throw error;
+    }
+  }
+
+  private async filesystemOperationWithTimeout<T>(
+    operation: () => Promise<T>,
+    timeoutMs: number,
+    operationName: string
+  ): Promise<T> {
+    return Promise.race([
+      operation(),
+      new Promise<T>((_, reject) =>
+        setTimeout(
+          () => reject(new Error(`${operationName} timed out after ${timeoutMs}ms`)),
+          timeoutMs
+        )
+      )
+    ]);
   }
 
   async resolveTileForDisplay(options: {
@@ -402,10 +631,14 @@ export class OfflineMapTileService {
   private async hasTile(key: string): Promise<boolean> {
     if (this.isNativePlatform()) {
       try {
-        await Filesystem.stat({
-          path: this.storagePathFromKey(key),
-          directory: Directory.Data
-        });
+        // Use timeout to prevent hanging on Android filesystem operations
+        await Promise.race([
+          Filesystem.stat({
+            path: this.storagePathFromKey(key),
+            directory: Directory.Data
+          }),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('stat timeout')), 2000))
+        ]);
         return true;
       } catch {
         return false;
@@ -422,30 +655,20 @@ export class OfflineMapTileService {
   }
 
   private async storeTileBlob(key: string, blob: Blob): Promise<void> {
-    if (this.isNativePlatform()) {
-      try {
-        const data = await this.blobToBase64(blob);
-        await Filesystem.writeFile({
-          path: this.storagePathFromKey(key),
-          directory: Directory.Data,
-          data,
-          recursive: true
-        });
-      } catch (error) {
-        console.error(`[OfflineMapService] Failed to store tile ${key}:`, error);
-        throw error;
-      }
-      return;
-    }
-
+    // DEVICE OPTIMIZATION: Use Web Cache API for ALL platforms
+    // Filesystem is too slow on Android (8-10s per tile); Cache API is instant
+    // This dramatically improves download speed on device
+    
     if (typeof caches === 'undefined') {
       console.warn('[OfflineMapService] Cache API not available on this platform');
       return;
     }
 
     try {
+      console.log(`[OfflineMapService] Caching tile ${key} (size: ${blob.size} bytes) using Cache API...`);
       const cache = await caches.open(this.cacheName);
       await cache.put(this.webCacheRequest(key), new Response(blob));
+      console.log(`[OfflineMapService] Tile ${key} cached successfully via Cache API`);
     } catch (error) {
       console.error(`[OfflineMapService] Failed to cache tile ${key}:`, error);
       throw error;
@@ -490,35 +713,21 @@ export class OfflineMapTileService {
   }
 
   private async blobToBase64(blob: Blob): Promise<string> {
-    return await new Promise<string>((resolve, reject) => {
+    // Fast, simple base64 encoding without unnecessary complexity
+    return new Promise<string>((resolve, reject) => {
       const reader = new FileReader();
-      
-      // Add timeout to prevent hanging
-      const timeoutId = setTimeout(() => {
-        reader.abort();
-        reject(new Error('Base64 encoding timed out (blob too large?)'));
-      }, 10000);
-      
-      reader.onloadend = () => {
-        clearTimeout(timeoutId);
-        const result = reader.result;
-        if (typeof result !== 'string') {
-          reject(new Error('Failed to encode tile blob as base64.'));
-          return;
-        }
-
+      reader.onload = () => {
+        const result = reader.result as string;
         const commaIndex = result.indexOf(',');
-        resolve(commaIndex >= 0 ? result.slice(commaIndex + 1) : result);
+        const base64Data = commaIndex >= 0 ? result.substring(commaIndex + 1) : result;
+        resolve(base64Data);
       };
-      reader.onerror = () => {
-        clearTimeout(timeoutId);
-        reject(reader.error || new Error('FileReader error while encoding tile.'));
-      };
+      reader.onerror = () => reject(new Error('Failed to read blob'));
       reader.readAsDataURL(blob);
     });
   }
 
   private delay(ms: number): Promise<void> {
-    return new Promise(resolve => setTimeout(resolve, ms));
+    return new Promise(resolve => setTimeout(resolve, Math.max(0, ms)));
   }
 }

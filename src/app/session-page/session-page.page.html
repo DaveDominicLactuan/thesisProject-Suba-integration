@@ -24,6 +24,13 @@
   </div>
   <ul class="menu-items scrollable-menu">
     <div class="menu-section">
+      <li class="menu-item" (click)="goToHomePage()">
+        <ion-icon name="home-outline"></ion-icon>
+        <span>Home</span>
+      </li>
+    </div>
+    <div class="menu-section">
+      <div class="menu-header">Users</div>
       <li class="menu-item">
         <ion-icon name="checkmark-circle"></ion-icon>
         <span>Availability</span>
@@ -36,29 +43,13 @@
         <ion-icon name="notifications-outline"></ion-icon>
         <span>Notifications</span>
       </li>
-       <li class="menu-item" (click)="goToHomePage()">
-        <ion-icon name="home-outline"></ion-icon>
-        <span>Home</span>
-      </li>
-      <li class="menu-item" (click)="goSessionPage()">
-        <ion-icon name="bookmark-outline"></ion-icon>
-        <span>Show Current Sessions</span>
-        <span class="sync-status-pill" [ngClass]="syncStatusState">{{ syncStatusText }}</span>
-      </li>
     </div>
-    <hr class="menu-divider" />
     <div class="menu-section">
-      <li class="menu-item">
-        <ion-icon name="folder-outline"></ion-icon>
-        <span>Files</span>
-      </li>
+      <div class="menu-header">Settings</div>
       <li class="menu-item">
         <ion-icon name="settings-outline"></ion-icon>
         <span>Settings</span>
       </li>
-    </div>
-    <hr class="menu-divider" />
-    <div class="menu-section">
       <li class="menu-item">
         <ion-icon name="person-outline"></ion-icon>
         <span>About Us</span>

@@ -1,0 +1,16 @@
+[ChatPage.download] Function called
+chat-page.page.ts:860 [ChatPage.download] Map bounds: LatLngBounds {_southWest: LatLng, _northEast: LatLng}
+chat-page.page.ts:865 [ChatPage.download] Starting offline download with settings: {minZoom: 13, maxZoom: 13, maxTiles: 800}
+chat-page.page.ts:870 [ChatPage.download] Calling service.downloadTilesForBounds...
+offline-map-tile.service.ts:174 [OfflineMapService.downloadTilesForBounds] METHOD CALLED
+offline-map-tile.service.ts:175 [OfflineMapService.downloadTilesForBounds] Request params: {minZoom: 13, maxZoom: 13, maxTiles: 800, hasOnProgress: true}
+offline-map-tile.service.ts:188 [OfflineMapService.downloadTilesForBounds] Calling listTileCoordinatesForBounds...
+offline-map-tile.service.ts:197 [OfflineMapService.downloadTilesForBounds] Got tile list: 2 tiles
+offline-map-tile.service.ts:207 [OfflineMapService] Starting download of 2 tiles on WEB platform
+chat-page.page.ts:883 [ChatPage.progress] Callback received: {completed: 1, total: 2, percentage: 50}
+chat-page.page.ts:893 [ChatPage.progress] UI updated: Downloading tiles: 1/2 (50%)
+chat-page.page.ts:883 [ChatPage.progress] Callback received: {completed: 2, total: 2, percentage: 100}
+chat-page.page.ts:893 [ChatPage.progress] UI updated: Downloading tiles: 2/2 (100%)
+offline-map-tile.service.ts:370 [OfflineMapService] Download complete: {total: 2, downloaded: 0, cached: 2, failed: 0}
+chat-page.page.ts:901 [ChatPage.download] Download completed with summary: {total: 2, downloaded: 0, cached: 2, failed: 0}
+chat-page.page.ts:917 [ChatPage.download] Download finished. offlineDownloadInProgress set to false.

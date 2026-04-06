@@ -1,3 +1,31 @@
+<!-- 📊 Process Window Modal -->
+<div *ngIf="isProcessWindowOpen" class="process-window-backdrop" (click)="closeProcessWindow()">
+  <div class="process-window-modal" (click)="$event.stopPropagation()">
+    <div class="process-window-header">
+      <h2>Process Window</h2>
+    </div>
+    <div class="process-window-content">
+      <div class="process-section-title">Photos</div>
+      <div class="process-info-row">
+        <span class="process-label">Photos Taken</span>
+        <span class="process-value">{{ photosTaken }}</span>
+      </div>
+      <div class="process-info-row">
+        <span class="process-label">Photos Processed</span>
+        <span class="process-value">{{ photosProcessed }}</span>
+      </div>
+      <div class="process-info-row">
+        <span class="process-label">Cracks Detected in Image</span>
+        <span class="process-value">{{ totalBoundingBoxesCreated }}</span>
+      </div>
+      <!-- <div class="process-notice">
+        <p><strong>Notice:</strong></p>
+        <p>The total number of photos taken shows the full number of images does not always equal the total cracks detected in image</p>
+      </div> -->
+    </div>
+  </div>
+</div>
+
 <!-- Thumbnail section (outside control-bar, above) -->
 <!-- Top spinner overlay (shows when isProcessing is true) -->
 <div *ngIf="isProcessing" class="top-spinner-overlay">
@@ -37,7 +65,7 @@
     <!-- Top section: keep existing controls here (spinner + action buttons) -->
     <div class="bottom-top-row">
       <!-- Images processed block (spinner on top, label below) -->
-      <div class="func-action" (click)="goToFeedBackPage()">
+      <div class="func-action" (click)="openProcessWindow()">
         <div class="spinner-container-rect">
           <svg *ngIf="isProcessing" class="rect-spinner" width="70" height="40">
             <rect x="2" y="2" width="66" height="36" rx="12" ry="12" class="rect-spinner-path" />

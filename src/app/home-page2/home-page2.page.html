@@ -95,10 +95,10 @@
         </ion-icon>
         <span>Location: {{ isLocationAvailable ? 'Enabled' : 'Disabled' }}</span>
       </li>
-      <li class="menu-item" *ngIf="isLocationDataFetched">
+      <!-- <li class="menu-item" *ngIf="isLocationDataFetched">
         <ion-icon name="checkmark-circle" style="color: #4CAF50;"></ion-icon>
         <span>Location Data Fetched</span>
-      </li>
+      </li> -->
       <li class="menu-item" *ngIf="!isLocationDataFetched && isLocationAvailable">
         <ion-icon name="sync" style="color: #FF9800;"></ion-icon>
         <span>Fetching Location...</span>
