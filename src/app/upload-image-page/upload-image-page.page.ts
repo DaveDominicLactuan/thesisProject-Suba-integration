@@ -44,7 +44,21 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
   extraText: string | null = null;
   isProcessing: boolean = false;
   photosTaken = 0;
-  photosProcessed = 0;
+  private _photosProcessed = 0;
+  // transient flag to show a short glow when a photo finishes processing
+  processedGlowActive: boolean = false;
+  private _processedGlowTimer?: any;
+  glowDurationMs: number = 2500;
+  get photosProcessed() {
+    return this._photosProcessed;
+  }
+  set photosProcessed(v: number) {
+    const prev = this._photosProcessed;
+    this._photosProcessed = v;
+    if (v > prev) {
+      this.triggerProcessedGlow();
+    }
+  }
   savedImage: StoredImage | null = null;
   lastPrediction: { type: string; shape: string; severity: string } | null = null;
 
@@ -322,6 +336,8 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
       //build a standard data:image/jpeg;base64,... URL the rest of the code can consume.
       if (photo && photo.base64String) {
         const dataUrl = `data:image/jpeg;base64,${photo.base64String}`;
+        const galleryFilename = `Gallery-${Date.now()}.jpg`;
+        console.log(`📸 Picked image from gallery: ${galleryFilename}` && console.log(photo)  && console.log(dataUrl));
         //call processDataUrl to run inference/store 
         //the image but race it against a 10s timeout to avoid hanging.
         try {
@@ -349,6 +365,8 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
 
   /** Helper to process a data URL (image) — runs inference and stores the image */
   async processDataUrl(dataUrl: string, filename: string) {
+    // Log the current image being processed
+    console.log(`🖼️ [UploadImagePage] Current image name is: ${filename}`);
     // Update UI
     this.imagePreview = dataUrl;
     //prepend to captured images for thumbnail scroller
@@ -718,6 +736,21 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
 
   closePreview() {
     this.imagePreview = null;
+  }
+
+  /** Briefly enable processed glow for `glowDurationMs` milliseconds */
+  private triggerProcessedGlow(durationMs?: number) {
+    const ms = typeof durationMs === 'number' ? durationMs : this.glowDurationMs;
+    this.processedGlowActive = true;
+    if (this._processedGlowTimer) {
+      clearTimeout(this._processedGlowTimer);
+    }
+    try { this.cdr.detectChanges(); } catch (e) {}
+    this._processedGlowTimer = setTimeout(() => {
+      this.processedGlowActive = false;
+      this._processedGlowTimer = undefined;
+      try { this.cdr.detectChanges(); } catch (e) {}
+    }, ms);
   }
 
   toggleCamera() {

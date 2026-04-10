@@ -356,8 +356,15 @@ export class ChatPagePage implements OnInit, OnDestroy {
   private mapTapOverlayElement?: HTMLDivElement;
   private markerSelectionSquare?: L.Rectangle;
   private markerSquareHalfSideMeters = 440;
+  
+  // Periodic service recovery checker (internet & location)
+  private serviceRecoveryCheckInterval?: ReturnType<typeof setInterval>;
+  private readonly serviceRecoveryCheckMs = 7000; // Check every 7 seconds
+  private lastInternetStatus = true;
+  private lastLocationStatus = true;
 // private markerSquareHalfSideMeters = 8050; //1 mile radius
   isRadiusSelectionOverlayOpen = false;
+  showAdvancedOptions = false;
   readonly markerRadiusOptions: RadiusOption[] = [
     { label: '500m', value: 440 },
     { label: '1km', value: 880 },
@@ -808,6 +815,9 @@ ngOnInit(): void {
 
     // Load user location from storage and start background marker fetch
     this.loadUserLocationAndStartBackgroundFetch(cachedUid);
+
+    // Get and save current location if available
+    void this.getAndSaveCurrentLocation();
   }
 
   this.initialize();
@@ -815,6 +825,9 @@ ngOnInit(): void {
   this.startUserChatsSubscription().catch((err) => {
     console.warn('[ChatPage.ngOnInit] Unable to start chat list subscription:', err);
   });
+  
+  // Start periodic checker for internet and location service recovery
+  this.startServiceRecoveryChecker();
 }
 
 getCurrentMapBoundsBBox(): { west: number; south: number; east: number; north: number } | null {
@@ -1086,14 +1099,38 @@ private async maybePromptForLocationActivation(): Promise<void> {
 
 private async getInitialCoordinatesWithTimeout(timeoutMs: number = 4500): Promise<{ latitude: number; longitude: number } | null> {
   try {
+    // First, try to get current coordinates with timeout
     const coordinates = await Promise.race<
       { latitude: number; longitude: number } | null
     >([
       this.getCurrentCoordinates(),
       this.waitMs(timeoutMs).then(() => null)
     ]);
-    return coordinates;
-  } catch {
+    
+    if (coordinates) {
+      console.log('[ChatPage.getInitialCoordinatesWithTimeout] Current location obtained successfully:', coordinates);
+      return coordinates;
+    }
+
+    // If current coordinates failed or timed out, try stored location
+    console.log('[ChatPage.getInitialCoordinatesWithTimeout] Current location unavailable, checking stored location...');
+    const storedLocation = this.getStoredUserLocation();
+    if (storedLocation) {
+      console.log('[ChatPage.getInitialCoordinatesWithTimeout] Using stored location:', storedLocation);
+      return storedLocation;
+    }
+
+    // No stored location available
+    console.log('[ChatPage.getInitialCoordinatesWithTimeout] No stored location available; will use fallback coordinates.');
+    return null;
+  } catch (error) {
+    console.error('[ChatPage.getInitialCoordinatesWithTimeout] Error getting coordinates:', error);
+    // Try stored location as fallback
+    const storedLocation = this.getStoredUserLocation();
+    if (storedLocation) {
+      console.log('[ChatPage.getInitialCoordinatesWithTimeout] Exception occurred; using stored location:', storedLocation);
+      return storedLocation;
+    }
     return null;
   }
 }
@@ -1160,9 +1197,19 @@ private async runStaggeredOnlineBootstrap(bootstrapId: number): Promise<void> {
     return;
   }
 
-  // Online detected: refresh markers in the background WITHOUT blocking the map
-  this.offlineDownloadStatusText = 'Online detected. Refreshing markers shortly...';
-  this.setMapBootstrapStatus('Online detected. Refreshing map markers...', undefined, 'loading');
+  // Check if user location is available - required for smart marker filtering
+  const hasUserLocation = this.currentUserLocation !== null || this.getStoredUserLocation() !== null;
+  
+  if (!hasUserLocation) {
+    console.log('[ChatPage.mapBootstrap] Online but no user location available. Skipping Firebase marker fetch. Using local cache.');
+    this.offlineDownloadStatusText = 'Online but no location available. Using local marker cache.';
+    this.setMapBootstrapStatus('Awaiting location data...', undefined, 'loading');
+    return;
+  }
+
+  // Online detected AND location available: refresh markers in the background WITHOUT blocking the map
+  this.offlineDownloadStatusText = 'Online detected. Fetching markers from Firebase...';
+  this.setMapBootstrapStatus('Online detected. Fetching map markers...', undefined, 'loading');
   
   // Short delay before checking for fresh markers (let network stabilize)
   await this.waitMs(this.mapOnlineMarkerRefreshDelayMs);
@@ -1178,13 +1225,23 @@ private async runStaggeredOnlineBootstrap(bootstrapId: number): Promise<void> {
 
 private async refreshMarkersFromOnlineInBackground(bootstrapId: number): Promise<void> {
   // This runs AFTER local markers are already displayed
-  // Refresh marker data from Firestore if online
+  // Refresh marker data from Firestore if online AND location is available
   console.log('[ChatPage.markerRefresh] Starting background marker refresh from Firestore');
   
   try {
     const previousMarkersCount = this.officeLocationMarkerData.length;
     
-    // Fetch fresh markers from Firestore
+    // Verify location is available before attempting Firebase fetch
+    const hasUserLocation = this.currentUserLocation !== null || this.getStoredUserLocation() !== null;
+    
+    if (!hasUserLocation) {
+      console.log('[ChatPage.markerRefresh] No user location available - skipping Firebase fetch, keeping local cache.');
+      this.offlineDownloadStatusText = 'Waiting for location. Using local marker cache.';
+      this.setMapBootstrapStatus('Location unavailable. Using cached markers.', 2200, 'warning');
+      return;
+    }
+    
+    // Fetch fresh markers from Firestore (only fetches when online AND location is available)
     await this.fetchOfficeLocationMarkerData();
     
     // Verify the bootstrap is still current (map wasn't closed/recreated)
@@ -1196,21 +1253,53 @@ private async refreshMarkersFromOnlineInBackground(bootstrapId: number): Promise
     // Re-render markers on the map with fresh data
     this.renderStoredOfficeLocationMarkers();
     
+    // Refresh map display after marker updates
+    if (this.map) {
+      try {
+        console.log('[ChatPage.markerRefresh] Refreshing map display after marker update...');
+        // Invalidate map size to ensure proper rendering
+        this.map.invalidateSize();
+        
+        // If user location is available, optionally center map on user location
+        const userLocation = this.currentUserLocation || this.getStoredUserLocation();
+        if (userLocation) {
+          this.map.setView([userLocation.latitude, userLocation.longitude], this.map.getZoom());
+          console.log('[ChatPage.markerRefresh] Map view refreshed centered on user location.');
+        }
+      } catch (mapRefreshError) {
+        console.warn('[ChatPage.markerRefresh] Error refreshing map display:', mapRefreshError);
+      }
+    }
+    
     const newMarkersCount = this.officeLocationMarkerData.length;
     const markerUpdate = newMarkersCount === previousMarkersCount 
       ? `${newMarkersCount} markers (unchanged)` 
       : `${previousMarkersCount} → ${newMarkersCount} markers (updated)`;
     
-    this.offlineDownloadStatusText = `Markers refreshed: ${markerUpdate}`;
+    this.offlineDownloadStatusText = `Markers refreshed from Firebase: ${markerUpdate}`;
     this.setMapBootstrapStatus(`Online markers loaded: ${markerUpdate}`, 2200, 'success');
     console.log('[ChatPage.markerRefresh] Background marker refresh completed successfully.', {
       previousCount: previousMarkersCount,
-      newCount: newMarkersCount
+      newCount: newMarkersCount,
+      source: 'Firebase',
+      mapRefreshed: true
     });
   } catch (error) {
-    console.warn('[ChatPage.markerRefresh] Background refresh failed - keeping locally cached markers.', error);
-    this.offlineDownloadStatusText = 'Online refresh failed. Keeping local marker cache.';
-    this.setMapBootstrapStatus('Online refresh failed. Using local cache.', 2600, 'warning');
+    console.warn('[ChatPage.markerRefresh] Firebase fetch failed - reverting to locally cached markers.', error);
+    
+    // Ensure we have local marker data as fallback
+    this.officeLocationMarkerData = this.loadOfficeMarkerDataFromLocalStorage();
+    
+    // Verify the bootstrap is still current before updating UI
+    if (bootstrapId !== this.mapBootstrapSequence) {
+      return;
+    }
+    
+    // Re-render with local markers
+    this.renderStoredOfficeLocationMarkers();
+    
+    this.offlineDownloadStatusText = 'Firebase fetch failed. Using local marker cache.';
+    this.setMapBootstrapStatus('Using locally cached markers.', 2600, 'warning');
   }
 }
 
@@ -1961,6 +2050,79 @@ onMsgBubbleTap(message: Message): void {
   }
 
   /**
+   * Get the localStorage key for storing the current user's location.
+   * Scoped to the current user to avoid cross-user data leaks.
+   */
+  private getUserLocationStorageKey(): string {
+    const userId = this.userID || this.auth3.getCurrentUser()?.uid || 'unknown_user';
+    return `user_current_location_${userId}`;
+  }
+
+  /**
+   * Fetch current user location and save it locally if available.
+   * Called during initialization to populate the stored location.
+   */
+  private async getAndSaveCurrentLocation(): Promise<{ latitude: number; longitude: number } | null> {
+    try {
+      console.log('[ChatPage.getAndSaveCurrentLocation] Attempting to fetch and save current location...');
+      const location = await this.getCurrentCoordinates();
+      
+      if (location && (location.latitude !== this.fallbackCoordinates.latitude || location.longitude !== this.fallbackCoordinates.longitude)) {
+        // Location was successfully fetched (not fallback)
+        try {
+          const storageKey = this.getUserLocationStorageKey();
+          localStorage.setItem(storageKey, JSON.stringify({
+            latitude: location.latitude,
+            longitude: location.longitude,
+            timestamp: new Date().toISOString()
+          }));
+          console.log('[ChatPage.getAndSaveCurrentLocation] Current location saved to localStorage:', {
+            latitude: location.latitude,
+            longitude: location.longitude
+          });
+        } catch (storageError) {
+          console.warn('[ChatPage.getAndSaveCurrentLocation] Failed to save location to localStorage:', storageError);
+        }
+        return location;
+      } else {
+        console.log('[ChatPage.getAndSaveCurrentLocation] Location is fallback coordinates; skipping storage.');
+        return location;
+      }
+    } catch (error) {
+      console.error('[ChatPage.getAndSaveCurrentLocation] Error fetching current location:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Load the user's location from localStorage if available.
+   */
+  private getStoredUserLocation(): { latitude: number; longitude: number } | null {
+    try {
+      const storageKey = this.getUserLocationStorageKey();
+      const storedData = localStorage.getItem(storageKey);
+      if (!storedData) {
+        console.log('[ChatPage.getStoredUserLocation] No stored location found.');
+        return null;
+      }
+
+      const parsed = JSON.parse(storedData);
+      console.log('[ChatPage.getStoredUserLocation] Location loaded from storage:', {
+        latitude: parsed.latitude,
+        longitude: parsed.longitude,
+        timestamp: parsed.timestamp
+      });
+      return {
+        latitude: parsed.latitude,
+        longitude: parsed.longitude
+      };
+    } catch (error) {
+      console.error('[ChatPage.getStoredUserLocation] Error loading stored location:', error);
+      return null;
+    }
+  }
+
+  /**
    * Fetch markers from Firestore that fall within the bounding box around the user's current location.
    * Calculates top, bottom, left, right boundaries and filters markers based on these bounds.
    * Results are stored in officeLocationMarkerData array.
@@ -2074,50 +2236,80 @@ onMsgBubbleTap(message: Message): void {
     return enrichedMarkers.map((marker) => this.mergeMarkerAndUserForMapSheet(marker, marker.associatedUser, marker.resolvedUserId));
   }
 
-  private async onOfficeMarkerSelectedForMapSheet(marker: L.Marker, titleText: string, trigger: 'click' | 'touchend'): Promise<void> {
-    const markerCenter = marker.getLatLng();
+  /**
+   * Unified handler for aggregating markers and displaying them in the map sheet.
+   * Called when clicking on a marker OR clicking on the map.
+   * Draws the radius square, fetches aggregated markers, and displays results.
+   */
+  private async handleLocationClickForMapAggregation(
+    latitude: number,
+    longitude: number,
+    trigger: 'click' | 'touchend' | 'story-item',
+    titleText: string
+  ): Promise<void> {
+    const center = L.latLng(latitude, longitude);
 
+    // Draw the marker-centered square
     try {
-      this.drawMarkerCenteredSquare(markerCenter, trigger, titleText);
+      this.drawMarkerCenteredSquare(center, trigger, titleText);
     } catch (squareError) {
-      console.error('[ChatPage.markerSquare] Failed to draw marker square', {
+      console.error('[ChatPage.aggregation] Failed to draw marker square', {
         trigger,
         titleText,
         squareError
       });
     }
 
-    const markerUserProfile = this.markerUserProfileMap.get(marker) || null;
-    const markerFallback = {
-      ...(markerUserProfile || {}),
-      name: markerUserProfile?.name || titleText,
-      markerTitle: titleText,
-      latitude: markerCenter.lat,
-      longitude: markerCenter.lng
-    };
-
-    const aggregatedMapSheetItems = await this.aggregateMarkersForMapSheet(markerCenter.lat, markerCenter.lng);
+    // Aggregate markers within the radius
+    const aggregatedMapSheetItems = await this.aggregateMarkersForMapSheet(latitude, longitude);
     this.mapSheetAggregatedEngineers = aggregatedMapSheetItems;
 
+    // Display aggregated results
     if (aggregatedMapSheetItems.length > 1) {
       this.selectedMapEngineer = aggregatedMapSheetItems[0];
       this.mapSheetViewMode = 'list';
       this.isMapBottomSheetActive = true;
-      console.log('[ChatPage.mapBottomSheet] Marker selected with multiple nearby engineers. Opening list view.', {
+      console.log('[ChatPage.mapAggregation] Multiple engineers found. Opening list view.', {
         trigger,
         titleText,
-        aggregatedCount: aggregatedMapSheetItems.length
+        aggregatedCount: aggregatedMapSheetItems.length,
+        center: { latitude: Number(center.lat.toFixed(6)), longitude: Number(center.lng.toFixed(6)) }
       });
       return;
     }
 
+    if (aggregatedMapSheetItems.length === 1) {
+      this.mapSheetViewMode = 'detail';
+      this.selectedMapEngineer = aggregatedMapSheetItems[0];
+      this.isMapBottomSheetActive = true;
+      console.log('[ChatPage.mapAggregation] Single engineer found. Opening detail view.', {
+        trigger,
+        titleText,
+        center: { latitude: Number(center.lat.toFixed(6)), longitude: Number(center.lng.toFixed(6)) }
+      });
+      return;
+    }
+
+    // No engineers found - show fallback
+    const fallback = {
+      markerTitle: titleText,
+      latitude,
+      longitude,
+      name: titleText
+    };
     this.mapSheetViewMode = 'detail';
-    this.openMapMarkerBottomSheet(aggregatedMapSheetItems[0] || markerFallback);
-    console.log('[ChatPage.mapBottomSheet] Marker selected with single/no nearby engineer. Opening detail view.', {
+    this.openMapMarkerBottomSheet(fallback);
+    console.log('[ChatPage.mapAggregation] No engineers found. Opening detail view with fallback.', {
       trigger,
       titleText,
-      aggregatedCount: aggregatedMapSheetItems.length
+      center: { latitude: Number(center.lat.toFixed(6)), longitude: Number(center.lng.toFixed(6)) }
     });
+  }
+
+  private async onOfficeMarkerSelectedForMapSheet(marker: L.Marker, titleText: string, trigger: 'click' | 'touchend'): Promise<void> {
+    const markerCenter = marker.getLatLng();
+    // Use the unified handler for aggregation and display
+    await this.handleLocationClickForMapAggregation(markerCenter.lat, markerCenter.lng, trigger, titleText);
   }
 
   async aggregateMarkersWithinSelectedRadius(): Promise<void> {
@@ -2606,6 +2798,29 @@ onMsgBubbleTap(message: Message): void {
   }
 
   /** Switch bottom navigation tab and update view state. */
+  /**
+   * Trigger offline tile download with default values.
+   * Uses configured offlineMinZoom, offlineMaxZoom, and offlineMaxTilesPerDownload.
+   */
+  private async triggerOfflineDownloadWithDefaults(): Promise<void> {
+    if (this.offlineDownloadInProgress) {
+      console.log('[ChatPage.offlineDownload] Offline download already in progress. Skipping duplicate request.');
+      return;
+    }
+    
+    console.log('[ChatPage.offlineDownload] Triggering offline tile download with default values:', {
+      minZoom: this.offlineMinZoom,
+      maxZoom: this.offlineMaxZoom,
+      maxTiles: this.offlineMaxTilesPerDownload
+    });
+    
+    try {
+      await this.downloadVisibleMapAreaOffline();
+    } catch (error) {
+      console.error('[ChatPage.offlineDownload] Error triggering offline download:', error);
+    }
+  }
+
   setNav(tab: 'person' | 'people' | 'location' | 'settings' | 'profile') {
     if (this.isChatOpen) {
       this.closeChat();
@@ -2628,6 +2843,8 @@ onMsgBubbleTap(message: Message): void {
       this.scheduleMapInitialization();
       // Start periodic map refresh when entering location tab
       this.startMapRefreshTimer();
+      // Trigger offline tile download in background (with default values)
+      void this.triggerOfflineDownloadWithDefaults();
     } else if (tab === 'settings' || tab === 'profile') {
       this.dismissMapTapOverlay();
       this.destroyMapInstance();
@@ -2680,7 +2897,8 @@ onMsgBubbleTap(message: Message): void {
       latitude: roundedLatitude,
       longitude: roundedLongitude
     });
-    this.openMapTapMarkerOverlay(roundedLatitude, roundedLongitude);
+    // Use the same unified aggregation handler as marker clicks
+    void this.handleLocationClickForMapAggregation(roundedLatitude, roundedLongitude, source, 'Map Click Location');
   }
 
   private handleMapTap(event: L.LeafletMouseEvent): void {
@@ -2984,6 +3202,117 @@ onMsgBubbleTap(message: Message): void {
     }
   }
 
+  /**
+   * Start periodic checker to detect when internet and location services become available.
+   * Runs every 7 seconds and updates map/markers/location when services recover.
+   */
+  private startServiceRecoveryChecker(): void {
+    if (this.serviceRecoveryCheckInterval) {
+      clearInterval(this.serviceRecoveryCheckInterval);
+    }
+
+    console.log('[ChatPage.startServiceRecoveryChecker] Starting periodic service recovery checker...');
+    this.serviceRecoveryCheckInterval = setInterval(async () => {
+      try {
+        await this.checkAndRecoverServices();
+      } catch (error) {
+        console.error('[ChatPage.serviceRecoveryChecker] Error during check cycle:', error);
+      }
+    }, this.serviceRecoveryCheckMs);
+  }
+
+  /**
+   * Stop the periodic service recovery checker and clean up the interval.
+   */
+  private stopServiceRecoveryChecker(): void {
+    if (this.serviceRecoveryCheckInterval) {
+      clearInterval(this.serviceRecoveryCheckInterval);
+      this.serviceRecoveryCheckInterval = undefined;
+      console.log('[ChatPage.stopServiceRecoveryChecker] Service recovery checker stopped.');
+    }
+  }
+
+  /**
+   * Check internet connectivity status using browser API and fallback methods.
+   */
+  private async checkInternetStatus(): Promise<boolean> {
+    // Primary method: browser's navigator.onLine API
+    if (!navigator.onLine) {
+      return false;
+    }
+    
+    // Additional validation: try a quick fetch to verify actual connectivity
+    try {
+      const response = await fetch('https://www.google.com/gen_204', {
+        method: 'HEAD',
+        mode: 'no-cors',
+        cache: 'no-store'
+      });
+      return response.status === 204 || response.status === 0; // 0 for no-cors mode
+    } catch (error) {
+      // If fetch fails but navigator.onLine is true, assume connected
+      console.warn('[ChatPage.checkInternetStatus] Fetch validation failed, using navigator.onLine:', navigator.onLine);
+      return navigator.onLine;
+    }
+  }
+
+  /**
+   * Check if location services are available and accessible.
+   */
+  private async checkLocationStatus(): Promise<boolean> {
+    try {
+      const permission = await Geolocation.checkPermissions();
+      return permission.location === 'granted';
+    } catch (error) {
+      console.warn('[ChatPage.checkLocationStatus] Failed to check location permissions:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Check for service recovery and update data if services become available.
+   */
+  private async checkAndRecoverServices(): Promise<void> {
+    const internetNow = await this.checkInternetStatus();
+    const locationNow = await this.checkLocationStatus();
+
+    // Check if internet was unavailable but is now available
+    if (!this.lastInternetStatus && internetNow) {
+      console.log('[ChatPage.checkAndRecoverServices] Internet reconnected! Updating data...');
+      // Trigger map refresh, fetch markers again
+      try {
+        await this.fetchMarkersWithinUserLocationRadius();
+        console.log('[ChatPage.checkAndRecoverServices] Markers updated after internet recovery.');
+      } catch (error) {
+        console.error('[ChatPage.checkAndRecoverServices] Failed to update markers:', error);
+      }
+    }
+
+    // Check if location was unavailable but is now available
+    if (!this.lastLocationStatus && locationNow) {
+      console.log('[ChatPage.checkAndRecoverServices] Location access recovered! Fetching and updating user location...');
+      try {
+        const coords = await this.getCurrentCoordinates();
+        if (coords) {
+          // Update user location marker on the map if map is initialized
+          if (this.map && this.userLocationMarker) {
+            this.userLocationMarker.setLatLng([coords.latitude, coords.longitude]);
+            console.log('[ChatPage.checkAndRecoverServices] User location marker updated:', coords);
+          }
+          // Fetch markers around new location
+          await this.fetchMarkersWithinUserLocationRadius();
+          console.log('[ChatPage.checkAndRecoverServices] Markers updated after location recovery.');
+        }
+      } catch (error) {
+        console.error('[ChatPage.checkAndRecoverServices] Failed to update location/markers:', error);
+      }
+    }
+
+    // Update status trackers
+    this.lastInternetStatus = internetNow;
+    this.lastLocationStatus = locationNow;
+  }
+
   private toFiniteNumber(value: unknown): number | null {
     if (typeof value === 'number' && Number.isFinite(value)) return value;
     if (typeof value === 'string') {
@@ -3082,13 +3411,14 @@ onMsgBubbleTap(message: Message): void {
   private async fetchOfficeLocationMarkerData(): Promise<void> {
     const authedUser = this.auth3.getCurrentUser() ?? await this.auth3.waitForAuthUser(5000).catch(() => null);
     if (!authedUser?.uid) {
-      console.warn('[ChatPage.userOfficeLocationMarker] Skipping collection fetch because Firebase auth user is not ready.');
+      console.warn('[ChatPage.userOfficeLocationMarker] Skipping Firebase fetch - auth user not ready. Falling back to localStorage.');
       // Try to load from localStorage as a fallback
       this.officeLocationMarkerData = this.loadOfficeMarkerDataFromLocalStorage();
       return;
     }
 
     try {
+      console.log('[ChatPage.userOfficeLocationMarker] Fetching userOfficeLocationMarker collection from Firestore...');
       const markerCollectionRef = collection(this.firestore, 'userOfficeLocationMarker');
       const markerSnapshot = await getDocs(markerCollectionRef);
       const parsedMarkers: OfficeLocationMarkerData[] = [];
@@ -3114,9 +3444,10 @@ onMsgBubbleTap(message: Message): void {
       });
 
       this.officeLocationMarkerData = parsedMarkers;
-      // Save to localStorage after successful fetch
+      // Save to localStorage after successful Firebase fetch
       this.saveOfficeMarkerDataToLocalStorage();
-      console.log('[ChatPage.userOfficeLocationMarker] Collection data loaded and stored.', {
+      console.log('[ChatPage.userOfficeLocationMarker] Successfully fetched and stored from Firebase.', {
+        source: 'Firebase',
         totalDocuments: markerSnapshot.size,
         markersStored: parsedMarkers.length,
         markersSkipped: markerSnapshot.size - parsedMarkers.length
@@ -3124,11 +3455,12 @@ onMsgBubbleTap(message: Message): void {
     } catch (error) {
       const errorCode = (error as { code?: string } | null)?.code ?? 'unknown';
       if (errorCode === 'permission-denied') {
-        console.error('[ChatPage.userOfficeLocationMarker] Permission denied while reading full collection. Check firestore.rules for list/get read access on /userOfficeLocationMarker.', error);
+        console.error('[ChatPage.userOfficeLocationMarker] Permission denied while reading Firebase collection. Check firestore.rules for list/get read access on /userOfficeLocationMarker.', error);
       } else {
-        console.error('[ChatPage.userOfficeLocationMarker] Failed to fetch collection data.', error);
+        console.error('[ChatPage.userOfficeLocationMarker] Failed to fetch from Firebase.', error);
       }
       // Fall back to localStorage data if Firestore fetch fails
+      console.log('[ChatPage.userOfficeLocationMarker] Falling back to locally stored markers.');
       this.officeLocationMarkerData = this.loadOfficeMarkerDataFromLocalStorage();
     }
   }
@@ -3362,13 +3694,13 @@ onMsgBubbleTap(message: Message): void {
         console.log('[ChatPage.initMap] Map already initialized. Updating view and markers.');
         // already initialized: invalidate size in case container changed
         this.map.invalidateSize();
-        // IMPORTANT: Render local markers immediately WITHOUT waiting for anything
+        // IMPORTANT: Render local markers and tiles immediately WITHOUT waiting for internet checks
         this.renderLocalMarkerCacheImmediately();
         this.applyEffectiveTileLayerMode();
         this.bindMapTapCapture();
         this.map.setView(center, 15);
         await this.markUserLocation(this.map, coordinates);
-        // Start background online refresh (won't block map display)
+        // Start background online refresh (won't block map display since markers & tiles are already visible)
         void this.runStaggeredOnlineBootstrap(bootstrapId);
         return;
       }
@@ -3378,6 +3710,8 @@ onMsgBubbleTap(message: Message): void {
       // place developer/test markers after map creation
       try { this.placeTestMarkers(); } catch (err) { console.error('[ChatPage.initMap] placeTestMarkers error', err); }
 
+      // Create offline-capable tile layer with offline mode enabled immediately
+      // This ensures offline tiles are displayed right away if available
       this.baseTileLayer = new OfflineLeafletTileLayer(this.osmTileTemplate, this.offlineMapTileService, {
         maxZoom: 19,
         attribution: '&copy; OpenStreetMap contributors',
@@ -3386,20 +3720,22 @@ onMsgBubbleTap(message: Message): void {
         offlineMode: this.getEffectiveOfflineMode()
       });
       this.baseTileLayer.addTo(this.map);
-      console.log('[ChatPage.initMap] Tile layer added.');
+      console.log('[ChatPage.initMap] Offline-capable tile layer added (offline tiles displayed if available).');
 
       this.bindMapTapCapture();
 
-      // CRITICAL: Load and render local markers SYNCHRONOUSLY and immediately - this happens BEFORE internet checks
-      console.log('[ChatPage.initMap] Rendering local marker cache immediately (before any internet checks).');
+      // CRITICAL: Load and render local markers SYNCHRONOUSLY and immediately - happens BEFORE internet checks
+      // Both local markers AND offline tiles are now visible to the user
+      console.log('[ChatPage.initMap] Rendering local marker cache immediately with offline tiles (before any internet checks).');
       this.renderLocalMarkerCacheImmediately();
       
       await this.markUserLocation(this.map, coordinates);
       
-      // Start background online refresh (this won't block marker display since local markers are already rendered)
+      // Start background online refresh (won't block display since markers & tiles are already rendered)
+      // If online & location detected, refreshes markers from Firestore and stores them locally
       void this.runStaggeredOnlineBootstrap(bootstrapId);
       
-      console.log('[ChatPage.initMap] Map initialization complete with local markers visible.');
+      console.log('[ChatPage.initMap] Map initialization complete with offline tiles and local markers visible.');
     } catch (err) {
       console.warn('[ChatPage.initMap] Initialization failed', err);
     }
@@ -3502,6 +3838,8 @@ private readonly userLocationIcon = L.icon({
   }
 
   ngOnDestroy(): void {
+    // Clean up service recovery checker
+    this.stopServiceRecoveryChecker();
     // Clean up background fetch
     this.stopBackgroundMarkerFetch();
     // Clean up chat subscription

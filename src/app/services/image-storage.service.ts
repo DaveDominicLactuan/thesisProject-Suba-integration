@@ -166,7 +166,7 @@ export class ImageStorageService {
 
   /**
    * Generate a session-scoped filename in the form:
-   * img{N}crack{M}MMDDYYYYHHMM.jpg (crack part included only when hasCrack is true)
+   * userID:${userId}sessionId:${sessionId}img{N}crack{M}MMDDYYYYHHMM.jpg (crack part included only when hasCrack is true)
    */
   generateSessionFilename(options: { sessionId?: string; hasCrack?: boolean; timestamp?: string } = {}): string {
     const date = options.timestamp ? new Date(options.timestamp) : new Date();
@@ -183,7 +183,12 @@ export class ImageStorageService {
     const imgIndex = sessionId ? (this.getSessionImageCount(sessionId) + 1) : (this.images.length + 1);
     const crackPart = options.hasCrack ? `crack${this.getSessionCrackCount(sessionId) + 1}` : '';
 
-    return `img${imgIndex}${crackPart}${dateStr}${timeStr}.jpg`;
+    // Get session userId and sessionId if session exists
+    const session = sessionId ? this.getSession(sessionId) : undefined;
+    const userId = session?.userId || '';
+    const finalSessionId = session?.sessionId || '';
+
+    return `userID:${userId}sessionId:${finalSessionId}img${imgIndex}${crackPart}${dateStr}${timeStr}.jpg`;
   }
 
   /**

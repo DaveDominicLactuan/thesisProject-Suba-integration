@@ -327,7 +327,7 @@
         <span class="chip-text">{{ mapBootstrapStatusText }}</span>
       </div>
 
-      <div class="offline-map-controls" (click)="$event.stopPropagation()">
+      <!-- <div class="offline-map-controls" (click)="$event.stopPropagation()">
         <div class="offline-controls-row">
           <button
             type="button"
@@ -379,7 +379,7 @@
           <div class="offline-progress-bar" [style.width.%]="offlineDownloadProgressPct"></div>
         </div>
         <div class="offline-meta">Saved offline areas: {{ downloadedOfflineAreas.length }}</div>
-      </div>
+      </div> -->
 
       <!-- Google Maps-style Bottom Sheet -->
       <div class="map-bottom-sheet"
@@ -489,10 +489,78 @@
             </select>
           </div>
 
-          <button class="radius-selection-confirm" type="button" (click)="confirmRadiusSelection()">
+          <button class="radius-selection-confirm" [class.advanced-shown]="showAdvancedOptions" type="button" (click)="confirmRadiusSelection()">
             CONFIRM
           </button>
+
+          <div class="advanced-block">
+            <!-- Advanced Options Toggle -->
+            <div class="radius-selection-advanced-toggle" (click)="showAdvancedOptions = !showAdvancedOptions" role="button" tabindex="0" [attr.aria-expanded]="showAdvancedOptions">
+              <span>Advanced Options</span>
+              <ion-icon [name]="showAdvancedOptions ? 'chevron-up-outline' : 'chevron-down-outline'"></ion-icon>
+            </div>
+
+            <!-- Advanced Options Content (Collapsible, absolutely positioned so toggle doesn't move) -->
+            <div class="advanced-options-content" *ngIf="showAdvancedOptions">
+              <div class="offline-controls-row">
+                <button
+                  type="button"
+                  class="offline-btn"
+                  [ngClass]="{'active': offlineModeEnabled}"
+                  (click)="toggleOfflineMode()">
+                  {{ offlineModeEnabled ? 'Offline ON' : 'Offline OFF' }}
+                </button>
+                <button
+                  type="button"
+                  class="offline-btn"
+                  [disabled]="offlineDownloadInProgress"
+                  (click)="downloadVisibleMapAreaOffline()">
+                  {{ offlineDownloadInProgress ? 'Downloading...' : 'Download Area' }}
+                </button>
+                <!-- <button
+                  type="button"
+                  class="offline-btn danger"
+                  [disabled]="offlineDownloadInProgress"
+                  (click)="clearOfflineMapCache()">
+                  Clear
+                </button> -->
+              </div>
+
+              <div class="offline-controls-row inputs">
+                <label>
+                  Min Z
+                  <input type="number" [(ngModel)]="offlineMinZoom" min="0" max="19" />
+                </label>
+                <label>
+                  Max Z
+                  <input type="number" [(ngModel)]="offlineMaxZoom" min="0" max="19" />
+                </label>
+                <label>
+                  Max Tiles
+                  <input type="number" [(ngModel)]="offlineMaxTilesPerDownload" min="1" />
+                </label>
+              </div>
+
+              <!-- <div class="offline-controls-row inputs">
+                <label class="full">
+                  Area Name
+                  <input type="text" [(ngModel)]="offlineAreaName" placeholder="Optional area name" />
+                </label>
+              </div> -->
+
+              <div class="offline-status">{{ offlineDownloadStatusText }}</div>
+              <div class="offline-progress-wrap" *ngIf="offlineDownloadInProgress">
+                <div class="offline-progress-bar" [style.width.%]="offlineDownloadProgressPct"></div>
+              </div>
+              <div class="offline-meta">Saved offline areas: {{ downloadedOfflineAreas.length }}</div>
+            </div>
+          </div>
         </div>
+
+           <!-- <button class="radius-selection-confirm" type="button" (click)="confirmRadiusSelection()">
+            CONFIRM
+          </button> -->
+          
       </div>
 
     </div>

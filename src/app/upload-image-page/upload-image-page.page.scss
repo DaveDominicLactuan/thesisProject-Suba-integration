@@ -445,6 +445,21 @@ form, input, optgroup, select {
 	justify-content: center;
 	cursor: pointer;
 	overflow: visible;
+	border-radius: 8px;
+	transition: box-shadow 300ms ease;
+}
+
+/* Breathing glow animation when images are processed */
+.spinner-container-rect.has-processed-images {
+	/* run once for the glow duration; JavaScript removes the class after the same duration */
+	animation: breathing-glow 2.5s ease-in-out 1;
+}
+
+@keyframes breathing-glow {
+	0%, 100% { box-shadow: 0 0 0 0 rgba(37, 199, 90, 0.7); }
+	25% { box-shadow: 0 0 0 8px rgba(37, 199, 90, 0.5); }
+	50% { box-shadow: 0 0 0 15px rgba(37, 199, 90, 0.25); }
+	75% { box-shadow: 0 0 0 8px rgba(37, 199, 90, 0.5); }
 }
 
 
@@ -510,20 +525,18 @@ form, input, optgroup, select {
 	background: red;
 	color: white;
 	font-weight: bold;
-		font-size: 18px;
-		color: #aaa;
-		text-align: center;
-		// padding: 24px;
-		// max-width: 20px;
-		// max-height: 20px;
-		width: 20px;
-  height: 20px;
-  border-radius: 50%;
-		margin: 0 auto;
+	font-size: 18px;
+	color: #aaa;
+	text-align: center;
+	width: 20px;
+	height: 20px;
+	border-radius: 50%;
+	margin: 0 auto;
 	align-items: center;
 	justify-content: center;
-	// border-radius: 50px;
 	z-index: 1;
+	box-shadow: none;
+	animation: none;
 
 	&.green {
 		background: rgb(9, 188, 18);

@@ -32,6 +32,7 @@ password: string = '';
 confirmPassword: string = '';
 rememberMe: boolean = false;
 showPassword: boolean = false;
+showConfirmPassword: boolean = false;
 username: string = '';
 firstName: string = '';
 userID: string = '';
@@ -335,6 +336,11 @@ selectRole(role: string) {
 /** Toggle password input visibility in the form. */
 togglePasswordVisibility() {
   this.showPassword = !this.showPassword;
+}
+
+/** Toggle confirm password input visibility in the form. */
+toggleConfirmPasswordVisibility() {
+  this.showConfirmPassword = !this.showConfirmPassword;
 }
 
 

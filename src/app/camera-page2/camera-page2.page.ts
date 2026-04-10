@@ -1,4 +1,4 @@
-import { Component, OnDestroy, AfterViewInit, ElementRef, ViewChild } from '@angular/core';
+import { Component, OnDestroy, AfterViewInit, ElementRef, ViewChild, ChangeDetectorRef } from '@angular/core';
 import { ActivatedRoute } from '@angular/router';
 import { DomSanitizer } from '@angular/platform-browser';
 import { Router } from '@angular/router';
@@ -52,7 +52,22 @@ export class CameraPage2Page implements AfterViewInit {
   extraText: string | null = null;
   isProcessing: boolean = true;
   photosTaken = 0;
-  photosProcessed = 0;
+  private _photosProcessed = 0;
+  // public transient flag used to show a short glow when a photo finishes processing
+  processedGlowActive: boolean = false;
+  private _processedGlowTimer?: any;
+  // glow duration in milliseconds (default 2.5s)
+  glowDurationMs: number = 2500;
+  get photosProcessed() {
+    return this._photosProcessed;
+  }
+  set photosProcessed(v: number) {
+    const prev = this._photosProcessed;
+    this._photosProcessed = v;
+    if (v > prev) {
+      this.triggerProcessedGlow();
+    }
+  }
   savedImage: StoredImage | null = null;
   selectedThumbSrc: string | null = null;
   selectedImageTitle: string = '';
@@ -74,6 +89,10 @@ export class CameraPage2Page implements AfterViewInit {
   isPhoneLeveled: boolean = false;
   levelRollDeg: number = 0;
   private levelThresholdDeg: number = 1.0;
+  private levelTargetRoll: number = 0; // Target roll angle for smooth interpolation
+  private levelSmoothingFactor: number = 0.15; // Lower = smoother but slower (0-1)
+  private levelAnimationFrameId?: number; // RAF ID for cleanup
+  private lastRawRoll: number = 0; // Track last raw value for velocity calculation
   flashDurationMs: number = 120; // visual flash length
   cooldownMs: number = 500; // minimum time between pictures
   private backButtonSub: any; // hardware back handler
@@ -82,8 +101,8 @@ export class CameraPage2Page implements AfterViewInit {
     if (typeof event.gamma !== 'number') return;
 
     const rawRoll = event.gamma;
-    const clampedRoll = Math.max(-45, Math.min(45, rawRoll));
-    this.levelRollDeg = clampedRoll;
+    // Store target and let RAF loop handle smooth interpolation
+    this.levelTargetRoll = Math.max(-45, Math.min(45, rawRoll));
     this.isPhoneLeveled = Math.abs(rawRoll) <= this.levelThresholdDeg;
   };
   // session management
@@ -102,7 +121,8 @@ export class CameraPage2Page implements AfterViewInit {
     private sanitizer: DomSanitizer,
     private crackDetectionService: CrackDetectionService,
     private imageStorage: ImageStorageService,
-    private route: ActivatedRoute
+    private route: ActivatedRoute,
+    private cdr: ChangeDetectorRef
   ) {
     this.requestCameraPermission();
     // subscribe to current image changes so UI can react when another page selects one
@@ -228,8 +248,11 @@ export class CameraPage2Page implements AfterViewInit {
 
       const dataUrl = canvas.toDataURL('image/png');
 
+      // Generate a descriptive filename for camera capture
+      const cameraFilename = `Camera-${Date.now()}.jpg`;
+      console.log(`📸 Captured image from camera: ${cameraFilename}` && console.log(dataUrl));
       // Delegate processing to processDataUrl
-      await this.processDataUrl(dataUrl);
+      await this.processDataUrl(dataUrl, cameraFilename);
     } catch (err) {
       console.error('Failed to take picture:', err);
       alert('Failed to capture/process image. See console for details.');
@@ -338,9 +361,11 @@ export class CameraPage2Page implements AfterViewInit {
       if (photo && photo.base64String) {
         //create dataURL and filename
         const dataUrl = `data:image/jpeg;base64,${photo.base64String}`;
+        const galleryFilename = `Gallery-${Date.now()}.jpg`;
+        console.log(`📸 Picked image from gallery: ${galleryFilename}` && console.log(photo)  && console.log(dataUrl));
         // reuse existing processing pipeline with a 10s overall timeout
         try {
-          await this.processDataUrl(dataUrl);
+          await this.processDataUrl(dataUrl, galleryFilename);
         } catch (e) {
           // processDataUrl handles its own timeout/cleanup, but catch here to avoid unhandled rejections
           console.warn('[CameraPage2] pickImagesMobile: processing failed or timed out', e);
@@ -360,6 +385,8 @@ export class CameraPage2Page implements AfterViewInit {
    * Updates session state via ImageStorageService and refreshes thumbnails/counters.
    */
   async processDataUrl(dataUrl: string, originalName?: string, bumpCounters: boolean = true) {
+    // Log the current image being processed
+    console.log(`🖼️ [CameraPage2] Current image name is: ${originalName || 'Unknown'}`);
     // mimic upload-image-page behaviour: preprocess, run inference, store
     this.capturedImages.unshift(dataUrl);
     // bump counters early so spinner shows while processing unless caller already did so
@@ -857,7 +884,13 @@ export class CameraPage2Page implements AfterViewInit {
       this.isLevelEnabled = true;
       this.isPhoneLeveled = false;
       this.levelRollDeg = 0;
+      this.levelTargetRoll = 0;
+      
+      // Add event listener for raw orientation data
       window.addEventListener('deviceorientation', this.orientationHandler, true);
+      
+      // Start smooth interpolation loop for responsive updates
+      this.startLevelSmoothingLoop();
     } catch (e) {
       console.warn('[CameraPage2] toggleLevelGuide failed', e);
       this.disableLevelGuide();
@@ -865,11 +898,59 @@ export class CameraPage2Page implements AfterViewInit {
     }
   }
 
+  /** Smooth interpolation loop for responsive level guide using requestAnimationFrame */
+  private startLevelSmoothingLoop() {
+    const updateLevel = () => {
+      if (!this.isLevelEnabled) return;
+
+      // Smooth interpolation using linear interpolation (lerp)
+      const angleDelta = this.levelTargetRoll - this.levelRollDeg;
+      
+      // Only update if there's a meaningful change to avoid excessive redraws
+      if (Math.abs(angleDelta) > 0.01) {
+        this.levelRollDeg += angleDelta * this.levelSmoothingFactor;
+      } else if (Math.abs(angleDelta) > 0) {
+        // Snap to target if very close to avoid oscillation
+        this.levelRollDeg = this.levelTargetRoll;
+      }
+
+      // Schedule next frame
+      this.levelAnimationFrameId = window.requestAnimationFrame(updateLevel);
+    };
+
+    // Start the loop
+    this.levelAnimationFrameId = window.requestAnimationFrame(updateLevel);
+  }
+
   private disableLevelGuide() {
     this.isLevelEnabled = false;
     this.isPhoneLeveled = false;
     this.levelRollDeg = 0;
+    this.levelTargetRoll = 0;
+    
+    // Cancel RAF loop
+    if (this.levelAnimationFrameId) {
+      window.cancelAnimationFrame(this.levelAnimationFrameId);
+      this.levelAnimationFrameId = undefined;
+    }
+    
     window.removeEventListener('deviceorientation', this.orientationHandler, true);
+  }
+
+  /** Briefly enable processed glow for `glowDurationMs` milliseconds */
+  private triggerProcessedGlow(durationMs?: number) {
+    const ms = typeof durationMs === 'number' ? durationMs : this.glowDurationMs;
+    this.processedGlowActive = true;
+    if (this._processedGlowTimer) {
+      clearTimeout(this._processedGlowTimer);
+    }
+    // ensure the animation starts
+    try { this.cdr.detectChanges(); } catch (e) {}
+    this._processedGlowTimer = setTimeout(() => {
+      this.processedGlowActive = false;
+      this._processedGlowTimer = undefined;
+      try { this.cdr.detectChanges(); } catch (e) {}
+    }, ms);
   }
 
   /**

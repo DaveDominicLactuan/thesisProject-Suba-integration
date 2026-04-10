@@ -32,14 +32,17 @@
     <img src="assets/back.png" alt="Back" class="back-icon" />
   </button>
   
-  <h2 class="login-title">Welcome back Engineer</h2>
-  <p class="login-subtitle">
-   Sign up and create an account to join our growing community of engineers and users.
-  </p>
-    <h3 class="role-label">WHO YOU ARE?</h3>
+  <!-- Header section: visible only when no role selected -->
+  <div *ngIf="!selectedRole" class="header-section">
+    <h2 class="login-title">Welcome back Engineer</h2>
+    <p class="login-subtitle">
+      Sign up and create an account to join our growing community of engineers and users.
+    </p>
+    <h3 class="role-label">Choose your role</h3>
+  </div>
 
 
-    <div class="role-selector">
+    <div class="role-selector" *ngIf="!selectedRole">
     <div
       class="role-option"
       *ngIf="!selectedRole || selectedRole === 'engineer'"
@@ -78,12 +81,42 @@
 
     <form [formGroup]="regForm" (ngSubmit)="onRegister()">
       <div class="steps-container" *ngIf="selectedRole">
-        <!-- Stepper navigation UI -->
+        <!-- Step indicator with progress -->
+        <div class="step-indicator-section">
+          <p class="step-indicator-text">Step {{ step }} of 4 — Create your account</p>
+          <div class="progress-bar-wrapper">
+            <div class="progress-bar-fill" [ngStyle]="{'width': (step / 4) * 100 + '%'}"></div>
+          </div>
+        </div>
+
+        <!-- Stepper navigation UI with progress connectors -->
         <div class="stepper">
-          <div class="step" [class.active]="step === 1">1</div>
-          <div class="step" [class.active]="step === 2">2</div>
-          <div class="step" [class.active]="step === 3">3</div>
-          <div class="step" [class.active]="step === 4">4</div>
+          <div class="step-wrapper">
+            <div class="step" [class.active]="step === 1">1</div>
+            <div class="step-connector" [class.active]="step > 1"></div>
+          </div>
+          <div class="step-wrapper">
+            <div class="step" [class.active]="step === 2">2</div>
+            <div class="step-connector" [class.active]="step > 2"></div>
+          </div>
+          <div class="step-wrapper">
+            <div class="step" [class.active]="step === 3">3</div>
+            <div class="step-connector" [class.active]="step > 3"></div>
+          </div>
+          <div class="step-wrapper">
+            <div class="step" [class.active]="step === 4">4</div>
+          </div>
+        </div>
+
+        <!-- Role display section (visible when role selected) -->
+        <div class="role-display-section" *ngIf="selectedRole">
+          <div class="role-display-content">
+            <img class="role-display-avatar" [src]="selectedRole === 'engineer' ? 'assets/engIcon.png' : 'assets/useIcon.png'" [alt]="selectedRole + ' icon'" />
+            <div class="role-display-text">
+              <p class="role-display-label">Signing up as {{ selectedRole | titlecase }}</p>
+              <button type="button" class="role-display-change" (click)="onBack()">Change</button>
+            </div>
+          </div>
         </div>
 
 
@@ -100,21 +133,27 @@
 
           <div class="form-field" [class.invalid]="f['password'].invalid && (f['password'].touched || submitted)">
             <ion-icon name="lock-closed-outline"></ion-icon>
-            <input type="password" placeholder="Password" formControlName="password" />
+            <input [type]="showPassword ? 'text' : 'password'" placeholder="Password" formControlName="password" (blur)="f['password'].markAsTouched()" />
+            <button type="button" class="password-toggle-btn" (click)="togglePasswordVisibility()" tabindex="-1" aria-label="Toggle password visibility">
+              <ion-icon [name]="showPassword ? 'eye-off-outline' : 'eye-outline'"></ion-icon>
+            </button>
           </div>
           <div *ngIf="f['password'].invalid && (f['password'].touched || submitted)" class="field-error">
             <span *ngIf="f['password'].errors?.['required']">Password is required.</span>
             <span *ngIf="f['password'].errors?.['minlength']">Password must be at least 6 characters.</span>
           </div>
 
-          <div class="form-field" [class.invalid]="(f['confirmPassword'].invalid && (f['confirmPassword'].touched || submitted)) || (regForm.errors?.['mismatch'] && submitted)">
+          <div class="form-field" [class.invalid]="(f['confirmPassword'].invalid && (f['confirmPassword'].touched || submitted)) || (regForm.errors?.['mismatch'] && f['confirmPassword'].touched)">
             <ion-icon name="lock-closed-outline"></ion-icon>
-            <input type="password" placeholder="Confirm Password" formControlName="confirmPassword" />
+            <input [type]="showConfirmPassword ? 'text' : 'password'" placeholder="Confirm Password" formControlName="confirmPassword" (blur)="f['confirmPassword'].markAsTouched()" />
+            <button type="button" class="password-toggle-btn" (click)="toggleConfirmPasswordVisibility()" tabindex="-1" aria-label="Toggle confirm password visibility">
+              <ion-icon [name]="showConfirmPassword ? 'eye-off-outline' : 'eye-outline'"></ion-icon>
+            </button>
           </div>
-          <div *ngIf="(f['confirmPassword'].invalid && (f['confirmPassword'].touched || submitted))" class="field-error">Confirm password is required.</div>
-          <div *ngIf="regForm.errors?.['mismatch'] && submitted" class="field-error">Passwords do not match.</div>
+          <div *ngIf="f['confirmPassword'].invalid && (f['confirmPassword'].touched || submitted)" class="field-error">Confirm password is required.</div>
+          <div *ngIf="regForm.errors?.['mismatch'] && f['confirmPassword'].touched" class="field-error">Passwords do not match.</div>
 
-          <button class="signup-btn" type="button" (click)="nextStep()" [disabled]="isRegistering || f['email'].invalid || f['password'].invalid || f['confirmPassword'].invalid || regForm.errors?.['mismatch']">Next</button>
+          <button class="signup-btn" type="button" (click)="nextStep(); submitted=false" [disabled]="isRegistering || f['email'].invalid || f['password'].invalid || f['confirmPassword'].invalid || (f['password'].value && f['confirmPassword'].value && regForm.errors?.['mismatch'])">Next</button>
         </div>
 
         <!-- Step 2: User Info -->
@@ -164,10 +203,10 @@
               </p>
             </div>
 
-            <div class="location-preview-chip">
+            <!-- <div class="location-preview-chip">
               <ion-icon name="navigate-circle-outline"></ion-icon>
               <span>{{ officeLocationText }}</span>
-            </div>
+            </div> -->
 
             <div
               class="location-map-placeholder"

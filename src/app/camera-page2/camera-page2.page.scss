@@ -453,6 +453,29 @@ position: absolute;
   cursor: pointer;
   /* Add overflow visible to show spinner outside if needed */
   overflow: visible;
+  border-radius: 8px;
+  transition: box-shadow 300ms ease;
+}
+
+/* Breathing glow animation when images are processed */
+.spinner-container-rect.has-processed-images {
+  /* run once for the glow duration; JavaScript removes the class after the same duration */
+  animation: breathing-glow 2.5s ease-in-out 1;
+}
+
+@keyframes breathing-glow {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(37, 199, 90, 0.7);
+  }
+  25% {
+    box-shadow: 0 0 0 8px rgba(37, 199, 90, 0.5);
+  }
+  50% {
+    box-shadow: 0 0 0 15px rgba(37, 199, 90, 0.25);
+  }
+  75% {
+    box-shadow: 0 0 0 8px rgba(37, 199, 90, 0.5);
+  }
 }
 
 
@@ -466,9 +489,9 @@ position: absolute;
 .rect-spinner-path {
   fill: none;
   stroke: #222;
-  stroke-width: 4;
+  stroke-width: 1.5;
   /* Perimeter is ~204px for 66x36 rounded rect; show a moving segment */
-  stroke-dasharray: 80 124; /* visible segment length + gap */
+  stroke-dasharray: 50 124; /* visible segment length + gap */
   stroke-dashoffset: 0;
   stroke-linecap: round;
   animation: rect-dash 1.2s ease-in-out infinite;
@@ -527,6 +550,8 @@ position: absolute;
   align-items: center;
   justify-content: center;
   z-index: 2;
+  box-shadow: none;
+  animation: none;
 
   &.green {
     background: rgb(9, 188, 18);

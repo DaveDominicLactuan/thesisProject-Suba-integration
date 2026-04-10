@@ -1525,7 +1525,8 @@ $sheet-transition: transform 0.32s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .radius-selection-panel {
-	width: min(520px, calc(100vw - 32px));
+	position: relative;
+	width: min(670px, calc(100vw - 32px));
 	height: min(600px, calc(100vh - 120px));
 	// border-radius: 28px;
 	// background: #efefef;
@@ -1546,7 +1547,7 @@ $sheet-transition: transform 0.32s cubic-bezier(0.4, 0, 0.2, 1);
 
 .radius-selection-label {
 	// font-size: 2rem;
-	font-size: 0.67rem;
+	font-size: 0.93rem;
 	line-height: 1.2;
 	font-weight: 500;
 	color: #2c2c2c;
@@ -1579,7 +1580,13 @@ $sheet-transition: transform 0.32s cubic-bezier(0.4, 0, 0.2, 1);
 	letter-spacing: 0.03em;
 	cursor: pointer;
 	box-shadow: 0 8px 18px rgba(245, 163, 0, 0.36);
-	transition: transform 0.12s ease, filter 0.12s ease;
+	transition: transform 0.12s ease, filter 0.12s ease, top 0.32s cubic-bezier(0.4, 0, 0.2, 1);
+	position: relative;
+	top: 0;
+}
+
+.radius-selection-confirm.advanced-shown {
+	top: 50%;
 }
 
 .radius-selection-confirm:active {
@@ -1587,6 +1594,61 @@ $sheet-transition: transform 0.32s cubic-bezier(0.4, 0, 0.2, 1);
 	filter: brightness(0.96);
 }
 
+.radius-selection-advanced-toggle {
+	margin-top: 12px;
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	padding: 12px 16px;
+	cursor: pointer;
+	font-weight: 600;
+	color: #222;
+	user-select: none;
+	transition: background 0.15s;
+	border-radius: 8px;
+	position: relative;
+	top: -510%;
+
+	&:active {
+		background: #f7f7f7;
+	}
+
+	ion-icon {
+		font-size: 1.3rem;
+		color: #666;
+	}
+}
+
+.advanced-block {
+	position: relative;
+}
+
+.advanced-options-content {
+	position: absolute;
+	top: calc(-400% + 8px);
+	left: 0;
+	right: 0;
+	z-index: 40;
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+	padding: 8px 4px;
+	animation: slideDown 0.18s ease-out;
+	background: rgba(255,255,255,0.98);
+	border-radius: 8px;
+	// box-shadow: 0 6px 18px rgba(0,0,0,0.08);
+}
+
+@keyframes slideDown {
+	from {
+		opacity: 0;
+		transform: translateY(-8px);
+	}
+	to {
+		opacity: 1;
+		transform: translateY(0);
+	}
+}
 
 .map-placeholder {
 	width: 90%;
@@ -1828,16 +1890,16 @@ $sheet-transition: transform 0.32s cubic-bezier(0.4, 0, 0.2, 1);
 	filter: brightness(1.06);
 }
 
-@media (max-width: 640px) {
+@media (max-width: 840px) {
 	.radius-selection-panel {
 		height: min(460px, calc(100vh - 150px));
-		width: 250px;
+		min-width: 285px;
 		padding: 62px 13px 20px 12px;
 		// border-radius: 24px;
 		background: white;
 		position: relative;
 		top: -15%;
-		left: 15%;
+		left: 20%;
 		border-bottom-left-radius: 20px;
 		border-bottom-right-radius: 0px;
 		border-top-left-radius: 20px;
@@ -1856,8 +1918,9 @@ $sheet-transition: transform 0.32s cubic-bezier(0.4, 0, 0.2, 1);
 	}
 
 	.radius-selection-confirm {
-		height: 52px;
-		font-size: 1rem;
+		height: 29px;
+		width: 120px;
+		font-size: 0.85rem;
 	}
 
 	.marker-selection-panel {

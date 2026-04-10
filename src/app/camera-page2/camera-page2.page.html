@@ -105,7 +105,7 @@
     <!-- Bottom Section (Spinner + Shutter + Thumbnails) -->
     <div class="bottom-bottom-row">
       <div class="func-action" (click)="openProcessWindow()">
-        <div class="spinner-container-rect">
+        <div class="spinner-container-rect" [class.has-processed-images]="processedGlowActive">
           <svg *ngIf="photosProcessed < photosTaken" class="rect-spinner" width="70" height="40">
             <rect x="2" y="2" width="66" height="36" rx="12" ry="12" class="rect-spinner-path" />
           </svg>
