@@ -4,6 +4,9 @@ import { BehaviorSubject, Observable } from 'rxjs';
 import { Auth } from '@angular/fire/auth';
 import { onAuthStateChanged } from 'firebase/auth';
 import { Firestore, collection, doc, setDoc, deleteDoc, getDocs, query, where, writeBatch } from '@angular/fire/firestore';
+import { S3Client, PutObjectCommand, ListObjectsV2Command, GetObjectCommand } from '@aws-sdk/client-s3';
+import { fromCognitoIdentityPool } from '@aws-sdk/credential-providers';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner'; // NEW IMPORT
 
 //image object in the session
 export interface StoredImage {
@@ -26,6 +29,11 @@ export interface StoredImage {
   storageUrl?: string; // Cloud Storage download URL for original image
   withBoxesStoragePath?: string; // Cloud Storage object path for withBoxes image
   withBoxesStorageUrl?: string; // Cloud Storage download URL for withBoxes image
+  // New explicit S3 key fields with userID:sessionId prefix (for clarity in Firestore)
+  originalS3Key?: string; // Full S3 key for original (e.g., "userID:abc123sessionId:xyz789img1crack1041120261109original.jpg")
+  originalS3Url?: string; // HTTPS URL for original image
+  withBoxesS3Key?: string; // Full S3 key for withBoxes (e.g., "userID:abc123sessionId:xyz789img1crack1041120261109withBoxes.jpg")
+  withBoxesS3Url?: string; // HTTPS URL for withBoxes image
 }
 
 //session
@@ -54,11 +62,23 @@ export class ImageStorageService {
   private readonly FIRESTORE_IMAGES_COLLECTION = 'images';
   private readonly FIRESTORE_SESSIONS_COLLECTION = 'sessionsImages';
   private readonly FIRESTORE_DOC_MAX_BYTES = 900_000;
+  private bucketName = 'my-angular-test-bucket-12345';
+  private region = 'ap-southeast-2';
+  private identityPoolId = 'ap-southeast-2:e70f96d9-6860-4f80-9bf8-082d2661b665';
   // Counter map to track image number per session
   private sessionImageCounters: Map<string, number> = new Map();
 
+  private s3Client: S3Client;
+
   constructor(private storage: Storage, private firestore: Firestore, private auth: Auth) {
     this.init();
+    this.s3Client = new S3Client({
+      region: this.region,
+      credentials: fromCognitoIdentityPool({
+        clientConfig: { region: this.region },
+        identityPoolId: this.identityPoolId,
+      }),
+    });
   }
 
   private getCurrentUserId(): string | null {
@@ -85,6 +105,415 @@ export class ImageStorageService {
         resolve(user?.uid ?? null);
       });
     });
+  }
+
+  // ==================== File Upload Methods ====================
+
+  /** Read a file as ArrayBuffer */
+  private readAsArrayBuffer(file: File): Promise<ArrayBuffer> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as ArrayBuffer);
+      reader.onerror = () => reject(reader.error);
+      reader.readAsArrayBuffer(file);
+    });
+  }
+
+  /** Upload a file to S3 and return the URL */
+  async uploadFile(file: File): Promise<string> {
+    const fileName = file.name || `upload-${Date.now()}`;
+
+    try {
+      const fileBuffer = await this.readAsArrayBuffer(file);
+      const uint8Array = new Uint8Array(fileBuffer);
+      const params = {
+        Bucket: this.bucketName,
+        Key: fileName,
+        Body: uint8Array,
+        ContentType: file.type
+      };
+
+      const command = new PutObjectCommand(params);
+      await this.s3Client.send(command);
+
+      const finalUrl = `https://${this.bucketName}.s3.${this.region}.amazonaws.com/${fileName}`;
+
+      // SUCCESS LOG
+      console.log('✅ AWS S3: Upload Successful!');
+      console.log('🔗 File URL:', finalUrl);
+
+      return finalUrl;
+    } catch (error: any) {
+      console.error('❌ AWS S3: Upload Failed', error);
+      throw error;
+    }
+  }
+
+  /** Handle file selection from input event */
+  onFileSelected(event: any): File | null {
+    const fileList: FileList = event.target.files;
+    if (fileList && fileList.length > 0) {
+      return fileList[0];
+    }
+    return null;
+  }
+
+  /** Main upload method that handles file upload and storage */
+  async upload(file: File, sessionId?: string): Promise<string | null> {
+    if (!file) {
+      console.warn('⚠️ No file provided for upload');
+      return null;
+    }
+
+    try {
+      const uploadedFileUrl = await this.uploadFile(file);
+      console.log('🚀 Upload complete! URL:', uploadedFileUrl);
+      return uploadedFileUrl;
+    } catch (error) {
+      console.error('🚀 Upload failed:', error);
+      return null;
+    }
+  }
+
+  /** Upload original image to S3 with session-scoped filename */
+  async uploadSessionImageOriginal(dataUrl: string, sessionId: string, originalFilename: string): Promise<{ url: string; s3Key: string } | null> {
+    try {
+      // Generate S3 filename using session info
+      const s3Filename = this.generateSessionFilename({
+        sessionId,
+        filename: originalFilename,
+        imageType: 'original',
+        timestamp: new Date().toISOString()
+      });
+
+      // Convert data URL to Uint8Array
+      const uint8Array = this.dataUrlToUint8Array(dataUrl);
+
+      // Upload to S3
+      const params = {
+        Bucket: this.bucketName,
+        Key: s3Filename,
+        Body: uint8Array,
+        ContentType: 'image/jpeg'
+      };
+
+      console.log('[ImageStorageService] Attempting to upload original image to S3:', s3Filename);
+      const command = new PutObjectCommand(params);
+      await this.s3Client.send(command);
+
+      const finalUrl = `https://${this.bucketName}.s3.${this.region}.amazonaws.com/${s3Filename}`;
+
+      console.log('✅ Original image uploaded to S3 with key:', s3Filename);
+      console.log('🔗 Original image URL:', finalUrl);
+
+      return { url: finalUrl, s3Key: s3Filename };
+    } catch (error: any) {
+      console.error('❌ Failed to upload original image to S3:', error?.message || error);
+      console.warn('[ImageStorageService] S3 upload failed (CORS or network issue). Image will be stored locally.');
+      console.warn('[ImageStorageService] To fix S3 uploads, ensure CORS is configured on the S3 bucket for origin: http://localhost:8100');
+      // Return null to indicate S3 upload failure - app should handle local storage fallback
+      return null;
+    }
+  }
+
+  /** Upload withBoxes image to S3 with session-scoped filename */
+  async uploadSessionImageWithBoxes(dataUrl: string, sessionId: string, originalFilename: string): Promise<{ url: string; s3Key: string } | null> {
+    try {
+      // Generate S3 filename using session info
+      const s3Filename = this.generateSessionFilename({
+        sessionId,
+        filename: originalFilename,
+        imageType: 'withBoxes',
+        timestamp: new Date().toISOString()
+      });
+
+      // Convert data URL to Uint8Array
+      const uint8Array = this.dataUrlToUint8Array(dataUrl);
+
+      // Upload to S3
+      const params = {
+        Bucket: this.bucketName,
+        Key: s3Filename,
+        Body: uint8Array,
+        ContentType: 'image/jpeg'
+      };
+
+      console.log('[ImageStorageService] Attempting to upload withBoxes image to S3:', s3Filename);
+      const command = new PutObjectCommand(params);
+      await this.s3Client.send(command);
+
+      const finalUrl = `https://${this.bucketName}.s3.${this.region}.amazonaws.com/${s3Filename}`;
+
+      console.log('✅ WithBoxes image uploaded to S3 with key:', s3Filename);
+      console.log('🔗 WithBoxes image URL:', finalUrl);
+
+      return { url: finalUrl, s3Key: s3Filename };
+    } catch (error: any) {
+      console.error('❌ Failed to upload withBoxes image to S3:', error?.message || error);
+      console.warn('[ImageStorageService] S3 upload failed (CORS or network issue). Image will be stored locally.');
+      console.warn('[ImageStorageService] To fix S3 uploads, ensure CORS is configured on the S3 bucket for origin: http://localhost:8100');
+      // Return null to indicate S3 upload failure - app should handle local storage fallback
+      return null;
+    }
+  }
+
+  /** Helper: Convert data URL to Uint8Array */
+  private dataUrlToUint8Array(dataUrl: string): Uint8Array {
+    const arr = dataUrl.split(',');
+    const bstr = atob(arr[1]);
+    const n = bstr.length;
+    const u8arr = new Uint8Array(n);
+    for (let i = 0; i < n; i++) {
+      u8arr[i] = bstr.charCodeAt(i);
+    }
+    return u8arr;
+  }
+
+  /** 
+   * Log and confirm the complete S3/Firestore integration workflow 
+   * @param sessionId Session ID to verify
+   * @param imageFilenames Optional array of filenames to verify
+   */
+  async logSaveWorkflowStatus(sessionId: string, imageFilenames?: string[]): Promise<void> {
+    try {
+      const session = this.getSession(sessionId);
+      if (!session) {
+        console.warn('[ImageStorageService] Session not found:', sessionId);
+        return;
+      }
+
+      const workflowLog: any = {
+        timestamp: new Date().toISOString(),
+        session: {
+          id: session.id,
+          name: session.name,
+          userId: session.userId,
+          imageCount: session.imageKeys?.length || 0
+        },
+        s3Uploads: [],
+        firestoreStatus: 'Pending verification'
+      };
+
+      // Collect image details from session
+      for (const key of session.imageKeys || []) {
+        const img = this.images.find(i => i.filename === key || i.original === key);
+        if (img) {
+          const imageInfo: any = {
+            filename: img.filename,
+            hasOriginal: !!img.original,
+            hasWithBoxes: !!img.withBoxes,
+            s3References: {
+              originalS3Key: img.storagePath || '(not uploaded)',
+              originalS3Url: img.storageUrl ? '✅ Available' : '❌ Missing',
+              withBoxesS3Key: img.withBoxesStoragePath || '(not uploaded)',
+              withBoxesS3Url: img.withBoxesStorageUrl ? '✅ Available' : '❌ Missing'
+            },
+            prediction: img.prediction || null,
+            statusMessage: img.statusMessage || ''
+          };
+          workflowLog.s3Uploads.push(imageInfo);
+        }
+      }
+
+      // Log workflow status
+      console.group('[ImageStorageService] ✅ S3/Firestore Integration Workflow Status');
+      console.log('📋 Workflow Summary:', workflowLog);
+      console.table(workflowLog.s3Uploads);
+      console.groupEnd();
+
+      // Log individual S3 references
+      console.group('[ImageStorageService] 📁 S3 References Details');
+      workflowLog.s3Uploads.forEach((img: any) => {
+        console.log(`\n${img.filename}:`);
+        console.log('  Original S3:', {
+          key: img.s3References.originalS3Key,
+          url: img.s3References.originalS3Url
+        });
+        console.log('  WithBoxes S3:', {
+          key: img.s3References.withBoxesS3Key,
+          url: img.s3References.withBoxesS3Url
+        });
+      });
+      console.groupEnd();
+
+      // Confirm Firestore will receive S3 references
+      console.log('[ImageStorageService] ✅ Firestore Save Process:');
+      console.log('  - S3 references will be stored in Firestore documents');
+      console.log('  - Original image S3 key:', workflowLog.s3Uploads[0]?.s3References.originalS3Key);
+      console.log('  - WithBoxes S3 key:', workflowLog.s3Uploads[0]?.s3References.withBoxesS3Key);
+    } catch (error) {
+      console.error('[ImageStorageService] Error logging workflow status:', error);
+    }
+  }
+
+  /**
+   * Fetch a single S3 object by key and convert to base64 data URL
+   * @param s3Key The S3 object key to fetch
+   * @returns Promise<string> Base64 data URL or null on failure
+   */
+  async fetchS3ObjectAsDataUrl(s3Key: string): Promise<string | null> {
+    try {
+      if (!s3Key) {
+        console.warn('[ImageStorageService] fetchS3ObjectAsDataUrl: No S3 key provided');
+        return null;
+      }
+
+      console.log(`[ImageStorageService] Fetching S3 object: ${s3Key}`);
+      const getCommand = new GetObjectCommand({
+        Bucket: this.bucketName,
+        Key: s3Key
+      });
+
+      const response = await this.s3Client.send(getCommand);
+      
+      // Convert response body stream to Uint8Array
+      const chunks: Uint8Array[] = [];
+      const reader = response.Body as any;
+
+      if (reader && typeof reader.pipe === 'function') {
+        // Node.js stream
+        return new Promise((resolve, reject) => {
+          reader.on('data', (chunk: Uint8Array) => chunks.push(chunk));
+          reader.on('end', () => {
+            const binaryString = String.fromCharCode(...new Uint8Array(Buffer.concat(chunks)));
+            const base64 = btoa(binaryString);
+            resolve(`data:image/jpeg;base64,${base64}`);
+          });
+          reader.on('error', reject);
+        });
+      } else if (reader && typeof reader.getReader === 'function') {
+        // Web stream
+        const readableStream = await new Response(reader as any).arrayBuffer();
+        const binaryString = String.fromCharCode(...new Uint8Array(readableStream));
+        const base64 = btoa(binaryString);
+        return `data:image/jpeg;base64,${base64}`;
+      } else {
+        console.warn('[ImageStorageService] Unknown stream type for S3 response');
+        return null;
+      }
+    } catch (error) {
+      console.error(`[ImageStorageService] Error fetching S3 object ${s3Key}:`, error);
+      return null;
+    }
+  }
+
+  /**
+   * Fetch session images from Firestore and S3, with progress tracking
+   * @param sessionId The session ID to fetch
+   * @param userId The user ID for query filtering
+   * @param onProgress Optional callback for progress updates: (current: number, total: number) => void
+   * @returns Promise<void> Updates this.images with fetched S3 data
+   */
+  async fetchSessionImagesFromS3(
+    sessionId: string,
+    userId: string,
+    onProgress?: (current: number, total: number) => void
+  ): Promise<void> {
+    try {
+      if (!sessionId || !userId) {
+        console.warn('[ImageStorageService] fetchSessionImagesFromS3: sessionId or userId missing', {
+          sessionId,
+          userId
+        });
+        return;
+      }
+
+      console.log('[ImageStorageService] Starting S3 fetch for session:', {
+        sessionId,
+        userId
+      });
+
+      // Query Firestore for all images in this session
+      const imagesCollection = collection(this.firestore, this.FIRESTORE_IMAGES_COLLECTION);
+      const imageQuery = query(
+        imagesCollection,
+        where('sessionId', '==', sessionId),
+        where('userId', '==', userId)
+      );
+
+      const querySnapshot = await getDocs(imageQuery);
+      const firestoreImages = querySnapshot.docs.map(doc => ({
+        filename: doc.id,
+        ...doc.data() as any
+      }));
+
+      if (firestoreImages.length === 0) {
+        console.warn('[ImageStorageService] No images found in Firestore for session:', sessionId);
+        return;
+      }
+
+      console.log(`[ImageStorageService] Found ${firestoreImages.length} images in Firestore for session ${sessionId}`);
+
+      // Fetch each image from S3 and update local images array
+      let fetchedCount = 0;
+      for (const firestoreImage of firestoreImages) {
+        try {
+          // Find or create the local StoredImage object
+          let localImage = this.images.find(i => i.filename === firestoreImage.filename);
+          if (!localImage) {
+            localImage = {
+              original: '',
+              withBoxes: '',
+              boxes: firestoreImage.boxes || [],
+              faceDetected: firestoreImage.faceDetected || false,
+              faceData: firestoreImage.faceData || [],
+              timestamp: firestoreImage.timestamp || new Date().toISOString(),
+              filename: firestoreImage.filename,
+              prediction: firestoreImage.prediction || null,
+              hasPrediction: firestoreImage.hasPrediction || false,
+              statusMessage: firestoreImage.statusMessage || '',
+              detectionMessage: firestoreImage.detectionMessage || '',
+              sessionId: firestoreImage.sessionId,
+              userId: firestoreImage.userId,
+              fileImageName: firestoreImage.fileImageName,
+              storagePath: firestoreImage.storagePath,
+              storageUrl: firestoreImage.storageUrl,
+              withBoxesStoragePath: firestoreImage.withBoxesStoragePath,
+              withBoxesStorageUrl: firestoreImage.withBoxesStorageUrl
+            };
+            this.images.push(localImage);
+          }
+
+          // Fetch original image from S3 if storagePath is available
+          if (firestoreImage.storagePath && !localImage.original) {
+            console.log(`[ImageStorageService] Fetching original image from S3: ${firestoreImage.storagePath}`);
+            const originalDataUrl = await this.fetchS3ObjectAsDataUrl(firestoreImage.storagePath);
+            if (originalDataUrl) {
+              localImage.original = originalDataUrl;
+              console.log(`✅ Original image fetched for ${firestoreImage.filename}`);
+            }
+          }
+
+          // Fetch withBoxes image from S3 if withBoxesStoragePath is available
+          if (firestoreImage.withBoxesStoragePath && !localImage.withBoxes) {
+            console.log(`[ImageStorageService] Fetching withBoxes image from S3: ${firestoreImage.withBoxesStoragePath}`);
+            const withBoxesDataUrl = await this.fetchS3ObjectAsDataUrl(firestoreImage.withBoxesStoragePath);
+            if (withBoxesDataUrl) {
+              localImage.withBoxes = withBoxesDataUrl;
+              console.log(`✅ WithBoxes image fetched for ${firestoreImage.filename}`);
+            }
+          }
+
+          fetchedCount++;
+          if (onProgress) {
+            onProgress(fetchedCount, firestoreImages.length);
+          }
+        } catch (error) {
+          console.error(`[ImageStorageService] Error fetching image data for ${firestoreImage.filename}:`, error);
+          fetchedCount++;
+          if (onProgress) {
+            onProgress(fetchedCount, firestoreImages.length);
+          }
+        }
+      }
+
+      // Persist updated images to local storage
+      await this.persistSessions();
+      console.log(`✅ All ${fetchedCount} images fetched from S3 for session ${sessionId}`);
+    } catch (error) {
+      console.error('[ImageStorageService] Error in fetchSessionImagesFromS3:', error);
+      throw error;
+    }
   }
 
   /** Initialize Ionic Storage and load existing images */
@@ -165,10 +594,18 @@ export class ImageStorageService {
   }
 
   /**
-   * Generate a session-scoped filename in the form:
-   * userID:${userId}sessionId:${sessionId}img{N}crack{M}MMDDYYYYHHMM.jpg (crack part included only when hasCrack is true)
+   * Generate a session-scoped filename with image type.
+   * Includes userID and sessionId prefixes to ensure unique filenames per user and session.
+   * Format: userID:{userId}sessionId:{sessionId}img{N}[crack{M}][_filename][_type]MMDDYYYYHHMM.jpg
+   * @param options Configuration object with sessionId, filename, imageType, hasCrack, and timestamp
    */
-  generateSessionFilename(options: { sessionId?: string; hasCrack?: boolean; timestamp?: string } = {}): string {
+  generateSessionFilename(options: { 
+    sessionId?: string; 
+    filename?: string; 
+    imageType?: string; 
+    hasCrack?: boolean; 
+    timestamp?: string 
+  } = {}): string {
     const date = options.timestamp ? new Date(options.timestamp) : new Date();
     const month = String(date.getMonth() + 1).padStart(2, '0');
     const day = String(date.getDate()).padStart(2, '0');
@@ -183,12 +620,34 @@ export class ImageStorageService {
     const imgIndex = sessionId ? (this.getSessionImageCount(sessionId) + 1) : (this.images.length + 1);
     const crackPart = options.hasCrack ? `crack${this.getSessionCrackCount(sessionId) + 1}` : '';
 
-    // Get session userId and sessionId if session exists
+    // Get current userId from auth
+    const currentUserId = this.getCurrentUserId() || '';
+    
+    // Get session object to retrieve sessionId
     const session = sessionId ? this.getSession(sessionId) : undefined;
-    const userId = session?.userId || '';
-    const finalSessionId = session?.sessionId || '';
+    
+    // Format userID prefix (only if userId is available)
+    const userIdPrefix = currentUserId ? `userID:${currentUserId}` : '';
+    
+    // Format sessionId prefix (using the actual session ID)
+    const sessionIdPrefix = session?.id ? `sessionId:${session.id}` : '';
 
-    return `userID:${userId}sessionId:${finalSessionId}img${imgIndex}${crackPart}${dateStr}${timeStr}.jpg`;
+    // Include original filename and image type in the final filename
+    const originalFilename = options.filename ? `_${options.filename.replace(/\.[^.]+$/, '')}` : '';
+    const imageTypeSuffix = options.imageType ? `_${options.imageType}` : '';
+
+    const crackPartStr = crackPart ? `_${crackPart}` : '';
+    
+    // Build final filename with userID and sessionId included
+    const finalFilename = `${userIdPrefix}${sessionIdPrefix}img${imgIndex}${crackPartStr}${originalFilename}${imageTypeSuffix}${dateStr}${timeStr}.jpg`;
+    
+    console.log('[ImageStorageService] Generated filename:', {
+      userId: currentUserId,
+      sessionId: session?.id,
+      filename: finalFilename
+    });
+    
+    return finalFilename;
   }
 
   /**
@@ -408,21 +867,35 @@ export class ImageStorageService {
       for (const image of imagesForSession) {
         // CRITICAL: Ensure userId is ALWAYS set to currentUid (never null)
         image.userId = currentUid;
-        const safeOriginal = await this.clampDataUrlToBytes(image.original, this.FIRESTORE_DOC_MAX_BYTES);
-        const safeWithBoxes = await this.clampDataUrlToBytes(image.withBoxes, this.FIRESTORE_DOC_MAX_BYTES);
+        // NOTE: Commented out base64 storage to save Firestore quota - using S3 references instead
+        // const safeOriginal = await this.clampDataUrlToBytes(image.original, this.FIRESTORE_DOC_MAX_BYTES);
+        // const safeWithBoxes = await this.clampDataUrlToBytes(image.withBoxes, this.FIRESTORE_DOC_MAX_BYTES);
         const imageRef = doc(imagesCollection, image.filename);
         batch.set(imageRef, {
           timestamp: image.timestamp,
           filename: image.filename,
           userId: currentUid,
           sessionId: session.id,
-          original: safeOriginal,
-          withBoxes: safeWithBoxes,
+          // NOTE: Commented out - base64 data stored in S3 instead
+          // original: safeOriginal,
+          // withBoxes: safeWithBoxes,
           hasPrediction: image.hasPrediction || false,
           statusMessage: image.statusMessage || '',
           detectionMessage: image.detectionMessage || '',
           prediction: image.prediction || null,
-          boxes: image.boxes || []
+          boxes: image.boxes || [],
+          // S3 references for original image (full generated filename with userID:sessionId prefix)
+          originalS3Key: image.storagePath || null,   // e.g., "userID:abc123sessionId:xyz789img1crack1041120261109original.jpg"
+          originalS3Url: image.storageUrl || null,    // HTTPS URL to original image
+          // Backward compatibility
+          storagePath: image.storagePath || null,
+          storageUrl: image.storageUrl || null,
+          // S3 references for withBoxes image (full generated filename with userID:sessionId prefix)
+          withBoxesS3Key: image.withBoxesStoragePath || null,   // e.g., "userID:abc123sessionId:xyz789img1crack1041120261109withBoxes.jpg"
+          withBoxesS3Url: image.withBoxesStorageUrl || null,    // HTTPS URL to withBoxes image
+          // Backward compatibility
+          withBoxesStoragePath: image.withBoxesStoragePath || null,
+          withBoxesStorageUrl: image.withBoxesStorageUrl || null
         });
       }
 

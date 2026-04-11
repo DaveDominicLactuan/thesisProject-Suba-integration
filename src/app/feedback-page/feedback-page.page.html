@@ -43,7 +43,7 @@
           <button class="delete-left-btn" type="button" (click)="deleteSelectedImage()" title="Delete selected image">
             <img src="assets/Trash.png" alt="Delete" class="trash-icon" />
           </button>
-          <div class="image-title">{{ selectedImageTitle }}</div>
+          <div class="image-title" [title]="selectedImageTitle">{{ getShortImageTitle(selectedImageTitle) }}</div>
           <!-- Toggle control placed beside the title on the right side -->
           <div class="toggle-wrapper">
             <label class="switch">

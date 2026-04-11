@@ -77,6 +77,9 @@
     <button class="sort-btn" (click)="showSortOverlay()" title="Sort sessions">
       <ion-icon name="swap-vertical-outline"></ion-icon>
     </button>
+    <button class="debug-btn" (click)="printSessionsList()" title="Debug: Print sessions list" style="background: #ff6b00; margin-left: 8px; padding: 8px 12px; border: none; border-radius: 6px; color: white; cursor: pointer; font-size: 12px;">
+      Debug Sessions
+    </button>
   </div>
 
   <!-- Sort overlay -->
@@ -116,22 +119,24 @@
   </div>
 
   <div class="sessions-list">
-    <div *ngFor="let s of sessions" class="session-item" (click)="goToSession(s)">
-      <div class="session-left">
-        <div class="session-name">{{ s.name }}</div>
-        <div class="session-images">
-          <ion-icon name="image" class="image-icon"></ion-icon>
-          <span>{{ s.imageKeys?.length || 0 }} Images</span>
+    <ng-container *ngFor="let s of sessions">
+      <div *ngIf="s.userId === userID" class="session-item" (click)="goToSession(s)">
+        <div class="session-left">
+          <div class="session-name">{{ s.name }}</div>
+          <div class="session-images">
+            <ion-icon name="image" class="image-icon"></ion-icon>
+            <span>{{ s.imageKeys?.length || 0 }} Images</span>
+          </div>
+        </div>
+        <div class="session-right">
+          <div class="session-time">{{ s.created | date:'shortTime' }}</div>
+          <button class="delete-btn" (click)="deleteSession(s, $event)">
+            <img src="assets/trashIcon.png" alt="Delete" style="width: 28px; height: 28px; object-fit: contain;" />
+          </button>
         </div>
       </div>
-      <div class="session-right">
-        <div class="session-time">{{ s.created | date:'shortTime' }}</div>
-        <button class="delete-btn" (click)="deleteSession(s, $event)">
-          <img src="assets/trashIcon.png" alt="Delete" style="width: 28px; height: 28px; object-fit: contain;" />
-        </button>
-      </div>
-    </div>
-    <div *ngIf="!sessions || sessions.length === 0" class="no-sessions">
+    </ng-container>
+    <div *ngIf="!hasUserSessions()" class="no-sessions">
       No sessions yet. Start a new session to get started.
     </div>
   </div>

@@ -467,6 +467,11 @@
   text-align: center;
   padding-bottom: 10px;
   font-family: 'Segoe UI Variable Text Semibold', sans-serif;
+  /* Max width and text truncation */
+  max-width: 200px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* wrapper to position a left-side delete button while keeping the title centered */

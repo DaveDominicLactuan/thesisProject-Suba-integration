@@ -114,6 +114,8 @@ private async initialize(): Promise<void> {
     this.engineeringID = profile['engineeringID'] || '';
     this.email = profile['email'] || '';
     this.userID = profile['userID'] || '';
+    // Store current userId to localStorage for offline reference
+    this.storeCurrentUserId();
     // Read role from Firestore profile (authoritative source)
     this.userRole = profile['role'] || (this.engineeringID ? 'engineer' : 'user');
     //gets username from firatName and lastName
@@ -817,7 +819,13 @@ private async initialize(): Promise<void> {
           hasPrediction: !!fsImage.hasPrediction,
           prediction: fsImage.prediction || undefined,
           userId: userId,
-          sessionId: fsImage.sessionId || undefined
+          sessionId: fsImage.sessionId || undefined,
+          // S3 references for original image
+          storagePath: fsImage.storagePath || undefined,
+          storageUrl: fsImage.storageUrl || undefined,
+          // S3 references for withBoxes image
+          withBoxesStoragePath: fsImage.withBoxesStoragePath || undefined,
+          withBoxesStorageUrl: fsImage.withBoxesStorageUrl || undefined
         };
         console.log('[HomePage2.syncUserDataFromFirestore] Mapped image object:', {
           filename: storedImage.filename,
@@ -825,7 +833,11 @@ private async initialize(): Promise<void> {
           withBoxesPreview: storedImage.withBoxes ? `${String(storedImage.withBoxes).slice(0, 40)}...` : '',
           boxesCount: Array.isArray(storedImage.boxes) ? storedImage.boxes.length : 0,
           faceDetected: storedImage.faceDetected,
-          timestamp: storedImage.timestamp
+          timestamp: storedImage.timestamp,
+          s3References: {
+            hasStoragePath: !!storedImage.storagePath,
+            hasWithBoxesStoragePath: !!storedImage.withBoxesStoragePath
+          }
         });
 
         // Check/store image in local storage while skipping duplicates
@@ -918,8 +930,48 @@ private async initialize(): Promise<void> {
     try {
       await this.auth3.logout();
     } catch {}
-    try { localStorage.setItem('isLoggedIn', 'false'); } catch {}
-    try { localStorage.removeItem('userData'); } catch {}
+    
+    // Clear all locally stored sessions and images
+    try {
+      // Clear all images from ImageStorageService and Ionic Storage
+      if (this.imageStorage && typeof this.imageStorage.clear === 'function') {
+        await this.imageStorage.clear();
+        console.log('[HomePage2.logout] Cleared all images from storage');
+      }
+    } catch (e) {
+      console.warn('[HomePage2.logout] Failed to clear images', e);
+    }
+
+    // Clear sessions from Ionic Storage
+    try {
+      // Access the Storage instance from imageStorage to clear sessions
+      if ((this.imageStorage as any)._storage) {
+        await (this.imageStorage as any)._storage?.remove('stored_image_sessions');
+        console.log('[HomePage2.logout] Cleared all sessions from storage');
+      }
+    } catch (e) {
+      console.warn('[HomePage2.logout] Failed to clear sessions', e);
+    }
+
+    // Clear other user-related local storage
+    try { 
+      localStorage.setItem('isLoggedIn', 'false'); 
+    } catch {}
+    try { 
+      localStorage.removeItem('userData'); 
+    } catch {}
+    try {
+      localStorage.removeItem('userProfile');
+    } catch {}
+    try {
+      localStorage.removeItem('currentSessionId');
+    } catch {}
+    
+    // Clear sessionStorage as well
+    try {
+      sessionStorage.removeItem('userProfile');
+    } catch {}
+    
     this.isLoggedIn = false;
     if (closeOverlay) {
       this.removeTestOverlay();
@@ -1693,6 +1745,50 @@ private async initialize(): Promise<void> {
    goNetworkPage() {
     this.router.navigate(['/network-page2']);
     console.log('network page 2');
+  }
+
+  /**
+   * Store the current userId to localStorage for offline reference.
+   */
+  private storeCurrentUserId(): void {
+    const currentUid = this.auth3.getCurrentUser()?.uid || this.userID || '';
+    if (currentUid) {
+      try {
+        localStorage.setItem('currentUserId', currentUid);
+        console.log('[HomePage2.storeCurrentUserId] Stored current userId:', currentUid);
+      } catch (error) {
+        console.error('[HomePage2.storeCurrentUserId] Failed to store userId:', error);
+      }
+    }
+  }
+
+  /**
+   * Get the userId stored in localStorage.
+   */
+  private getStoredUserId(): string | null {
+    try {
+      return localStorage.getItem('currentUserId');
+    } catch (error) {
+      console.error('[HomePage2.getStoredUserId] Failed to retrieve stored userId:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Print locally stored userId and current userId for debugging.
+   */
+  printUserIdStatus(): void {
+    const storedUserId = this.getStoredUserId();
+    const currentUserId = this.auth3.getCurrentUser()?.uid || this.userID || null;
+
+    console.log('[HomePage2.printUserIdStatus] User ID Status:', {
+      storedUserId: storedUserId || 'Not stored',
+      currentUserId: currentUserId || 'Not available',
+      match: storedUserId === currentUserId
+    });
+
+    // Also print to alert for immediate visibility
+    alert(`User ID Status:\n\nStored: ${storedUserId || 'Not stored'}\nCurrent: ${currentUserId || 'Not available'}\n\nMatch: ${storedUserId === currentUserId ? 'Yes ✓' : 'No ✗'}`);
   }
 
 }

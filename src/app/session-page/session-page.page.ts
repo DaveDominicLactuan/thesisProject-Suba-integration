@@ -451,8 +451,48 @@ private async initialize(): Promise<void> {
     try {
       await this.auth3.logout();
     } catch {}
-    try { localStorage.setItem('isLoggedIn', 'false'); } catch {}
-    try { localStorage.removeItem('userData'); } catch {}
+    
+    // Clear all locally stored sessions and images
+    try {
+      // Clear all images from ImageStorageService and Ionic Storage
+      if (this.imageStorage && typeof this.imageStorage.clear === 'function') {
+        await this.imageStorage.clear();
+        console.log('[SessionPage.logout] Cleared all images from storage');
+      }
+    } catch (e) {
+      console.warn('[SessionPage.logout] Failed to clear images', e);
+    }
+
+    // Clear sessions from Ionic Storage
+    try {
+      // Access the Storage instance from imageStorage to clear sessions
+      if ((this.imageStorage as any)._storage) {
+        await (this.imageStorage as any)._storage?.remove('stored_image_sessions');
+        console.log('[SessionPage.logout] Cleared all sessions from storage');
+      }
+    } catch (e) {
+      console.warn('[SessionPage.logout] Failed to clear sessions', e);
+    }
+
+    // Clear other user-related local storage
+    try { 
+      localStorage.setItem('isLoggedIn', 'false'); 
+    } catch {}
+    try { 
+      localStorage.removeItem('userData'); 
+    } catch {}
+    try {
+      localStorage.removeItem('userProfile');
+    } catch {}
+    try {
+      localStorage.removeItem('currentSessionId');
+    } catch {}
+    
+    // Clear sessionStorage as well
+    try {
+      sessionStorage.removeItem('userProfile');
+    } catch {}
+    
     this.isLoggedIn = false;
     if (closeOverlay) {
       this.removeTestOverlay();
@@ -468,11 +508,12 @@ private async initialize(): Promise<void> {
   /**
    * Open the Feedback page pre-selecting a session. Select its first image in
    * ImageStorageService so detail UIs can initialize accordingly.
+   * Before navigating, fetch S3 images from the session to ensure they're available.
    */
   async goToSession(session: any) {
     // pick the first image in session and prepare the destination(feedback-page) to load it and 
     // display that first image when the session is selected
-     try {
+    try {
       if (session && session.imageKeys && session.imageKeys.length > 0) {
         const key = session.imageKeys[0];
         if (this.imageStorage && typeof this.imageStorage.selectImageByOriginal === 'function') {
@@ -480,19 +521,173 @@ private async initialize(): Promise<void> {
         }
       }
     } catch (e) { console.warn('goToSession warning', e); }
+    
     try {
-      // Ensure HomePage back handler is removed before naviagting 
+      // Ensure HomePage back handler is removed before navigating 
       // to feedback-page to keep the logic and behavior of back button is kept inside the home-page
       try { this.removeBackButtonHandler(); } catch (e) { /* ignore */ }
 
-      //build the parameters for the current session to be selected and displayed 
+      // Create and show loading spinner for S3 fetch
+      const spinnerContainer = document.createElement('div');
+      spinnerContainer.id = 'session-fetch-spinner';
+      spinnerContainer.style.position = 'fixed';
+      spinnerContainer.style.top = '50%';
+      spinnerContainer.style.left = '50%';
+      spinnerContainer.style.transform = 'translate(-50%, -50%)';
+      spinnerContainer.style.zIndex = '10000';
+      spinnerContainer.style.textAlign = 'center';
+      spinnerContainer.style.backgroundColor = 'rgba(0, 0, 0, 0.3)';
+      spinnerContainer.style.width = '100%';
+      spinnerContainer.style.height = '100%';
+      spinnerContainer.style.display = 'flex';
+      spinnerContainer.style.justifyContent = 'center';
+      spinnerContainer.style.alignItems = 'center';
+
+      const spinner = document.createElement('div');
+      spinner.style.border = '4px solid rgba(255, 81, 47, 0.3)';
+      spinner.style.borderTop = '4px solid #ff512f';
+      spinner.style.borderRadius = '50%';
+      spinner.style.width = '40px';
+      spinner.style.height = '40px';
+      spinner.style.animation = 'spin 1s linear infinite';
+      spinner.style.margin = '0 auto 10px';
+
+      // Add CSS animation for spinner if not already present
+      if (!document.getElementById('session-spinner-animation')) {
+        const style = document.createElement('style');
+        style.id = 'session-spinner-animation';
+        style.innerHTML = `
+          @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+          }
+        `;
+        document.head.appendChild(style);
+      }
+
+      const spinnerBox = document.createElement('div');
+      spinnerBox.style.backgroundColor = 'white';
+      spinnerBox.style.padding = '30px';
+      spinnerBox.style.borderRadius = '10px';
+      spinnerBox.style.boxShadow = '0 4px 15px rgba(0, 0, 0, 0.2)';
+      spinnerBox.style.minWidth = '320px';
+
+      const spinnerText = document.createElement('div');
+      spinnerText.innerText = 'Loading session images from S3...';
+      spinnerText.style.color = '#333';
+      spinnerText.style.marginTop = '10px';
+      spinnerText.style.fontSize = '14px';
+      spinnerText.style.maxWidth = '300px';
+      spinnerText.style.wordWrap = 'break-word';
+
+      // Create progress bar container
+      const progressBarContainer = document.createElement('div');
+      progressBarContainer.style.marginTop = '20px';
+      progressBarContainer.style.width = '100%';
+      progressBarContainer.style.maxWidth = '280px';
+      progressBarContainer.style.margin = '20px auto 0';
+
+      // Progress bar background (empty)
+      const progressBarBackground = document.createElement('div');
+      progressBarBackground.style.width = '100%';
+      progressBarBackground.style.height = '8px';
+      progressBarBackground.style.backgroundColor = '#e0e0e0';
+      progressBarBackground.style.borderRadius = '4px';
+      progressBarBackground.style.overflow = 'hidden';
+      progressBarBackground.style.border = '1px solid #ccc';
+
+      // Progress bar fill (animated)
+      const progressBarFill = document.createElement('div');
+      progressBarFill.style.height = '100%';
+      progressBarFill.style.width = '0%';
+      progressBarFill.style.backgroundColor = '#ff512f';
+      progressBarFill.style.borderRadius = '4px';
+      progressBarFill.style.transition = 'width 0.3s ease';
+
+      progressBarBackground.appendChild(progressBarFill);
+
+      // Progress percentage text
+      const progressText = document.createElement('div');
+      progressText.innerText = '0%';
+      progressText.style.fontSize = '12px';
+      progressText.style.color = '#666';
+      progressText.style.marginTop = '8px';
+      progressText.style.textAlign = 'center';
+
+      progressBarContainer.appendChild(progressBarBackground);
+      progressBarContainer.appendChild(progressText);
+
+      spinnerBox.appendChild(spinner);
+      spinnerBox.appendChild(spinnerText);
+      spinnerBox.appendChild(progressBarContainer);
+      spinnerContainer.appendChild(spinnerBox);
+      document.body.appendChild(spinnerContainer);
+
+      // Fetch S3 images with progress tracking
+      const svc: any = this.imageStorage as any;
+      const sessionId = session?.id || null;
+      const userId = this.userID || null;
+
+      if (sessionId && userId && typeof svc.fetchSessionImagesFromS3 === 'function') {
+        try {
+          console.log('[SessionPage] Starting S3 fetch for session:', { sessionId, userId });
+          
+          // Fetch images with progress callback to update spinner text and progress bar
+          await svc.fetchSessionImagesFromS3(
+            sessionId,
+            userId,
+            (current: number, total: number) => {
+              const percentage = total > 0 ? Math.round((current / total) * 100) : 0;
+              progressBarFill.style.width = `${percentage}%`;
+              progressText.innerText = `${percentage}% (${current}/${total} images)`;
+              spinnerText.innerText = `Loading images from S3...\n(${current}/${total} images)`;
+              console.log(`[SessionPage] S3 fetch progress: ${current}/${total} (${percentage}%)`);
+            }
+          );
+
+          spinnerText.innerText = '✅ Session images loaded!';
+          progressBarFill.style.width = '100%';
+          progressText.innerText = '100%';
+          console.log('[SessionPage] ✅ S3 images fetched successfully for session:', sessionId);
+
+          // Brief delay to show success message before navigating
+          await new Promise(resolve => setTimeout(resolve, 500));
+        } catch (error) {
+          spinnerText.innerText = '⚠️ Images may not be fully loaded, but continuing...';
+          console.warn('[SessionPage] Warning during S3 fetch:', error);
+          // Continue anyway - some images may be available locally
+          await new Promise(resolve => setTimeout(resolve, 500));
+        }
+      } else {
+        console.warn('[SessionPage] Cannot fetch S3 images - missing sessionId, userId, or fetchSessionImagesFromS3 method', {
+          sessionId,
+          userId,
+          hasMethod: typeof svc.fetchSessionImagesFromS3 === 'function'
+        });
+        spinnerText.innerText = 'Preparing session...';
+        progressBarFill.style.width = '50%';
+        progressText.innerText = '50%';
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
+
+      // Remove spinner and navigate
+      try { spinnerContainer.remove(); } catch (e) { /* ignore */ }
+
+      // Build the parameters for the current session to be selected and displayed 
       // in feedback-page with the session.id
       const params: any = {};
       if (session && session.id) params.sessionId = session.id;
       // Navigate to feedback page and include sessionId so feedback page can load the session
       this.router.navigate(['/feedback-page'], { queryParams: params });
     } catch (e) {
-      console.warn('Navigation to feedback page failed, falling back', e);
+      console.error('[SessionPage] Navigation to feedback page failed:', e);
+      // Clean up spinner if it exists
+      try {
+        const spinner = document.getElementById('session-fetch-spinner');
+        if (spinner) spinner.remove();
+      } catch (err) { /* ignore */ }
+      
+      // Fallback to navigation without S3 fetch
       this.router.navigate(['/feedback-page']);
     }
   }
@@ -1035,5 +1230,78 @@ private async initialize(): Promise<void> {
     
     // Close overlay after sorting
     this.closeSortOverlay();
+  }
+
+  /**
+   * Get the userId stored in localStorage.
+   */
+  private getStoredUserId(): string | null {
+    try {
+      return localStorage.getItem('currentUserId');
+    } catch (error) {
+      console.error('[SessionPage.getStoredUserId] Failed to retrieve stored userId:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Print current user ID and stored user ID to console for debugging.
+   */
+  printUserIdStatus(): void {
+    const storedUserId = this.getStoredUserId();
+    const currentUserId = this.auth3.getCurrentUser()?.uid || this.userID || null;
+
+    console.log('[SessionPage.printUserIdStatus] User ID Status:', {
+      storedUserId: storedUserId || 'Not stored',
+      currentUserId: currentUserId || 'Not available',
+      match: storedUserId === currentUserId
+    });
+
+    // Also print to alert for immediate visibility
+    alert(`User ID Status:\n\nStored: ${storedUserId || 'Not stored'}\nCurrent: ${currentUserId || 'Not available'}\n\nMatch: ${storedUserId === currentUserId ? 'Yes ✓' : 'No ✗'}`);
+  }
+
+  /**
+   * Print all session objects currently displayed in the sessions list to console.
+   */
+  printSessionsList(): void {
+    console.log('[SessionPage.printSessionsList] Total sessions:', this.sessions.length);
+    
+    if (!this.sessions || this.sessions.length === 0) {
+      console.log('[SessionPage.printSessionsList] No sessions to display');
+      alert('No sessions to display');
+      return;
+    }
+
+    console.log('[SessionPage.printSessionsList] Full sessions array:', this.sessions);
+    
+    // Print each session with details
+    this.sessions.forEach((session, index) => {
+      console.log(`[SessionPage.printSessionsList] Session ${index}:`, {
+        id: session.id,
+        name: session.name,
+        created: session.created,
+        imageCount: session.imageKeys?.length || 0,
+        imageKeys: session.imageKeys || [],
+        userId: session.userId
+      });
+    });
+
+    // Also create a summary alert
+    const summary = this.sessions.map((s, i) => 
+      `Session ${i + 1}: ${s.name || 'Untitled'} (${s.imageKeys?.length || 0} images)`
+    ).join('\n');
+    
+    alert(`Sessions List (${this.sessions.length} total):\n\n${summary}`);
+  }
+
+  /**
+   * Check if there are any sessions for the current user.
+   */
+  hasUserSessions(): boolean {
+    if (!this.sessions || this.sessions.length === 0) {
+      return false;
+    }
+    return this.sessions.some(session => session.userId === this.userID);
   }
 }

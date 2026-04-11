@@ -75,6 +75,7 @@ private backButtonSub: any; // hardware back handler
   detectionMessage: string = '';
   detectionResult: string = '';
   userRole: string | null = null; // User role for access control
+  userId: string | null = null; // Current user ID
 
   /**
    * Inject router, API, storage service, and CameraPreview (native).
@@ -96,6 +97,7 @@ private backButtonSub: any; // hardware back handler
    */
   ngOnInit() {
     this.loadUserRole();
+    this.loadUserId();
     try {
       // CameraPreview is a Cordova/native plugin — on web it will throw; ignore on web
       this.cameraPreview.stopCamera();
@@ -139,6 +141,8 @@ private backButtonSub: any; // hardware back handler
           this.debugLogStoredImages();
           // Try to detect the centered image (will update again when DOM ready)
           this.detectCenterImage();
+          // Display user and session information
+          this.displayUserAndSessionInfo();
         })
         .catch(err => console.warn('[FeedbackPage] failed to initialize sessions/images', err));
     }, 500);
@@ -172,6 +176,69 @@ private backButtonSub: any; // hardware back handler
       console.warn('[FeedbackPage] loadUserRole failed, defaulting to user', e);
       this.userRole = 'user';
     }
+  }
+
+  /**
+   * Load userId from localStorage (userData) or from sessionStorage.
+   * Attempts to retrieve the current user ID for identification purposes.
+   */
+  private loadUserId() {
+    try {
+      // Try localStorage first
+      const cached = localStorage.getItem('userData');
+      if (cached) {
+        const data = JSON.parse(cached);
+        this.userId = data.userID || data.uid || null;
+      }
+    } catch (e) {
+      console.warn('[FeedbackPage] loadUserId from localStorage failed', e);
+    }
+
+    // Fallback to sessionStorage if not found
+    if (!this.userId) {
+      try {
+        const sessionData = sessionStorage.getItem('userProfile');
+        if (sessionData) {
+          const data = JSON.parse(sessionData);
+          this.userId = data.userID || data.uid || null;
+        }
+      } catch (e) {
+        console.warn('[FeedbackPage] loadUserId from sessionStorage failed', e);
+      }
+    }
+
+    if (this.userId) {
+      console.log('[FeedbackPage] loaded userId:', this.userId);
+    } else {
+      console.warn('[FeedbackPage] userId could not be loaded from storage');
+    }
+  }
+
+  /**
+   * Display the current user ID and session ID in the console and return them.
+   * Useful for debugging and verifying user/session context.
+   */
+  displayUserAndSessionInfo(): { userId: string | null; sessionId: string | null } {
+    const info = {
+      userId: this.userId,
+      sessionId: this.selectedSessionId || null
+    };
+
+    console.group('[FeedbackPage] 👤 User and Session Information');
+    console.log('User ID:', info.userId || '(not loaded)');
+    console.log('Session ID:', info.sessionId || '(no session selected)');
+    console.log('Current Session:', this.selectedSessionId ? this.sessions.find(s => s.id === this.selectedSessionId) : 'None');
+    console.log('All loaded sessions:', this.sessions.length > 0 ? this.sessions : '(no sessions loaded)');
+    console.groupEnd();
+
+    return info;
+  }
+
+  /**
+   * Log user context for debugging (userId, sessionId, and related metadata).
+   */
+  private logUserContext() {
+    this.displayUserAndSessionInfo();
   }
 
   //handles a user clicking an image in the gallaery scroller, selects it and populates the UI
@@ -228,6 +295,8 @@ private backButtonSub: any; // hardware back handler
     // debug output for immediate inspection
     console.log('[FeedbackPage] onImageClick debug', {
       filename: img.filename,
+      selectedImageTitle: this.selectedImageTitle,
+      shortImageTitle: this.getShortImageTitle(this.selectedImageTitle),
       rawPrediction: img.rawPrediction,
       statusMessage: img.statusMessage,
       selectedPrediction: this.selectedPrediction,
@@ -543,6 +612,12 @@ detectCenterImage() {
 
   // Set the title from the stored filename if available
   this.selectedImageTitle = matched.fileName ?? '';
+
+  // Debug: Log both full and shortened titles
+  console.group('[FeedbackPage] 📋 Image Title Debug');
+  console.log('Full selectedImageTitle:', this.selectedImageTitle);
+  console.log('Shortened title:', this.getShortImageTitle(this.selectedImageTitle));
+  console.groupEnd();
 
   // Populate structured prediction and status for UI use
   this.selectedPrediction = matched.rawPrediction ?? {};
@@ -882,6 +957,13 @@ addEntry() {
         this.selectedStatusMessage = first.statusMessage ?? '';
         this.selectedImageTitle = first.filename ?? '';
 
+        // Debug: Log both full and shortened titles after deletion
+        console.group('[FeedbackPage] 📋 Image Title Debug (After Deletion)');
+        console.log('Full selectedImageTitle:', this.selectedImageTitle);
+        console.log('Shortened title:', this.getShortImageTitle(this.selectedImageTitle));
+        console.log('Remaining images:', this.imagePaths.length);
+        console.groupEnd();
+
         // update dropdowns and detection strings
         if (this.selectedStatusMessage && this.selectedStatusMessage.length > 0) {
           this.detectionMessage = this.selectedStatusMessage;
@@ -905,6 +987,13 @@ addEntry() {
         this.selectedImageTitle = '';
         this.detectionMessage = '';
         this.detectionResult = '';
+
+        // Debug: Log when all images cleared
+        console.group('[FeedbackPage] 📋 Image Title Debug (All Cleared)');
+        console.log('All images deleted - selectedImageTitle reset to empty');
+        console.log('Full selectedImageTitle:', this.selectedImageTitle);
+        console.log('Shortened title:', this.getShortImageTitle(this.selectedImageTitle));
+        console.groupEnd();
         this.dropdown1 = '';
         this.dropdown2 = '';
         this.dropdown3 = '';
@@ -1010,6 +1099,26 @@ addEntry() {
       //Navigate without session id
       this.router.navigate(['/results-dashboard']);
     }
+  }
+
+  /**
+   * Shorten the image title by removing userID, sessionId, and img1 prefixes.
+   * Example: "userID:abc123sessionId:xyz789img1crack1041120261109.jpg" → "crack1041120261109.jpg"
+   * Handles cases where these prefixes don't exist.
+   */
+  getShortImageTitle(fullTitle: string): string {
+    if (!fullTitle) return '';
+    
+    // Remove userID: prefix if it exists (format: userID:someIdValue)
+    let shortened = fullTitle.replace(/^userID:[^s]*/i, '');
+    
+    // Remove sessionId: prefix if it exists (format: sessionId:someIdValue)
+    shortened = shortened.replace(/^sessionId:[^i]*/i, '');
+    
+    // Remove img1, img2, etc. prefix if it exists (format: img{N})
+    shortened = shortened.replace(/^img\d+/i, '');
+    
+    return shortened || fullTitle; // Return original if nothing was removed
   }
 
   /**
@@ -1167,14 +1276,62 @@ addEntry() {
       });
 
       //read input, call ImageStorageService to add or create session, 
-      //remove overlay, alert, navigate, resolve
+      //upload images to S3, remove overlay, alert, navigate, resolve
       saveBtn.addEventListener('click', async () => {
         try {
+          // Create and show loading spinner
+          const spinnerContainer = document.createElement('div');
+          spinnerContainer.style.position = 'fixed';
+          spinnerContainer.style.top = '50%';
+          spinnerContainer.style.left = '50%';
+          spinnerContainer.style.transform = 'translate(-50%, -50%)';
+          spinnerContainer.style.zIndex = '10000';
+          spinnerContainer.style.textAlign = 'center';
+
+          const spinner = document.createElement('div');
+          spinner.style.border = '4px solid rgba(255, 81, 47, 0.3)';
+          spinner.style.borderTop = '4px solid #ff512f';
+          spinner.style.borderRadius = '50%';
+          spinner.style.width = '40px';
+          spinner.style.height = '40px';
+          spinner.style.animation = 'spin 1s linear infinite';
+          spinner.style.margin = '0 auto 10px';
+
+          // Add CSS animation for spinner
+          if (!document.getElementById('spinner-animation')) {
+            const style = document.createElement('style');
+            style.id = 'spinner-animation';
+            style.innerHTML = `
+              @keyframes spin {
+                0% { transform: rotate(0deg); }
+                100% { transform: rotate(360deg); }
+              }
+            `;
+            document.head.appendChild(style);
+          }
+
+          const spinnerText = document.createElement('div');
+          spinnerText.innerText = 'Saving session and uploading images...';
+          spinnerText.style.color = '#333';
+          spinnerText.style.marginTop = '10px';
+          spinnerText.style.fontSize = '14px';
+          spinnerText.style.maxWidth = '300px';
+          spinnerText.style.wordWrap = 'break-word';
+
+          spinnerContainer.appendChild(spinner);
+          spinnerContainer.appendChild(spinnerText);
+          document.body.appendChild(spinnerContainer);
+
+          // Disable buttons during save
+          saveBtn.disabled = true;
+          cancelBtn.disabled = true;
+
           const val = input.value && input.value.trim().length > 0 ? input.value.trim() : `Session ${new Date().toLocaleString()}`;
           const svc: any = this.imageStorageService as any;
           // Use filename as key, fallback to original for backward compatibility
           const imageKey = entry.filename || entry.original;
           let savedSessionId: string | null = null;
+
           // If a session is already selected (e.g., from Camera page), update it
           if (this.selectedSessionId && typeof svc.addImageToSession === 'function') {
             try {
@@ -1201,22 +1358,123 @@ addEntry() {
             }
           }
 
+          // Track S3 upload results for Firestore persistence
+          let originalS3Result: { url: string; s3Key: string } | null = null;
+          let withBoxesS3Result: { url: string; s3Key: string } | null = null;
+
+          // Upload images to S3 for the session
+          if (savedSessionId && entry.original) {
+            try {
+              spinnerText.innerText = 'Uploading original image to S3...';
+              
+              // Upload original image
+              if (typeof svc.uploadSessionImageOriginal === 'function' && entry.original) {
+                try {
+                  originalS3Result = await svc.uploadSessionImageOriginal(entry.original, savedSessionId, entry.filename || imageKey);
+                  
+                  // Update spinner with success message and S3 key
+                  if (originalS3Result && originalS3Result.s3Key) {
+                    spinnerText.innerText = `✅ Original image uploaded to S3\n📁 ${originalS3Result.s3Key}`;
+                    console.log('✅ Original image uploaded to S3 with key:', originalS3Result.s3Key);
+                  } else {
+                    spinnerText.innerText = '💾 Original image stored locally (S3 unavailable)';
+                    console.log('[FeedbackPage] S3 upload returned null - using local storage');
+                  }
+                } catch (error) {
+                  spinnerText.innerText = '💾 Original image stored locally (S3 failed)';
+                  console.warn('[FeedbackPage] Failed to upload original image to S3:', error);
+                }
+              }
+
+              // Upload withBoxes image if available
+              if (typeof svc.uploadSessionImageWithBoxes === 'function' && entry.withBoxes) {
+                try {
+                  spinnerText.innerText = 'Uploading processed image to S3...';
+                  withBoxesS3Result = await svc.uploadSessionImageWithBoxes(entry.withBoxes, savedSessionId, entry.filename || imageKey);
+                  
+                  // Update spinner with success message and S3 key
+                  if (withBoxesS3Result && withBoxesS3Result.s3Key) {
+                    spinnerText.innerText = `✅ Processed image uploaded to S3\n📁 ${withBoxesS3Result.s3Key}`;
+                    console.log('✅ WithBoxes image uploaded to S3 with key:', withBoxesS3Result.s3Key);
+                  } else {
+                    spinnerText.innerText = '💾 Processed image stored locally (S3 unavailable)';
+                    console.log('[FeedbackPage] S3 upload returned null - using local storage');
+                  }
+                } catch (error) {
+                  spinnerText.innerText = '💾 Processed image stored locally (S3 failed)';
+                  console.warn('[FeedbackPage] Failed to upload withBoxes image to S3:', error);
+                }
+              }
+
+              // Update entry with S3 references before Firestore save (only if S3 upload succeeded)
+              if (originalS3Result) {
+                entry.storagePath = originalS3Result.s3Key;
+                entry.storageUrl = originalS3Result.url;
+                console.log('[FeedbackPage] S3 reference persisted for original image:', originalS3Result.s3Key);
+              } else {
+                console.log('[FeedbackPage] Original image stored locally (no S3 reference)');
+              }
+              if (withBoxesS3Result) {
+                entry.withBoxesStoragePath = withBoxesS3Result.s3Key;
+                entry.withBoxesStorageUrl = withBoxesS3Result.url;
+                console.log('[FeedbackPage] S3 reference persisted for withBoxes image:', withBoxesS3Result.s3Key);
+              } else {
+                console.log('[FeedbackPage] WithBoxes image stored locally (no S3 reference)');
+              }
+
+              // Update the entry in service storage to persist S3 references
+              if (typeof svc.setEntryForImage === 'function') {
+                svc.setEntryForImage(imageKey, entry);
+              }
+
+              spinnerText.innerText = 'Saving to Firestore...';
+            } catch (err) {
+              console.warn('[FeedbackPage] Error during S3 upload:', err);
+              spinnerText.innerText = '⚠️ Error during S3 upload process';
+            }
+          }
+
+          // Firestore save - includes S3 references from updated entry
           let firestoreSaved = false;
           if (savedSessionId && typeof svc.saveSessionWithImagesToFirestore === 'function') {
             try {
               await svc.saveSessionWithImagesToFirestore(savedSessionId);
               firestoreSaved = true;
+              spinnerText.innerText = '✅ Session and images saved to Firestore';
+              console.log('✅ Firestore save completed with S3 references');
+              
+              // Log the complete S3/Firestore workflow status
+              if (typeof svc.logSaveWorkflowStatus === 'function') {
+                try {
+                  await svc.logSaveWorkflowStatus(savedSessionId);
+                } catch (logError) {
+                  console.warn('⚠️ Failed to log workflow status:', logError);
+                }
+              }
             } catch (e) {
-              /* ignore */
+              console.warn('⚠️ Failed to save to Firestore:', e);
+              spinnerText.innerText = '⚠️ Firestore save failed, but S3 upload succeeded';
             }
           }
 
           try { document.body.removeChild(overlay); } catch (e) {}
+          try { document.body.removeChild(spinnerContainer); } catch (e) {}
 
           if (firestoreSaved && savedSessionId) {
-            const firestoreMessage = `✅ Session and images saved to Firestore: ${savedSessionId}`;
+            const s3Summary = [];
+            if (originalS3Result) s3Summary.push(`Original: ${originalS3Result.s3Key}`);
+            if (withBoxesS3Result) s3Summary.push(`Processed: ${withBoxesS3Result.s3Key}`);
+            
+            const firestoreMessage = `✅ Session saved to Firestore: ${savedSessionId}\n${s3Summary.length > 0 ? '📁 S3 Files:\n' + s3Summary.join('\n') : ''}`;
             console.log(firestoreMessage);
             await this.showFirestoreSavePrompt(firestoreMessage);
+          } else if (originalS3Result || withBoxesS3Result) {
+            const s3Summary = [];
+            if (originalS3Result) s3Summary.push(`Original: ${originalS3Result.s3Key}`);
+            if (withBoxesS3Result) s3Summary.push(`Processed: ${withBoxesS3Result.s3Key}`);
+            
+            const successMessage = `✅ Images uploaded to S3\n📁 S3 Files:\n${s3Summary.join('\n')}`;
+            alert(successMessage);
           } else {
             alert('Session saved successfully');
           }
@@ -1225,6 +1483,13 @@ addEntry() {
         } catch (ee) {
           console.warn('Failed to save session via prompt', ee);
           alert('Failed to create session. See console.');
+          // Remove spinner on error
+          try {
+            const spinner = document.querySelector('div[style*="position: fixed"]');
+            if (spinner && spinner.parentNode) {
+              spinner.parentNode.removeChild(spinner);
+            }
+          } catch (e) {}
         }
         resolve();
       });

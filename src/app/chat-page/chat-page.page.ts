@@ -1821,8 +1821,48 @@ onMsgBubbleTap(message: Message): void {
     try {
       await this.auth3.logout();
     } catch {}
-    try { localStorage.setItem('isLoggedIn', 'false'); } catch {}
-    try { localStorage.removeItem('userData'); } catch {}
+    
+    // Clear all locally stored sessions and images
+    try {
+      // Clear all images from ImageStorageService and Ionic Storage
+      if (this.imageStorage && typeof this.imageStorage.clear === 'function') {
+        await this.imageStorage.clear();
+        console.log('[ChatPage.logout] Cleared all images from storage');
+      }
+    } catch (e) {
+      console.warn('[ChatPage.logout] Failed to clear images', e);
+    }
+
+    // Clear sessions from Ionic Storage
+    try {
+      // Access the Storage instance from imageStorage to clear sessions
+      if ((this.imageStorage as any)._storage) {
+        await (this.imageStorage as any)._storage?.remove('stored_image_sessions');
+        console.log('[ChatPage.logout] Cleared all sessions from storage');
+      }
+    } catch (e) {
+      console.warn('[ChatPage.logout] Failed to clear sessions', e);
+    }
+
+    // Clear other user-related local storage
+    try { 
+      localStorage.setItem('isLoggedIn', 'false'); 
+    } catch {}
+    try { 
+      localStorage.removeItem('userData'); 
+    } catch {}
+    try {
+      localStorage.removeItem('userProfile');
+    } catch {}
+    try {
+      localStorage.removeItem('currentSessionId');
+    } catch {}
+    
+    // Clear sessionStorage as well
+    try {
+      sessionStorage.removeItem('userProfile');
+    } catch {}
+    
     this.isLoggedIn = false;
     if (closeOverlay) {
     }
