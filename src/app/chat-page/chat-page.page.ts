@@ -285,6 +285,80 @@ export class ChatPagePage implements OnInit, OnDestroy {
     return this.getInitials(this.getMapSheetEngineerName(engineer));
   }
 
+  // --- Conversation Attachment Sheet Methods ---
+  toggleAttachmentSheet(): void {
+    this.isAttachmentSheetActive = !this.isAttachmentSheetActive;
+    console.log(`[ChatPage.attachmentSheet] Toggled. State: ${this.isAttachmentSheetActive ? 'Active' : 'Inactive'}`);
+  }
+
+  openAttachmentSheet(): void {
+    this.attachmentSheetViewMode = 'grid';
+    this.isAttachmentSheetActive = true;
+    this.loadConversationAttachments();
+    console.log('[ChatPage.attachmentSheet] Opened. State: Active');
+  }
+
+  closeAttachmentSheet(): void {
+    this.isAttachmentSheetActive = false;
+    console.log('[ChatPage.attachmentSheet] Closed. State: Inactive');
+  }
+
+  loadConversationAttachments(): void {
+    // Load attachments from current conversation messages
+    // Filter messages that contain media/attachments
+    if (!this.messages || this.messages.length === 0) {
+      this.conversationAttachments = [];
+      return;
+    }
+
+    const attachments: any[] = [];
+    this.messages.forEach((msg: any) => {
+      if (msg.attachments && Array.isArray(msg.attachments)) {
+        msg.attachments.forEach((attachment: any) => {
+          attachments.push({
+            ...attachment,
+            messageId: msg.id,
+            senderId: msg.senderId,
+            timestamp: msg.timestamp
+          });
+        });
+      } else if (msg.imageUrl || msg.fileUrl) {
+        attachments.push({
+          url: msg.imageUrl || msg.fileUrl,
+          type: msg.imageUrl ? 'image' : 'file',
+          name: msg.fileName || 'Attachment',
+          messageId: msg.id,
+          senderId: msg.senderId,
+          timestamp: msg.timestamp
+        });
+      }
+    });
+
+    this.conversationAttachments = attachments;
+  }
+
+  selectAttachment(attachment: any, event?: Event): void {
+    event?.stopPropagation();
+    this.selectedAttachment = attachment;
+    this.attachmentSheetViewMode = 'detail';
+    console.log('[ChatPage.attachmentSheet] Attachment selected', attachment);
+  }
+
+  backToAttachmentGrid(event?: Event): void {
+    event?.stopPropagation();
+    if (this.conversationAttachments.length > 0) {
+      this.attachmentSheetViewMode = 'grid';
+    }
+  }
+
+  getAttachmentPreviewIcon(attachment: any): string {
+    const type = attachment?.type || 'file';
+    if (type === 'image') return 'image-outline';
+    if (type === 'pdf') return 'document-outline';
+    if (type === 'video') return 'play-circle-outline';
+    return 'attach-outline';
+  }
+
   private static userSyncTasks: Map<string, Promise<void>> = new Map();
   userName: string | null = null;
   firstName: string | null = null;
@@ -384,6 +458,12 @@ export class ChatPagePage implements OnInit, OnDestroy {
     latitude: 10.302051,
     longitude: 123.902243
   };
+
+  // --- Conversation Attachment Sheet State ---
+  isAttachmentSheetActive = false;
+  attachmentSheetViewMode: 'detail' | 'grid' = 'grid';
+  conversationAttachments: any[] = [];
+  selectedAttachment: any = null;
   private officeLocationMarkerData: OfficeLocationMarkerData[] = [];
   private officeLocationLeafletMarkers: L.Marker[] = [];
   private markerUserProfileMap: Map<L.Marker, any> = new Map();

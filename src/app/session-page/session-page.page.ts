@@ -32,6 +32,10 @@ export class SessionPagePage implements OnInit, OnDestroy {
   currentSort: string = 'time-newest'; // default sorting
   syncStatusText: string = 'Not synced';
   syncStatusState: 'idle' | 'syncing' | 'completed' | 'error' = 'idle';
+  
+  // --- Session Confirmation Dialog State ---
+  isSessionConfirmDialogOpen: boolean = false;
+  selectedSessionForConfirm: any = null;
 
   /** Inject auth, router, and image storage services for navigation and data. */
   constructor(private formBuilder: FormBuilder, private router: Router, private authService: AuthService, private navCtrl: NavController, private auth3: Auth3Service, private imageStorage: ImageStorageService, private platform: Platform) {
@@ -510,6 +514,99 @@ private async initialize(): Promise<void> {
    * ImageStorageService so detail UIs can initialize accordingly.
    * Before navigating, fetch S3 images from the session to ensure they're available.
    */
+  // Show confirmation dialog when session is clicked
+  onSessionItemClick(session: any, event?: Event): void {
+    if (event) event.stopPropagation();
+    this.selectedSessionForConfirm = session;
+    this.isSessionConfirmDialogOpen = true;
+    console.log('[SessionPage] Session click detected. Debug info:');
+    this.debugPrintSessionData(session);
+  }
+
+  // Close confirmation dialog without action
+  closeSessionConfirmDialog(): void {
+    this.isSessionConfirmDialogOpen = false;
+    this.selectedSessionForConfirm = null;
+  }
+
+  // Confirm session action: print debug and then navigate
+  async confirmSessionAction(session: any): Promise<void> {
+    console.log('[SessionPage] Session confirmed. Printing full debug info:');
+    await this.debugPrintSessionData(session);
+    this.closeSessionConfirmDialog();
+    // Now proceed with navigation
+    await this.goToSession(session);
+  }
+
+  // Debug method: print session object and related images from Firestore/S3
+  private async debugPrintSessionData(session: any): Promise<void> {
+    try {
+      console.log('========== SESSION DEBUG INFO ==========');
+      console.log('Session Object:', JSON.parse(JSON.stringify(session)));
+      
+      if (session && session.id) {
+        console.log('\n--- Session Images ---');
+        console.log('Session ID:', session.id);
+        console.log('Image Keys Count:', session.imageKeys?.length || 0);
+        console.log('Image Keys:', session.imageKeys);
+
+        // Get all stored images
+        let allImages: any[] = [];
+        try {
+          if (typeof (this.imageStorage as any).getAllImages === 'function') {
+            const res = (this.imageStorage as any).getAllImages();
+            allImages = (res && typeof (res as Promise<any>).then === 'function') ? await res : res;
+          } else if (typeof (this.imageStorage as any).getImages === 'function') {
+            const res = (this.imageStorage as any).getImages();
+            allImages = (res && typeof (res as Promise<any>).then === 'function') ? await res : res;
+          }
+          if (!Array.isArray(allImages)) allImages = [];
+        } catch (e) {
+          console.warn('[SessionPage] Failed to get all images:', e);
+          allImages = [];
+        }
+
+        console.log('\n--- All Stored Images ---');
+        console.log('Total Stored Images:', allImages.length);
+        allImages.forEach((img: any, idx: number) => {
+          console.log(`Image ${idx + 1}:`, {
+            filename: img.filename,
+            timestamp: img.timestamp,
+            hasPrediction: !!img.prediction,
+            hasOriginal: !!img.original,
+            hasWithBoxes: !!img.withBoxes,
+            s3Keys: {
+              originalS3Key: img.originalS3Key,
+              withBoxesS3Key: img.withBoxesS3Key
+            },
+            sessionId: img.sessionId
+          });
+        });
+
+        // Print images for this specific session
+        const sessionImages = allImages.filter((img: any) => 
+          session.imageKeys?.includes(img.filename) || 
+          session.imageKeys?.includes(img.original)
+        );
+        console.log(`\n--- Images in this Session (${sessionImages.length} total) ---`);
+        sessionImages.forEach((img: any, idx: number) => {
+          console.log(`Session Image ${idx + 1}:`, {
+            filename: img.filename,
+            prediction: img.prediction,
+            statusMessage: img.statusMessage,
+            s3URLs: {
+              original: img.originalS3Url,
+              withBoxes: img.withBoxesS3Url
+            }
+          });
+        });
+      }
+      console.log('========== END DEBUG INFO ==========\n');
+    } catch (e) {
+      console.error('[SessionPage] Error during debug print:', e);
+    }
+  }
+
   async goToSession(session: any) {
     // pick the first image in session and prepare the destination(feedback-page) to load it and 
     // display that first image when the session is selected

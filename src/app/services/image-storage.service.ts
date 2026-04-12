@@ -1050,13 +1050,15 @@ export class ImageStorageService {
       //the length of the boxes array is added to totalBoxes.
       if (img && Array.isArray((img as any).boxes)) totalBoxes += (img as any).boxes.length;
     }
+    const sessionId = `s-${Date.now()}`;
     const s: ImageSession = { 
-      id: `s-${Date.now()}`, 
+      id: sessionId, 
       name, 
       imageKeys: [...imageKeys], 
       created: new Date().toISOString(), 
       totalBoundingBoxes: totalBoxes,
-      userId: userId
+      userId: userId,
+      sessionId: sessionId
     };
     //The new session is added to the beginning of the sessions array using unshift.
     this.sessions.unshift(s);

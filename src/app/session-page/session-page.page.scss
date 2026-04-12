@@ -930,6 +930,131 @@ ion-menu ion-item:hover {
   z-index: 900; /* sits behind the sidebar but above page content */
 }
 
+// --- Session Confirmation Dialog Styles ---
+.session-confirm-overlay {
+  position: fixed;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+}
+
+.session-confirm-dialog {
+  background: #ffffff;
+  border-radius: 20px;
+  padding: 28px 24px;
+  max-width: 340px;
+  width: 90%;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  border: 2px solid #ff6b4a;
+}
+
+.session-confirm-header {
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+
+  h2 {
+    margin: 0;
+    font-size: 1.3rem;
+    font-weight: 700;
+    color: #1a1a2e;
+    line-height: 1.3;
+  }
+
+  p {
+    margin: 0;
+    font-size: 1rem;
+    color: #555;
+    line-height: 1.4;
+  }
+}
+
+.session-confirm-content {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.session-info {
+  background: #f9f9f9;
+  border-radius: 12px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.session-confirm-name {
+  font-size: 1rem;
+  font-weight: 600;
+  color: #1a1a2e;
+  word-break: break-word;
+}
+
+.session-confirm-details {
+  font-size: 0.85rem;
+  color: #888;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.session-confirm-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.confirm-btn,
+.cancel-btn {
+  padding: 14px 24px;
+  border: none;
+  border-radius: 12px;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  text-align: center;
+}
+
+.confirm-btn {
+  background: linear-gradient(135deg, #ff6b4a 0%, #ff9500 100%);
+  color: #fff;
+
+  &:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(255, 107, 74, 0.3);
+  }
+
+  &:active {
+    transform: translateY(0);
+  }
+}
+
+.cancel-btn {
+  background: #f0f0f0;
+  color: #555;
+  border: 1px solid #ddd;
+
+  &:hover {
+    background: #e8e8e8;
+  }
+
+  &:active {
+    background: #e0e0e0;
+  }
+}
+
 /* Sort overlay styles */
 .sort-overlay {
   position: fixed;

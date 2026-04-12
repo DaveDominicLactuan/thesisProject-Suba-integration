@@ -285,7 +285,7 @@
       </div>
 
       <div class="conv-input">
-        <button class="attach">
+        <button class="attach" (click)="openAttachmentSheet()" title="View attachments">
           <ion-icon name="attach-outline"></ion-icon>
         </button>
         <input
@@ -300,6 +300,85 @@
         <button class="send" (click)="sendMessage()">
           <ion-icon name="send-outline"></ion-icon>
         </button>
+      </div>
+    </div>
+
+    <!-- Attachment Bottom Sheet (similar to map-bottom-sheet) -->
+    <div class="attachment-sheet"
+         [ngClass]="{'active': isAttachmentSheetActive}">
+
+      <!-- Drag handle bar — clicking toggles active/inactive -->
+      <div class="attachment-sheet-handle-bar" (click)="toggleAttachmentSheet()">
+        <div class="attachment-sheet-handle-pill"></div>
+      </div>
+
+      <!-- Inactive peek row (always rendered, hidden in active via CSS) -->
+      <div class="attachment-sheet-peek" (click)="toggleAttachmentSheet()">
+        <div class="attachment-sheet-peek-icon">
+          <ion-icon name="attach-outline"></ion-icon>
+        </div>
+        <div class="attachment-sheet-peek-text">
+          <div class="attachment-sheet-peek-name">
+            Attachments
+          </div>
+          <div class="attachment-sheet-peek-sub">
+            {{ conversationAttachments.length }} item(s) in conversation
+          </div>
+        </div>
+        <ion-icon name="chevron-up-outline" class="attachment-sheet-peek-chevron" [ngClass]="{'rotated': isAttachmentSheetActive}"></ion-icon>
+      </div>
+
+      <!-- Active expanded body -->
+      <div class="attachment-sheet-body">
+        <ng-container *ngIf="attachmentSheetViewMode === 'grid'; else attachmentDetailTemplate">
+          <div class="attachment-sheet-header">
+            <h3>Shared Attachments</h3>
+            <span class="attachment-count">{{ conversationAttachments.length }}</span>
+          </div>
+
+          <div class="attachment-grid">
+            <button
+              type="button"
+              class="attachment-item"
+              *ngFor="let attachment of conversationAttachments"
+              (click)="selectAttachment(attachment, $event)">
+              <div class="attachment-item-preview">
+                <ion-icon [name]="getAttachmentPreviewIcon(attachment)" class="attachment-item-icon"></ion-icon>
+              </div>
+              <div class="attachment-item-title">{{ attachment.name || 'File' }}</div>
+            </button>
+          </div>
+
+          <div *ngIf="conversationAttachments.length === 0" class="no-attachments">
+            No attachments in this conversation
+          </div>
+        </ng-container>
+
+        <ng-template #attachmentDetailTemplate>
+          <div class="attachment-detail-header">
+            <button
+              *ngIf="conversationAttachments.length > 1"
+              type="button"
+              class="attachment-back-btn"
+              (click)="backToAttachmentGrid($event)">
+              <ion-icon name="chevron-back-outline"></ion-icon>
+              Back to attachments
+            </button>
+
+            <h2 class="attachment-detail-name">
+              {{ selectedAttachment?.name || 'Attachment' }}
+            </h2>
+            <div class="attachment-detail-info">
+              <div class="attachment-detail-type">
+                <ion-icon [name]="getAttachmentPreviewIcon(selectedAttachment)"></ion-icon>
+                <span>{{ selectedAttachment?.type || 'File' }}</span>
+              </div>
+              <div class="attachment-detail-size" *ngIf="selectedAttachment?.size">
+                Size: {{ (selectedAttachment.size / 1024).toFixed(2) }} KB
+              </div>
+            </div>
+          </div>
+        </ng-template>
       </div>
     </div>
 

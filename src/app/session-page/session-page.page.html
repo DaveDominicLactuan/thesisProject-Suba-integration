@@ -120,7 +120,7 @@
 
   <div class="sessions-list">
     <ng-container *ngFor="let s of sessions">
-      <div *ngIf="s.userId === userID" class="session-item" (click)="goToSession(s)">
+      <div *ngIf="s.userId === userID" class="session-item" (click)="onSessionItemClick(s, $event)">
         <div class="session-left">
           <div class="session-name">{{ s.name }}</div>
           <div class="session-images">
@@ -141,7 +141,33 @@
     </div>
   </div>
 
-  
+  <!-- Session Confirmation Dialog Overlay -->
+  <div *ngIf="isSessionConfirmDialogOpen" class="session-confirm-overlay" (click)="closeSessionConfirmDialog()">
+    <div class="session-confirm-dialog" (click)="$event.stopPropagation()">
+      <div class="session-confirm-header">
+        <h2>Send Session and Images?</h2>
+        <p>Would you like to send this Session and Images to this user?</p>
+      </div>
+      <div class="session-confirm-content">
+        <div *ngIf="selectedSessionForConfirm" class="session-info">
+          <div class="session-confirm-name">{{ selectedSessionForConfirm.name }}</div>
+          <div class="session-confirm-details">
+            <span>{{ selectedSessionForConfirm.imageKeys?.length || 0 }} Images</span>
+            <span>·</span>
+            <span>{{ selectedSessionForConfirm.created | date:'short' }}</span>
+          </div>
+        </div>
+      </div>
+      <div class="session-confirm-buttons">
+        <button class="confirm-btn" (click)="confirmSessionAction(selectedSessionForConfirm)">
+          Confirm
+        </button>
+        <button class="cancel-btn" (click)="closeSessionConfirmDialog()">
+          Cancel
+        </button>
+      </div>
+    </div>
+  </div>
 
 <ion-content id="main-content" class="home-page" (click)="closeSidebar()">
  
