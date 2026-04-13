@@ -374,11 +374,22 @@ private async initialize(): Promise<void> {
 
   /** Shared logout flow used by overlay button and menu item. */
   async logout(closeOverlay: boolean = false) {
+    console.log('[ProfilePage.logout] Logout initiated');
+    
+    // Get current user ID before we start clearing
+    const currentUserId = this.userID || this.auth3.getCurrentUser()?.uid || '';
+    
+    // Clear all user-related data
+    try {
+      await this.clearAllUserData(currentUserId);
+    } catch (error) {
+      console.error('[ProfilePage.logout] Error during data cleanup:', error);
+    }
+    
     try {
       await this.auth3.logout();
     } catch {}
-    try { localStorage.setItem('isLoggedIn', 'false'); } catch {}
-    try { localStorage.removeItem('userData'); } catch {}
+    
     this.isLoggedIn = false;
     if (closeOverlay) {
       this.removeTestOverlay();
@@ -389,6 +400,84 @@ private async initialize(): Promise<void> {
     } catch {
       this.router.navigate(['/landing-page']);
     }
+  }
+
+  /**
+   * Centralized function to clear ALL user-related data from local and session storage.
+   * Called on logout to ensure no user data persists for the next login.
+   */
+  private async clearAllUserData(userId: string): Promise<void> {
+    console.log('[ProfilePage.clearAllUserData] Beginning complete user data cleanup', { userId });
+
+    // Clear localStorage keys
+    const localStorageKeys = [
+      'isLoggedIn',
+      'userData',
+      'userProfile',
+      'currentSessionId',
+      'currentUserId'
+    ];
+
+    for (const key of localStorageKeys) {
+      try {
+        localStorage.removeItem(key);
+      } catch (e) {
+        console.warn(`[ProfilePage.clearAllUserData] Failed to remove localStorage key: ${key}`, e);
+      }
+    }
+
+    // Clear sessionStorage keys
+    const sessionStorageKeys = [
+      'userProfile',
+      'isLoggedInSession'
+    ];
+
+    for (const key of sessionStorageKeys) {
+      try {
+        sessionStorage.removeItem(key);
+      } catch (e) {
+        console.warn(`[ProfilePage.clearAllUserData] Failed to remove sessionStorage key: ${key}`, e);
+      }
+    }
+
+    // Clear user-specific storage keys (dynamic keys based on userId)
+    if (userId) {
+      const userSpecificKeys = [
+        `user_sync_status_${userId}`,
+        `user_sync_bootstrap_done_${userId}`
+      ];
+
+      for (const key of userSpecificKeys) {
+        try {
+          localStorage.removeItem(key);
+          sessionStorage.removeItem(key);
+        } catch (e) {
+          console.warn(`[ProfilePage.clearAllUserData] Failed to remove user-specific key: ${key}`, e);
+        }
+      }
+    }
+
+    // Clear sessions and images from ImageStorageService
+    try {
+      if (this.imageStorage && typeof this.imageStorage.clear === 'function') {
+        await this.imageStorage.clear();
+        console.log('[ProfilePage.clearAllUserData] Cleared all images from storage');
+      }
+    } catch (e) {
+      console.warn('[ProfilePage.clearAllUserData] Failed to clear images', e);
+    }
+
+    // Clear sessions from Ionic Storage
+    try {
+      if ((this.imageStorage as any)._storage) {
+        await (this.imageStorage as any)._storage?.remove('stored_image_sessions');
+        console.log('[ProfilePage.clearAllUserData] Cleared all sessions from storage');
+      }
+    } catch (e) {
+      console.warn('[ProfilePage.clearAllUserData] Failed to clear sessions', e);
+    }
+
+    console.log('[ProfilePage.clearAllUserData] Complete user data cleanup finished');
   }
 
   /**

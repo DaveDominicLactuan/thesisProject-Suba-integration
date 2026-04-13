@@ -1210,7 +1210,6 @@ addEntry() {
      
       //Create dialog box (card) and style
       const box = document.createElement('div');
-      // box.style.background = '#fff';
       box.style.border = '1px solid transparent';
       box.style.background = 'linear-gradient(#fff, #fff) padding-box, linear-gradient(to right, #ff512f, #f09819) border-box';
       box.style.padding = '18px';
@@ -1218,16 +1217,18 @@ addEntry() {
       box.style.minWidth = '300px';
       box.style.boxShadow = '0 6px 30px rgba(0,0,0,0.3)';
 
-      //Title, optional label and input field for session name
+      //Title for inactive state
       const title = document.createElement('div');
-      title.innerText = 'Save Session';
+      title.innerText = 'Save current session with a';
       title.style.fontWeight = '700';
-      title.style.marginBottom = '8px';
+      title.style.marginBottom = '4px';
+      title.style.fontSize = '16px';
 
-      const label = document.createElement('label');
-      label.innerText = 'Session name:';
-      label.style.display = 'block';
-      label.style.marginBottom = '6px';
+      const titleSubtext = document.createElement('div');
+      titleSubtext.innerText = 'session name';
+      titleSubtext.style.fontWeight = '700';
+      titleSubtext.style.marginBottom = '12px';
+      titleSubtext.style.fontSize = '16px';
 
       const input = document.createElement('input');
       input.type = 'text';
@@ -1237,90 +1238,95 @@ addEntry() {
       input.style.marginBottom = '12px';
       input.style.border = '1px solid #ccc';
       input.style.borderRadius = '4px';
+      input.style.boxSizing = 'border-box';
 
-     //Create the bottom row for the Cancel and Save buttons and style them
+      //Create the bottom row for the Cancel and Save buttons and style them
       const btnRow = document.createElement('div');
       btnRow.style.display = 'flex';
-      btnRow.style.justifyContent = 'flex-end';
-      btnRow.style.gap = '8px';
-
+      btnRow.style.justifyContent = 'center';
+      btnRow.style.gap = '12px';
 
       const cancelBtn = document.createElement('button');
       cancelBtn.innerText = 'Cancel';
-      cancelBtn.style.padding = '8px 10px';
-      cancelBtn.style.width = '110px';
+      cancelBtn.style.padding = '8px 16px';
+      cancelBtn.style.width = '120px';
       cancelBtn.style.height = '40px';
       cancelBtn.style.border = 'none';
-      // cancelBtn.style.background = '#aaa';
       cancelBtn.style.background = 'linear-gradient(90deg,#ff512f,#f09819)';
       cancelBtn.style.color = '#fff';
       cancelBtn.style.borderRadius = '6px';
       cancelBtn.style.cursor = 'pointer';
+      cancelBtn.style.fontWeight = '600';
 
       const saveBtn = document.createElement('button');
       saveBtn.innerText = 'Save';
-      saveBtn.style.padding = '8px 10px';
-      saveBtn.style.width = '110px';
+      saveBtn.style.padding = '8px 16px';
+      saveBtn.style.width = '120px';
       saveBtn.style.height = '40px';
       saveBtn.style.border = 'none';
-      // saveBtn.style.background = '#3880ff';
       saveBtn.style.background = 'linear-gradient(90deg,#ff512f,#f09819)';
       saveBtn.style.color = '#fff';
       saveBtn.style.borderRadius = '6px';
       saveBtn.style.cursor = 'pointer';
+      saveBtn.style.fontWeight = '600';
        
-      //Create Cancel and Save buttons and style them
+      // Cancel handler for inactive state
       cancelBtn.addEventListener('click', () => {
         try { document.body.removeChild(overlay); } catch (e) {}
         resolve();
       });
 
-      //read input, call ImageStorageService to add or create session, 
-      //upload images to S3, remove overlay, alert, navigate, resolve
+      // Save handler - transitions to active state with progress bar
       saveBtn.addEventListener('click', async () => {
         try {
-          // Create and show loading spinner
-          const spinnerContainer = document.createElement('div');
-          spinnerContainer.style.position = 'fixed';
-          spinnerContainer.style.top = '50%';
-          spinnerContainer.style.left = '50%';
-          spinnerContainer.style.transform = 'translate(-50%, -50%)';
-          spinnerContainer.style.zIndex = '10000';
-          spinnerContainer.style.textAlign = 'center';
-
-          const spinner = document.createElement('div');
-          spinner.style.border = '4px solid rgba(255, 81, 47, 0.3)';
-          spinner.style.borderTop = '4px solid #ff512f';
-          spinner.style.borderRadius = '50%';
-          spinner.style.width = '40px';
-          spinner.style.height = '40px';
-          spinner.style.animation = 'spin 1s linear infinite';
-          spinner.style.margin = '0 auto 10px';
-
-          // Add CSS animation for spinner
-          if (!document.getElementById('spinner-animation')) {
-            const style = document.createElement('style');
-            style.id = 'spinner-animation';
-            style.innerHTML = `
-              @keyframes spin {
-                0% { transform: rotate(0deg); }
-                100% { transform: rotate(360deg); }
-              }
-            `;
-            document.head.appendChild(style);
+          // Transition to ACTIVE STATE - Clear the inactive state UI
+          while (box.firstChild) {
+            box.removeChild(box.firstChild);
           }
 
-          const spinnerText = document.createElement('div');
-          spinnerText.innerText = 'Saving session and uploading images...';
-          spinnerText.style.color = '#333';
-          spinnerText.style.marginTop = '10px';
-          spinnerText.style.fontSize = '14px';
-          spinnerText.style.maxWidth = '300px';
-          spinnerText.style.wordWrap = 'break-word';
+          // Create active state UI with progress bar
+          const activeTitle = document.createElement('div');
+          activeTitle.innerText = 'Saving current session:';
+          activeTitle.style.fontWeight = '700';
+          activeTitle.style.marginBottom = '16px';
+          activeTitle.style.fontSize = '16px';
 
-          spinnerContainer.appendChild(spinner);
-          spinnerContainer.appendChild(spinnerText);
-          document.body.appendChild(spinnerContainer);
+          // Progress percentage text
+          const progressLabel = document.createElement('div');
+          progressLabel.innerText = 'Saving Session: 0%';
+          progressLabel.style.marginBottom = '8px';
+          progressLabel.style.fontSize = '14px';
+          progressLabel.style.fontWeight = '600';
+          progressLabel.style.color = '#333';
+
+          // Progress bar container
+          const progressBarContainer = document.createElement('div');
+          progressBarContainer.style.width = '100%';
+          progressBarContainer.style.height = '12px';
+          progressBarContainer.style.background = '#e0e0e0';
+          progressBarContainer.style.borderRadius = '6px';
+          progressBarContainer.style.overflow = 'hidden';
+          progressBarContainer.style.marginBottom = '16px';
+
+          // Progress bar fill with gradient
+          const progressBarFill = document.createElement('div');
+          progressBarFill.style.width = '0%';
+          progressBarFill.style.height = '100%';
+          progressBarFill.style.background = 'linear-gradient(90deg, #00ff00, #ffff00, #ff6600, #ff0000)';
+          progressBarFill.style.transition = 'width 0.3s ease';
+
+          progressBarContainer.appendChild(progressBarFill);
+
+          // Helper function to update progress
+          const updateProgress = (percentage: number, label: string) => {
+            const clampedPercentage = Math.min(Math.max(percentage, 0), 100);
+            progressBarFill.style.width = clampedPercentage + '%';
+            progressLabel.innerText = label;
+          };
+
+          box.appendChild(activeTitle);
+          box.appendChild(progressLabel);
+          box.appendChild(progressBarContainer);
 
           // Disable buttons during save
           saveBtn.disabled = true;
@@ -1328,9 +1334,10 @@ addEntry() {
 
           const val = input.value && input.value.trim().length > 0 ? input.value.trim() : `Session ${new Date().toLocaleString()}`;
           const svc: any = this.imageStorageService as any;
-          // Use filename as key, fallback to original for backward compatibility
           const imageKey = entry.filename || entry.original;
           let savedSessionId: string | null = null;
+
+          updateProgress(5, 'Saving Session: 5%');
 
           // If a session is already selected (e.g., from Camera page), update it
           if (this.selectedSessionId && typeof svc.addImageToSession === 'function') {
@@ -1339,13 +1346,11 @@ addEntry() {
             } catch (e) {
               console.warn('[FeedbackPage] failed to add image to existing session', e);
             }
-            // Try to rename session if service supports it
             if (typeof svc.updateSessionName === 'function') {
               try { svc.updateSessionName(this.selectedSessionId, val); } catch (e) { /* ignore */ }
             }
             savedSessionId = this.selectedSessionId;
           } else {
-            // create session via service and set last created name
             if (typeof svc.createSession === 'function') {
               const s = svc.createSession(val, [imageKey]);
               if (s && typeof svc.setLastCreatedSession === 'function') {
@@ -1358,6 +1363,8 @@ addEntry() {
             }
           }
 
+          updateProgress(15, 'Saving Session: 15%');
+
           // Track S3 upload results for Firestore persistence
           let originalS3Result: { url: string; s3Key: string } | null = null;
           let withBoxesS3Result: { url: string; s3Key: string } | null = null;
@@ -1365,72 +1372,53 @@ addEntry() {
           // Upload images to S3 for the session
           if (savedSessionId && entry.original) {
             try {
-              spinnerText.innerText = 'Uploading original image to S3...';
+              updateProgress(25, 'Saving Session: 25%');
               
               // Upload original image
               if (typeof svc.uploadSessionImageOriginal === 'function' && entry.original) {
                 try {
                   originalS3Result = await svc.uploadSessionImageOriginal(entry.original, savedSessionId, entry.filename || imageKey);
-                  
-                  // Update spinner with success message and S3 key
-                  if (originalS3Result && originalS3Result.s3Key) {
-                    spinnerText.innerText = `✅ Original image uploaded to S3\n📁 ${originalS3Result.s3Key}`;
-                    console.log('✅ Original image uploaded to S3 with key:', originalS3Result.s3Key);
-                  } else {
-                    spinnerText.innerText = '💾 Original image stored locally (S3 unavailable)';
-                    console.log('[FeedbackPage] S3 upload returned null - using local storage');
-                  }
+                  updateProgress(50, 'Saving Session: 50%');
+                  console.log('✅ Original image uploaded to S3 with key:', originalS3Result?.s3Key);
                 } catch (error) {
-                  spinnerText.innerText = '💾 Original image stored locally (S3 failed)';
                   console.warn('[FeedbackPage] Failed to upload original image to S3:', error);
+                  updateProgress(50, 'Saving Session: 50%');
                 }
               }
 
               // Upload withBoxes image if available
               if (typeof svc.uploadSessionImageWithBoxes === 'function' && entry.withBoxes) {
                 try {
-                  spinnerText.innerText = 'Uploading processed image to S3...';
+                  updateProgress(65, 'Saving Session: 65%');
                   withBoxesS3Result = await svc.uploadSessionImageWithBoxes(entry.withBoxes, savedSessionId, entry.filename || imageKey);
-                  
-                  // Update spinner with success message and S3 key
-                  if (withBoxesS3Result && withBoxesS3Result.s3Key) {
-                    spinnerText.innerText = `✅ Processed image uploaded to S3\n📁 ${withBoxesS3Result.s3Key}`;
-                    console.log('✅ WithBoxes image uploaded to S3 with key:', withBoxesS3Result.s3Key);
-                  } else {
-                    spinnerText.innerText = '💾 Processed image stored locally (S3 unavailable)';
-                    console.log('[FeedbackPage] S3 upload returned null - using local storage');
-                  }
+                  updateProgress(80, 'Saving Session: 80%');
+                  console.log('✅ WithBoxes image uploaded to S3 with key:', withBoxesS3Result?.s3Key);
                 } catch (error) {
-                  spinnerText.innerText = '💾 Processed image stored locally (S3 failed)';
                   console.warn('[FeedbackPage] Failed to upload withBoxes image to S3:', error);
+                  updateProgress(80, 'Saving Session: 80%');
                 }
               }
 
-              // Update entry with S3 references before Firestore save (only if S3 upload succeeded)
+              // Update entry with S3 references before Firestore save
               if (originalS3Result) {
                 entry.storagePath = originalS3Result.s3Key;
                 entry.storageUrl = originalS3Result.url;
                 console.log('[FeedbackPage] S3 reference persisted for original image:', originalS3Result.s3Key);
-              } else {
-                console.log('[FeedbackPage] Original image stored locally (no S3 reference)');
               }
               if (withBoxesS3Result) {
                 entry.withBoxesStoragePath = withBoxesS3Result.s3Key;
                 entry.withBoxesStorageUrl = withBoxesS3Result.url;
                 console.log('[FeedbackPage] S3 reference persisted for withBoxes image:', withBoxesS3Result.s3Key);
-              } else {
-                console.log('[FeedbackPage] WithBoxes image stored locally (no S3 reference)');
               }
 
-              // Update the entry in service storage to persist S3 references
               if (typeof svc.setEntryForImage === 'function') {
                 svc.setEntryForImage(imageKey, entry);
               }
 
-              spinnerText.innerText = 'Saving to Firestore...';
+              updateProgress(85, 'Saving Session: 85%');
             } catch (err) {
               console.warn('[FeedbackPage] Error during S3 upload:', err);
-              spinnerText.innerText = '⚠️ Error during S3 upload process';
+              updateProgress(85, 'Saving Session: 85%');
             }
           }
 
@@ -1438,12 +1426,11 @@ addEntry() {
           let firestoreSaved = false;
           if (savedSessionId && typeof svc.saveSessionWithImagesToFirestore === 'function') {
             try {
+              updateProgress(90, 'Saving Session: 90%');
               await svc.saveSessionWithImagesToFirestore(savedSessionId);
               firestoreSaved = true;
-              spinnerText.innerText = '✅ Session and images saved to Firestore';
               console.log('✅ Firestore save completed with S3 references');
               
-              // Log the complete S3/Firestore workflow status
               if (typeof svc.logSaveWorkflowStatus === 'function') {
                 try {
                   await svc.logSaveWorkflowStatus(savedSessionId);
@@ -1453,12 +1440,12 @@ addEntry() {
               }
             } catch (e) {
               console.warn('⚠️ Failed to save to Firestore:', e);
-              spinnerText.innerText = '⚠️ Firestore save failed, but S3 upload succeeded';
             }
           }
 
+          updateProgress(100, 'Saving Session: 100%');
+
           try { document.body.removeChild(overlay); } catch (e) {}
-          try { document.body.removeChild(spinnerContainer); } catch (e) {}
 
           if (firestoreSaved && savedSessionId) {
             const s3Summary = [];
@@ -1483,28 +1470,23 @@ addEntry() {
         } catch (ee) {
           console.warn('Failed to save session via prompt', ee);
           alert('Failed to create session. See console.');
-          // Remove spinner on error
-          try {
-            const spinner = document.querySelector('div[style*="position: fixed"]');
-            if (spinner && spinner.parentNode) {
-              spinner.parentNode.removeChild(spinner);
-            }
-          } catch (e) {}
+          try { document.body.removeChild(overlay); } catch (e) {}
         }
         resolve();
       });
       
-      //Append elements to compose the dialog, add to document, and focus input
+      //Append elements to compose the INACTIVE STATE dialog
       btnRow.appendChild(cancelBtn);
       btnRow.appendChild(saveBtn);
 
       box.appendChild(title);
-      // box.appendChild(label);
+      box.appendChild(titleSubtext);
       box.appendChild(input);
       box.appendChild(btnRow);
       overlay.appendChild(box);
       document.body.appendChild(overlay);
-      // focus input
+      
+      // Focus input for inactive state
       setTimeout(() => input.focus(), 50);
     });
   }

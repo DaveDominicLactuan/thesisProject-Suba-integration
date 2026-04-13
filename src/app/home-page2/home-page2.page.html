@@ -119,7 +119,7 @@
         <ion-icon name="help-circle-outline"></ion-icon>
         <span>Help</span>
       </li>
-      <li class="menu-item" (click)="logout()">
+      <li class="menu-item" (click)="logout(); closeSidebar(); $event.stopPropagation()" data-action="logout">
         <ion-icon name="log-out-outline"></ion-icon>
         <span>Log Out</span>
       </li>

@@ -291,10 +291,10 @@ export class ChatPagePage implements OnInit, OnDestroy {
     console.log(`[ChatPage.attachmentSheet] Toggled. State: ${this.isAttachmentSheetActive ? 'Active' : 'Inactive'}`);
   }
 
-  openAttachmentSheet(): void {
+  async openAttachmentSheet(): Promise<void> {
     this.attachmentSheetViewMode = 'grid';
     this.isAttachmentSheetActive = true;
-    this.loadConversationAttachments();
+    await this.loadConversationAttachments();
     console.log('[ChatPage.attachmentSheet] Opened. State: Active');
   }
 
@@ -303,38 +303,112 @@ export class ChatPagePage implements OnInit, OnDestroy {
     console.log('[ChatPage.attachmentSheet] Closed. State: Inactive');
   }
 
-  loadConversationAttachments(): void {
-    // Load attachments from current conversation messages
-    // Filter messages that contain media/attachments
-    if (!this.messages || this.messages.length === 0) {
-      this.conversationAttachments = [];
-      return;
-    }
-
-    const attachments: any[] = [];
-    this.messages.forEach((msg: any) => {
-      if (msg.attachments && Array.isArray(msg.attachments)) {
-        msg.attachments.forEach((attachment: any) => {
-          attachments.push({
-            ...attachment,
-            messageId: msg.id,
-            senderId: msg.senderId,
-            timestamp: msg.timestamp
-          });
-        });
-      } else if (msg.imageUrl || msg.fileUrl) {
-        attachments.push({
-          url: msg.imageUrl || msg.fileUrl,
-          type: msg.imageUrl ? 'image' : 'file',
-          name: msg.fileName || 'Attachment',
-          messageId: msg.id,
-          senderId: msg.senderId,
-          timestamp: msg.timestamp
+  /**
+   * Load conversation attachments from both messages and user's session objects.
+   * Fetches sessions created by the current user and maps them as attachments.
+   * Also validates that sessions belong to the current user to prevent data leaks.
+   */
+  async loadConversationAttachments(): Promise<void> {
+    try {
+      const attachments: any[] = [];
+      
+      // Load attachments from current conversation messages
+      // Filter messages that contain media/attachments
+      if (this.messages && this.messages.length > 0) {
+        this.messages.forEach((msg: any) => {
+          if (msg.attachments && Array.isArray(msg.attachments)) {
+            msg.attachments.forEach((attachment: any) => {
+              attachments.push({
+                ...attachment,
+                messageId: msg.id,
+                senderId: msg.senderId,
+                timestamp: msg.timestamp,
+                attachmentType: 'message'
+              });
+            });
+          } else if (msg.imageUrl || msg.fileUrl) {
+            attachments.push({
+              url: msg.imageUrl || msg.fileUrl,
+              type: msg.imageUrl ? 'image' : 'file',
+              name: msg.fileName || 'Attachment',
+              messageId: msg.id,
+              senderId: msg.senderId,
+              timestamp: msg.timestamp,
+              attachmentType: 'message'
+            });
+          }
         });
       }
-    });
 
-    this.conversationAttachments = attachments;
+      // Fetch and filter user's session objects
+      const currentUserId = this.auth3.getCurrentUser()?.uid || this.userID;
+      if (currentUserId) {
+        try {
+          const userSessions = await this.auth3.getUserSessions(currentUserId);
+          console.log('[ChatPage.loadConversationAttachments] Fetched user sessions:', userSessions.length);
+          
+          if (userSessions && Array.isArray(userSessions)) {
+            const sessionsToDelete: any[] = [];
+
+            for (const session of userSessions) {
+              // Validate that session belongs to the current user
+              if (!this.validateSessionBelongsToCurrentUser(session)) {
+                console.warn('[ChatPage.loadConversationAttachments] Session does not belong to current user, marking for deletion', {
+                  sessionId: session?.id,
+                  sessionUserId: session?.userId,
+                  currentUserId
+                });
+                sessionsToDelete.push(session);
+                continue;
+              }
+
+              // Only include sessions owned by the current user
+              if (session.userId === currentUserId) {
+                attachments.push({
+                  id: session.id,
+                  name: session.name || 'Untitled Session',
+                  type: 'session',
+                  created: session.created,
+                  imageKeys: session.imageKeys || [],
+                  imageCount: (session.imageKeys && session.imageKeys.length) || 0,
+                  userId: session.userId,
+                  totalBoundingBoxes: session.totalBoundingBoxes || 0,
+                  timestamp: session.created || new Date().toISOString(),
+                  attachmentType: 'session'
+                });
+              }
+            }
+
+            // Clean up any sessions that belong to a different user
+            if (sessionsToDelete.length > 0) {
+              console.warn('[ChatPage.loadConversationAttachments] Found mismatched sessions, cleaning up...', {
+                count: sessionsToDelete.length
+              });
+              for (const session of sessionsToDelete) {
+                try {
+                  await this.deleteSessionIfMismatchedUser(session);
+                } catch (error) {
+                  console.error('[ChatPage.loadConversationAttachments] Failed to delete mismatched session', {
+                    sessionId: session?.id,
+                    error
+                  });
+                }
+              }
+            }
+          }
+          
+          console.log('[ChatPage.loadConversationAttachments] Total attachments (messages + sessions):', attachments.length);
+        } catch (error) {
+          console.warn('[ChatPage.loadConversationAttachments] Failed to fetch user sessions:', error);
+          // Continue with just message attachments if session fetch fails
+        }
+      }
+
+      this.conversationAttachments = attachments;
+    } catch (error) {
+      console.error('[ChatPage.loadConversationAttachments] Error loading attachments:', error);
+      this.conversationAttachments = [];
+    }
   }
 
   selectAttachment(attachment: any, event?: Event): void {
@@ -342,6 +416,10 @@ export class ChatPagePage implements OnInit, OnDestroy {
     this.selectedAttachment = attachment;
     this.attachmentSheetViewMode = 'detail';
     console.log('[ChatPage.attachmentSheet] Attachment selected', attachment);
+    // Optionally trigger debug printing for sessions
+    if (attachment?.type === 'session') {
+      this.debugPrintAttachmentData(attachment);
+    }
   }
 
   backToAttachmentGrid(event?: Event): void {
@@ -356,7 +434,305 @@ export class ChatPagePage implements OnInit, OnDestroy {
     if (type === 'image') return 'image-outline';
     if (type === 'pdf') return 'document-outline';
     if (type === 'video') return 'play-circle-outline';
+    if (type === 'session') return 'images-outline';
     return 'attach-outline';
+  }
+
+  // Open debug dialog for attachment
+  onAttachmentDebugClick(attachment: any, event?: Event): void {
+    if (event) event.stopPropagation();
+    this.selectedAttachmentForDebug = attachment;
+    this.isAttachmentDebugDialogOpen = true;
+    console.log('[ChatPage] Attachment debug click detected. Debug info:');
+  }
+
+  // Close debug dialog without action
+  closeAttachmentDebugDialog(): void {
+    if (!this.isAttachmentCopyInProgress) {
+      this.isAttachmentDebugDialogOpen = false;
+      this.selectedAttachmentForDebug = null;
+    }
+  }
+
+  // Confirm debug action: copy session to current user with transformed filenames
+  async confirmAttachmentDebugAction(attachment: any): Promise<void> {
+    console.log('[ChatPage] Attachment copy action initiated...');
+    
+    if (attachment?.type !== 'session' || !attachment?.id) {
+      console.error('[ChatPage] Invalid attachment for copy operation');
+      alert('Invalid session attachment');
+      return;
+    }
+
+    // SECURITY: Validate that the attachment belongs to the current user
+    if (!this.validateSessionBelongsToCurrentUser(attachment)) {
+      console.error('[ChatPage] SECURITY: Cannot copy session - belongs to different user');
+      alert('Security error: Cannot copy session from another user');
+      return;
+    }
+
+    try {
+      this.isAttachmentCopyInProgress = true;
+      this.attachmentDebugState = 'active'; // Transition to active state
+      this.attachmentCopyProgress = 0;
+      this.attachmentCopyStatusText = 'Initializing...';
+
+      const currentUserId = this.auth3.getCurrentUser()?.uid || this.userID;
+      
+      if (!currentUserId) {
+        throw new Error('Cannot determine current user ID');
+      }
+
+      console.log('[ChatPage] Starting session copy. Current user:', currentUserId);
+      this.updateCopyProgress(5, 'Loading session data...');
+
+      // Step 1: Debug print original data
+      console.log('[ChatPage] Original attachment:');
+      await this.debugPrintAttachmentData(attachment);
+
+      // Step 2: Create NEW session with unique ID (copy, not replacement)
+      const newSessionId = `s-${Date.now()}`; // Generate NEW unique session ID
+      console.log('[ChatPage] Original session ID:', attachment.id);
+      console.log('[ChatPage] New copied session ID:', newSessionId);
+      
+      const newSession: any = {
+        id: newSessionId, // NEW session ID (not a replacement of original)
+        name: attachment.name, // Use same name (unique sessionId makes it distinct)
+        imageKeys: [], // Will be populated with new image filenames
+        created: new Date().toISOString(), // New creation timestamp
+        totalBoundingBoxes: attachment.totalBoundingBoxes || 0,
+        userId: currentUserId, // Current user owns the copy
+        sessionId: newSessionId
+      };
+
+      this.updateCopyProgress(15, 'Fetching images from S3...');
+
+      // Step 3: Fetch and transform images
+      const transformedImages: any[] = [];
+      const sessionImageKeys = attachment.imageKeys || [];
+      const totalImages = sessionImageKeys.length;
+
+      for (let i = 0; i < totalImages; i++) {
+        const imageKey = sessionImageKeys[i];
+        const originalImage = (this.imageStorage as any).getEntryForImage(imageKey);
+        
+        if (!originalImage) {
+          console.warn('[ChatPage] Image not found locally:', imageKey);
+          continue;
+        }
+
+        this.updateCopyProgress(
+          15 + ((i) / totalImages) * 40,
+          `Fetching image ${i + 1}/${totalImages} from S3...`
+        );
+
+        // Fetch from S3 if URLs exist
+        let originalDataUrl = originalImage.original;
+        let withBoxesDataUrl = originalImage.withBoxes;
+
+        if (originalImage.originalS3Key) {
+          try {
+            originalDataUrl = await (this.imageStorage as any).fetchS3ObjectAsDataUrl(
+              originalImage.originalS3Key
+            ) || originalImage.original;
+          } catch (e) {
+            console.warn('[ChatPage] Failed to fetch original from S3:', e);
+          }
+        }
+
+        if (originalImage.withBoxesS3Key) {
+          try {
+            withBoxesDataUrl = await (this.imageStorage as any).fetchS3ObjectAsDataUrl(
+              originalImage.withBoxesS3Key
+            ) || originalImage.withBoxes;
+          } catch (e) {
+            console.warn('[ChatPage] Failed to fetch withBoxes from S3:', e);
+          }
+        }
+
+        // Transform filename to use new userId
+        const newFilename = this.transformImageFilenameUserId(imageKey, currentUserId);
+
+        const transformedImage = {
+          ...originalImage,
+          original: originalDataUrl,
+          withBoxes: withBoxesDataUrl,
+          filename: newFilename,
+          userId: currentUserId,
+          sessionId: newSession.id
+        };
+
+        transformedImages.push(transformedImage);
+        console.log('[ChatPage] Transformed image:', newFilename);
+      }
+
+      // Update session imageKeys with new filenames
+      newSession.imageKeys = transformedImages.map(img => img.filename);
+
+      this.updateCopyProgress(60, 'Storing images locally...');
+
+      // Step 4: Store transformed images using ImageStorageService
+      for (let i = 0; i < transformedImages.length; i++) {
+        const image = transformedImages[i];
+        await (this.imageStorage as any).addImage(image, newSession.id);
+        
+        this.updateCopyProgress(
+          60 + ((i + 1) / transformedImages.length) * 20,
+          `Storing image ${i + 1}/${transformedImages.length}...`
+        );
+      }
+
+      this.updateCopyProgress(85, 'Saving session...');
+
+      // Step 5: Save session to user
+      await (this.imageStorage as any).saveSessionToUser(currentUserId, newSession);
+
+      this.updateCopyProgress(92, 'Storing to Firestore...');
+
+      // Step 6: Persist to Firestore
+      try {
+        await (this.imageStorage as any).saveSessionWithImagesToFirestore(newSession.id);
+      } catch (e) {
+        console.warn('[ChatPage] Firestore save warning:', e);
+      }
+
+      this.updateCopyProgress(100, 'Complete!');
+
+      console.log('[ChatPage] ====== SESSION COPY COMPLETED ======');
+      console.log('[ChatPage] ORIGINAL SESSION (unchanged):');
+      console.log(`  - ID: ${attachment.id}`);
+      console.log(`  - User: ${attachment.userId}`);
+      console.log(`  - Name: ${attachment.name}`);
+      console.log(`  - Images: ${attachment.imageKeys?.length || 0}`);
+      
+      console.log('[ChatPage] NEW COPIED SESSION (current user):');
+      console.log(`  - ID: ${newSession.id}`);
+      console.log(`  - User: ${currentUserId}`);
+      console.log(`  - Name: ${newSession.name}`);
+      console.log(`  - Images: ${transformedImages.length}`);
+      console.log('[ChatPage] Transformed image details:');
+      transformedImages.forEach(img => {
+        console.log(`  - ${img.filename}`);
+        console.log(`    Original S3: ${img.originalS3Url}`);
+        console.log(`    WithBoxes S3: ${img.withBoxesS3Url}`);
+      });
+      console.log('[ChatPage] ====== END SESSION COPY ======');
+
+      setTimeout(() => {
+        this.isAttachmentCopyInProgress = false;
+        this.attachmentDebugState = 'inactive'; // Return to inactive state
+        this.attachmentCopyProgress = 0;
+        this.closeAttachmentDebugDialog();
+        alert('Session successfully copied to your account!');
+        
+        // Auto-send success message and close attachment sheet
+        this.messageText = 'File shared successfully';
+        setTimeout(() => {
+          this.sendMessage();
+          this.closeAttachmentSheet();
+        }, 500);
+      }, 1000);
+    } catch (e) {
+      console.error('[ChatPage] Error during session copy:', e);
+      this.isAttachmentCopyInProgress = false;
+      this.attachmentCopyProgress = 0;
+      alert('Error copying session. See console for details.');
+    }
+  }
+
+  /**
+   * Transform an image filename to use a new userId
+   * Format: userID:oldUserIdpart...sessionId:sessionIdpart...
+   * Replace the old userId with new userId while preserving the rest
+   */
+  private transformImageFilenameUserId(filename: string, newUserId: string): string {
+    // Match pattern: userID:XXXXX (capture everything up to 'sessionId')
+    // Example: userID:qlqoKE1Gw3RhjnML9U3YA20vava2sessionId:s-1775908468155img1_crack1041120261954.jpg
+    
+    try {
+      const match = filename.match(/^userID:([^s]*)sessionId:(.*)$/);
+      if (match) {
+        const oldUserId = match[1];
+        const rest = match[2];
+        const newFilename = `userID:${newUserId}sessionId:${rest}`;
+        console.log(`[ChatPage] Filename transform: ${oldUserId} -> ${newUserId}`);
+        return newFilename;
+      } else {
+        // If pattern doesn't match, try to just prepend the new userId
+        console.warn('[ChatPage] Filename pattern not recognized, returning original:', filename);
+        return filename;
+      }
+    } catch (e) {
+      console.error('[ChatPage] Error transforming filename:', e);
+      return filename;
+    }
+  }
+
+  private updateCopyProgress(percent: number, status: string): void {
+    this.attachmentCopyProgress = Math.min(percent, 100);
+    this.attachmentCopyStatusText = status;
+    console.log(`[ChatPage.copyProgress] ${percent}% - ${status}`);
+  }
+
+  // Debug method: print attachment object and related images from Firestore/S3
+  private async debugPrintAttachmentData(attachment: any): Promise<void> {
+    try {
+      console.log('========== ATTACHMENT DEBUG INFO ==========');
+      console.log('Attachment Object:', JSON.parse(JSON.stringify(attachment)));
+      
+      if (attachment?.type === 'session' && attachment?.id) {
+        console.log('\n--- Session Details ---');
+        console.log('Session ID:', attachment.id);
+        console.log('Session Name:', attachment.name);
+        console.log('Image Count:', attachment.imageCount || 0);
+        console.log('Image Keys Count:', attachment.imageKeys?.length || 0);
+        console.log('Image Keys:', attachment.imageKeys);
+        console.log('Total Bounding Boxes:', attachment.totalBoundingBoxes || 0);
+        console.log('Created:', attachment.created);
+
+        // Get all stored images
+        let allImages: any[] = [];
+        try {
+          if (typeof (this.imageStorage as any).getAllImages === 'function') {
+            const result = (this.imageStorage as any).getAllImages();
+            allImages = result instanceof Promise ? await result : result;
+          } else if (typeof (this.imageStorage as any).getImages === 'function') {
+            const result = (this.imageStorage as any).getImages();
+            allImages = result instanceof Promise ? await result : result;
+          }
+          if (!Array.isArray(allImages)) allImages = [];
+        } catch (e) {
+          console.warn('[ChatPage] Failed to get all images:', e);
+          allImages = [];
+        }
+
+        console.log('\n--- All Stored Images ---');
+        console.log('Total Stored Images:', allImages.length);
+        allImages.forEach((img: any, idx: number) => {
+          console.log(`  [${idx}] Filename: ${img.filename}, Original: ${img.original?.substring?.(0, 50)}..., S3: ${img.s3Url?.substring?.(0, 50) || 'N/A'}...`);
+        });
+
+        // Print images for this specific session
+        const sessionImages = allImages.filter((img: any) => 
+          attachment.imageKeys?.includes(img.filename) || 
+          attachment.imageKeys?.includes(img.original)
+        );
+        console.log(`\n--- Images in this Session (${sessionImages.length} total) ---`);
+        sessionImages.forEach((img: any, idx: number) => {
+          console.log(`  [${idx}] Filename: ${img.filename}`);
+          console.log(`       Original: ${img.original}`);
+          console.log(`       S3 URL: ${img.s3Url}`);
+          console.log(`       Boxes: ${img.boxes?.length || 0}`);
+        });
+      } else {
+        console.log('\n--- Message Attachment Details ---');
+        console.log('Type:', attachment?.type);
+        console.log('Size:', attachment?.size);
+      }
+      console.log('========== END DEBUG INFO ==========\n');
+    } catch (e) {
+      console.error('[ChatPage] Error during attachment debug print:', e);
+    }
   }
 
   private static userSyncTasks: Map<string, Promise<void>> = new Map();
@@ -378,6 +754,16 @@ export class ChatPagePage implements OnInit, OnDestroy {
   syncStatusText: string = 'Not synced';
   cacheWarmStatusText: string = 'Not synced';
   syncStatusState: 'idle' | 'syncing' | 'completed' | 'error' = 'idle';
+
+  // Storage keys (centralized for easier management)
+  private readonly STORAGE_KEYS = {
+    isLoggedIn: 'isLoggedIn',
+    userData: 'userData',
+    userProfile: 'userProfile',
+    currentSessionId: 'currentSessionId',
+    isLoggedInSession: 'isLoggedInSession',
+    currentUserId: 'currentUserId'
+  };
   // UI: toggles between preview list and active chat conversation
   isChatOpen: boolean = false;
   activeChat: any = null;
@@ -431,6 +817,16 @@ export class ChatPagePage implements OnInit, OnDestroy {
   private markerSelectionSquare?: L.Rectangle;
   private markerSquareHalfSideMeters = 440;
   
+  // --- Attachment Debug Dialog State ---
+  isAttachmentDebugDialogOpen: boolean = false;
+  selectedAttachmentForDebug: any = null;
+  attachmentDebugState: 'inactive' | 'active' = 'inactive'; // Track dialog state
+  
+  // --- Attachment Copy Progress State ---
+  isAttachmentCopyInProgress: boolean = false;
+  attachmentCopyProgress: number = 0;
+  attachmentCopyStatusText: string = '';
+  
   // Periodic service recovery checker (internet & location)
   private serviceRecoveryCheckInterval?: ReturnType<typeof setInterval>;
   private readonly serviceRecoveryCheckMs = 7000; // Check every 7 seconds
@@ -464,6 +860,8 @@ export class ChatPagePage implements OnInit, OnDestroy {
   attachmentSheetViewMode: 'detail' | 'grid' = 'grid';
   conversationAttachments: any[] = [];
   selectedAttachment: any = null;
+  
+  // Conversation Attachment Sheet State - moved up with other state variables
   private officeLocationMarkerData: OfficeLocationMarkerData[] = [];
   private officeLocationLeafletMarkers: L.Marker[] = [];
   private markerUserProfileMap: Map<L.Marker, any> = new Map();
@@ -1893,54 +2291,32 @@ onMsgBubbleTap(message: Message): void {
 
   /** Shared logout flow used by overlay button and menu item. */
   async logout(closeOverlay: boolean = false) {
-    const currentUid = this.userID || this.auth3.getCurrentUser()?.uid || '';
-    if (currentUid) this.clearSyncStateForUser(currentUid);
+    console.log('[ChatPage.logout] Logout initiated');
+    
+    // Close sidebar immediately to provide user feedback
+    this.isSidebarOpen = false;
+    
+    // Get current user ID before we start clearing
+    const currentUserId = this.userID || this.auth3.getCurrentUser()?.uid || '';
+    
+    // Clear all user-related data
+    try {
+      await this.clearAllUserData(currentUserId);
+    } catch (error) {
+      console.error('[ChatPage.logout] Error during data cleanup:', error);
+    }
+
+    // Clear sync state for user
+    if (currentUserId) {
+      this.clearSyncStateForUser(currentUserId);
+    }
+    
     this.syncStatusState = 'idle';
     this.syncStatusText = 'Not synced';
     this.cacheWarmStatusText = 'Not synced';
+    
     try {
       await this.auth3.logout();
-    } catch {}
-    
-    // Clear all locally stored sessions and images
-    try {
-      // Clear all images from ImageStorageService and Ionic Storage
-      if (this.imageStorage && typeof this.imageStorage.clear === 'function') {
-        await this.imageStorage.clear();
-        console.log('[ChatPage.logout] Cleared all images from storage');
-      }
-    } catch (e) {
-      console.warn('[ChatPage.logout] Failed to clear images', e);
-    }
-
-    // Clear sessions from Ionic Storage
-    try {
-      // Access the Storage instance from imageStorage to clear sessions
-      if ((this.imageStorage as any)._storage) {
-        await (this.imageStorage as any)._storage?.remove('stored_image_sessions');
-        console.log('[ChatPage.logout] Cleared all sessions from storage');
-      }
-    } catch (e) {
-      console.warn('[ChatPage.logout] Failed to clear sessions', e);
-    }
-
-    // Clear other user-related local storage
-    try { 
-      localStorage.setItem('isLoggedIn', 'false'); 
-    } catch {}
-    try { 
-      localStorage.removeItem('userData'); 
-    } catch {}
-    try {
-      localStorage.removeItem('userProfile');
-    } catch {}
-    try {
-      localStorage.removeItem('currentSessionId');
-    } catch {}
-    
-    // Clear sessionStorage as well
-    try {
-      sessionStorage.removeItem('userProfile');
     } catch {}
     
     this.isLoggedIn = false;
@@ -1951,6 +2327,166 @@ onMsgBubbleTap(message: Message): void {
       this.router.navigateByUrl('/landing-page', { replaceUrl: true });
     } catch {
       this.router.navigate(['/landing-page']);
+    }
+  }
+
+  /**
+   * Centralized function to clear ALL user-related data from local and session storage.
+   * Called on logout to ensure no user data persists for the next login.
+   * Also validates and removes sessions/images that don't match the current user ID.
+   */
+  private async clearAllUserData(userId: string): Promise<void> {
+    console.log('[ChatPage.clearAllUserData] Beginning complete user data cleanup', { userId });
+
+    // Clear localStorage keys
+    const localStorageKeys = [
+      this.STORAGE_KEYS.isLoggedIn,
+      this.STORAGE_KEYS.userData,
+      this.STORAGE_KEYS.userProfile,
+      this.STORAGE_KEYS.currentSessionId,
+      this.STORAGE_KEYS.currentUserId,
+      // User-specific keys (old format compatibility)
+      'isLoggedIn',
+      'userData',
+      'userProfile',
+      'currentSessionId',
+      'currentUserId'
+    ];
+
+    for (const key of localStorageKeys) {
+      try {
+        localStorage.removeItem(key);
+      } catch (e) {
+        console.warn(`[ChatPage.clearAllUserData] Failed to remove localStorage key: ${key}`, e);
+      }
+    }
+
+    // Clear sessionStorage keys
+    const sessionStorageKeys = [
+      this.STORAGE_KEYS.userProfile,
+      this.STORAGE_KEYS.isLoggedInSession,
+      'userProfile',
+      'isLoggedInSession'
+    ];
+
+    for (const key of sessionStorageKeys) {
+      try {
+        sessionStorage.removeItem(key);
+      } catch (e) {
+        console.warn(`[ChatPage.clearAllUserData] Failed to remove sessionStorage key: ${key}`, e);
+      }
+    }
+
+    // Clear user-specific storage keys (dynamic keys based on userId)
+    if (userId) {
+      const userSpecificKeys = [
+        `user_sync_status_${userId}`,
+        `user_sync_bootstrap_done_${userId}`,
+        `user_current_location_${userId}`,
+        `office-location-markers-${userId}`
+      ];
+
+      for (const key of userSpecificKeys) {
+        try {
+          localStorage.removeItem(key);
+          sessionStorage.removeItem(key);
+        } catch (e) {
+          console.warn(`[ChatPage.clearAllUserData] Failed to remove user-specific key: ${key}`, e);
+        }
+      }
+    }
+
+    // Clear sessions and images from ImageStorageService
+    try {
+      if (this.imageStorage && typeof this.imageStorage.clear === 'function') {
+        await this.imageStorage.clear();
+        console.log('[ChatPage.clearAllUserData] Cleared all images from storage');
+      }
+    } catch (e) {
+      console.warn('[ChatPage.clearAllUserData] Failed to clear images', e);
+    }
+
+    // Clear sessions from Ionic Storage
+    try {
+      if ((this.imageStorage as any)._storage) {
+        await (this.imageStorage as any)._storage?.remove('stored_image_sessions');
+        console.log('[ChatPage.clearAllUserData] Cleared all sessions from storage');
+      }
+    } catch (e) {
+      console.warn('[ChatPage.clearAllUserData] Failed to clear sessions', e);
+    }
+
+    console.log('[ChatPage.clearAllUserData] Complete user data cleanup finished');
+  }
+
+  /**
+   * Validate that a session/attachment belongs to the current user.
+   * If it doesn't, log a warning and return false.
+   * This is used to prevent accidental cross-user data access.
+   */
+  private validateSessionBelongsToCurrentUser(session: any): boolean {
+    const currentUserId = this.auth3.getCurrentUser()?.uid || this.userID;
+    const sessionUserId = session?.userId;
+
+    if (!currentUserId || !sessionUserId) {
+      console.warn('[ChatPage.validateSessionBelongsToCurrentUser] Cannot validate - missing current or session userId', {
+        currentUserId,
+        sessionUserId,
+        sessionId: session?.id
+      });
+      return false;
+    }
+
+    if (currentUserId !== sessionUserId) {
+      console.error('[ChatPage.validateSessionBelongsToCurrentUser] SECURITY: Session belongs to different user!', {
+        currentUserId,
+        sessionUserId,
+        sessionId: session?.id
+      });
+      return false;
+    }
+
+    return true;
+  }
+
+  /**
+   * Delete a session and all its associated images if they don't belong to the current user.
+   * This prevents accidental exposure of other users' data.
+   */
+  private async deleteSessionIfMismatchedUser(session: any): Promise<void> {
+    if (this.validateSessionBelongsToCurrentUser(session)) {
+      return; // Session belongs to current user, don't delete
+    }
+
+    console.warn('[ChatPage.deleteSessionIfMismatchedUser] Deleting mismatched session', {
+      sessionId: session?.id,
+      sessionUserId: session?.userId,
+      currentUserId: this.userID || this.auth3.getCurrentUser()?.uid
+    });
+
+    try {
+      // Clean up session images if imageStorage has removeImage method
+      if (session?.imageKeys && Array.isArray(session.imageKeys)) {
+        for (const imageKey of session.imageKeys) {
+          try {
+            // Attempt to remove the image through storage service
+            if (this.imageStorage && typeof (this.imageStorage as any).removeImage === 'function') {
+              await (this.imageStorage as any).removeImage(imageKey);
+            }
+          } catch (error) {
+            console.warn('[ChatPage.deleteSessionIfMismatchedUser] Failed to delete image', { imageKey, error });
+          }
+        }
+      }
+
+      console.log('[ChatPage.deleteSessionIfMismatchedUser] Session marked for deletion', { sessionId: session?.id });
+      // Note: Complete session deletion would require service endpoints
+      // For now, we log the issue and prevent the session from being used
+    } catch (error) {
+      console.error('[ChatPage.deleteSessionIfMismatchedUser] Failed to process mismatched session', {
+        sessionId: session?.id,
+        error
+      });
     }
   }
 

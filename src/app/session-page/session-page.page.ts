@@ -220,14 +220,10 @@ private async initialize(): Promise<void> {
     this.removeBackButtonHandler();
   }
 
-  /** Load sessions from ImageStorageService and compute image counts. Filter by current user's ID. */
+  /** Load sessions from Firestore first (to get all user sessions), then local storage. Compute image counts and filter by current user's ID. */
   async loadSessions() {
     try {
-      //Safely read sessions from ImageStorageService, create a copy and stores it.
-      const s = (this.imageStorage.getSessions && typeof this.imageStorage.getSessions === 'function') ? this.imageStorage.getSessions() : [];
-      const sessionsRaw = Array.isArray(s) ? s.slice() : [];
-
-      // ========== USER ID FILTERING ==========
+      // ========== USER ID RESOLUTION ==========
       // Get current user ID from Firebase auth, localStorage, or sessionStorage
       let currentUserID = this.userID;
       if (!currentUserID) {
@@ -258,6 +254,43 @@ private async initialize(): Promise<void> {
       }
 
       console.log('[SessionPage.loadSessions] Current user ID:', currentUserID);
+
+      // ========== FETCH FROM FIRESTORE ==========
+      // Fetch sessions from Firestore first to ensure we get all sessions (like chat-page does)
+      let sessionsRaw: any[] = [];
+      if (currentUserID) {
+        try {
+          console.log('[SessionPage.loadSessions] Fetching sessions from Firestore for user:', currentUserID);
+          const firebaseSessions = await this.auth3.getUserSessions(currentUserID);
+          sessionsRaw = Array.isArray(firebaseSessions) ? firebaseSessions : [];
+          console.log('[SessionPage.loadSessions] Fetched', sessionsRaw.length, 'sessions from Firestore');
+
+          // Sync Firestore sessions to local storage for offline support
+          for (const fsSession of sessionsRaw) {
+            const session = {
+              id: fsSession.id || fsSession.sessionId || `s-${Date.now()}`,
+              name: fsSession.name || 'Untitled Session',
+              imageKeys: Array.isArray(fsSession.imageKeys) ? fsSession.imageKeys : [],
+              created: fsSession.created || new Date().toISOString(),
+              userId: currentUserID
+            };
+            try {
+              this.imageStorage.addSessionIfNotExists(session as any);
+            } catch (e) {
+              console.warn('[SessionPage.loadSessions] Failed to add session to local storage:', session.id, e);
+            }
+          }
+        } catch (error) {
+          console.warn('[SessionPage.loadSessions] Failed to fetch sessions from Firestore, falling back to local storage:', error);
+          // Fallback to local storage if Firestore fetch fails
+          const s = (this.imageStorage.getSessions && typeof this.imageStorage.getSessions === 'function') ? this.imageStorage.getSessions() : [];
+          sessionsRaw = Array.isArray(s) ? s.slice() : [];
+        }
+      } else {
+        // No user ID available, use local storage only
+        const s = (this.imageStorage.getSessions && typeof this.imageStorage.getSessions === 'function') ? this.imageStorage.getSessions() : [];
+        sessionsRaw = Array.isArray(s) ? s.slice() : [];
+      }
 
       // Filter sessions to only include those belonging to the current user
       // Sessions without userId are legacy sessions (show them for backward compatibility)
@@ -448,53 +481,31 @@ private async initialize(): Promise<void> {
 
   /** Shared logout flow used by overlay button and menu item. */
   async logout(closeOverlay: boolean = false) {
-    const currentUid = this.userID || this.auth3.getCurrentUser()?.uid || '';
-    if (currentUid) this.clearSyncStateForUser(currentUid);
+    console.log('[SessionPage.logout] Logout initiated');
+    
+    // Close sidebar immediately to provide user feedback
+    this.isSidebarOpen = false;
+    
+    // Get current user ID before we start clearing
+    const currentUserId = this.userID || this.auth3.getCurrentUser()?.uid || '';
+    
+    // Clear all user-related data
+    try {
+      await this.clearAllUserData(currentUserId);
+    } catch (error) {
+      console.error('[SessionPage.logout] Error during data cleanup:', error);
+    }
+
+    // Clear sync state for user
+    if (currentUserId) {
+      this.clearSyncStateForUser(currentUserId);
+    }
+    
     this.syncStatusState = 'idle';
     this.syncStatusText = 'Not synced';
+    
     try {
       await this.auth3.logout();
-    } catch {}
-    
-    // Clear all locally stored sessions and images
-    try {
-      // Clear all images from ImageStorageService and Ionic Storage
-      if (this.imageStorage && typeof this.imageStorage.clear === 'function') {
-        await this.imageStorage.clear();
-        console.log('[SessionPage.logout] Cleared all images from storage');
-      }
-    } catch (e) {
-      console.warn('[SessionPage.logout] Failed to clear images', e);
-    }
-
-    // Clear sessions from Ionic Storage
-    try {
-      // Access the Storage instance from imageStorage to clear sessions
-      if ((this.imageStorage as any)._storage) {
-        await (this.imageStorage as any)._storage?.remove('stored_image_sessions');
-        console.log('[SessionPage.logout] Cleared all sessions from storage');
-      }
-    } catch (e) {
-      console.warn('[SessionPage.logout] Failed to clear sessions', e);
-    }
-
-    // Clear other user-related local storage
-    try { 
-      localStorage.setItem('isLoggedIn', 'false'); 
-    } catch {}
-    try { 
-      localStorage.removeItem('userData'); 
-    } catch {}
-    try {
-      localStorage.removeItem('userProfile');
-    } catch {}
-    try {
-      localStorage.removeItem('currentSessionId');
-    } catch {}
-    
-    // Clear sessionStorage as well
-    try {
-      sessionStorage.removeItem('userProfile');
     } catch {}
     
     this.isLoggedIn = false;
@@ -507,6 +518,84 @@ private async initialize(): Promise<void> {
     } catch {
       this.router.navigate(['/landing-page']);
     }
+  }
+
+  /**
+   * Centralized function to clear ALL user-related data from local and session storage.
+   * Called on logout to ensure no user data persists for the next login.
+   */
+  private async clearAllUserData(userId: string): Promise<void> {
+    console.log('[SessionPage.clearAllUserData] Beginning complete user data cleanup', { userId });
+
+    // Clear localStorage keys
+    const localStorageKeys = [
+      'isLoggedIn',
+      'userData',
+      'userProfile',
+      'currentSessionId',
+      'currentUserId'
+    ];
+
+    for (const key of localStorageKeys) {
+      try {
+        localStorage.removeItem(key);
+      } catch (e) {
+        console.warn(`[SessionPage.clearAllUserData] Failed to remove localStorage key: ${key}`, e);
+      }
+    }
+
+    // Clear sessionStorage keys
+    const sessionStorageKeys = [
+      'userProfile',
+      'isLoggedInSession'
+    ];
+
+    for (const key of sessionStorageKeys) {
+      try {
+        sessionStorage.removeItem(key);
+      } catch (e) {
+        console.warn(`[SessionPage.clearAllUserData] Failed to remove sessionStorage key: ${key}`, e);
+      }
+    }
+
+    // Clear user-specific storage keys (dynamic keys based on userId)
+    if (userId) {
+      const userSpecificKeys = [
+        `user_sync_status_${userId}`,
+        `user_sync_bootstrap_done_${userId}`
+      ];
+
+      for (const key of userSpecificKeys) {
+        try {
+          localStorage.removeItem(key);
+          sessionStorage.removeItem(key);
+        } catch (e) {
+          console.warn(`[SessionPage.clearAllUserData] Failed to remove user-specific key: ${key}`, e);
+        }
+      }
+    }
+
+    // Clear sessions and images from ImageStorageService
+    try {
+      if (this.imageStorage && typeof this.imageStorage.clear === 'function') {
+        await this.imageStorage.clear();
+        console.log('[SessionPage.clearAllUserData] Cleared all images from storage');
+      }
+    } catch (e) {
+      console.warn('[SessionPage.clearAllUserData] Failed to clear images', e);
+    }
+
+    // Clear sessions from Ionic Storage
+    try {
+      if ((this.imageStorage as any)._storage) {
+        await (this.imageStorage as any)._storage?.remove('stored_image_sessions');
+        console.log('[SessionPage.clearAllUserData] Cleared all sessions from storage');
+      }
+    } catch (e) {
+      console.warn('[SessionPage.clearAllUserData] Failed to clear sessions', e);
+    }
+
+    console.log('[SessionPage.clearAllUserData] Complete user data cleanup finished');
   }
 
   /**

@@ -662,7 +662,29 @@
 }
 .conv-input input { flex:1; padding:10px 12px; border-radius:20px; border:1px solid #eee; }
 .conv-input .send { background:#6b46ff; color:#fff; border:none; padding:10px 12px; border-radius:18px; }
-.conv-input .attach { background:none; border:none; font-size:18px; }
+.conv-input .attach { 
+  background: none; 
+  border: none; 
+  font-size: 20px; 
+  padding: 8px 10px;
+  min-width: 44px;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: #666;
+  transition: color 0.2s ease;
+  border-radius: 8px;
+  -webkit-appearance: none;
+  -webkit-touch-callout: none;
+}
+.conv-input .attach:active,
+.conv-input .attach:focus {
+  color: #333;
+  background: rgba(107, 70, 255, 0.1);
+  outline: none;
+}
 
 .bottom-nav {
 	position: fixed;
@@ -2213,5 +2235,255 @@ $attachment-sheet-transition: transform 0.28s cubic-bezier(0.4, 0, 0.2, 1);
 	ion-icon {
 		font-size: 1.2rem;
 		color: #ff512f;
+	}
+}
+
+// --- Attachment Debug Button and Dialog ---
+.attachment-debug-btn {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	gap: 8px;
+	margin-top: 16px;
+	padding: 10px 16px;
+	border: 2px solid #ff6b4a;
+	border-radius: 8px;
+	background: transparent;
+	color: #ff6b4a;
+	font-weight: 600;
+	font-size: 0.9rem;
+	cursor: pointer;
+	transition: all 0.2s ease;
+
+	&:hover {
+		background: #ff6b4a;
+		color: #fff;
+	}
+
+	&:active {
+		transform: scale(0.98);
+	}
+
+	ion-icon {
+		font-size: 1.1rem;
+	}
+}
+
+// Debug Dialog Overlay
+.attachment-debug-overlay {
+	position: fixed;
+	inset: 0;
+	background: rgba(0, 0, 0, 0.5);
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	z-index: 9999;
+	animation: fadeIn 0.2s ease;
+}
+
+@keyframes fadeIn {
+	from {
+		opacity: 0;
+	}
+	to {
+		opacity: 1;
+	}
+}
+
+.attachment-debug-dialog {
+	background: #fff;
+	border-radius: 20px;
+	border: 2px solid #ff6b4a;
+	box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
+	max-width: 360px;
+	width: 90%;
+	padding: 24px;
+	display: flex;
+	flex-direction: column;
+	gap: 20px;
+	animation: slideUp 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+
+	// State-specific styling
+	&.inactive {
+		// Inactive state styling (confirmation dialog)
+	}
+
+	&.active {
+		// Active state styling (sharing progress)
+	}
+}
+
+@keyframes slideUp {
+	from {
+		transform: translateY(30px);
+		opacity: 0;
+	}
+	to {
+		transform: translateY(0);
+		opacity: 1;
+	}
+}
+
+.attachment-debug-header {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+
+	h2 {
+		margin: 0;
+		font-size: 1.3rem;
+		font-weight: 700;
+		color: #1a1a2e;
+	}
+
+	p {
+		margin: 0;
+		font-size: 0.9rem;
+		color: #666;
+		line-height: 1.4;
+	}
+}
+
+.attachment-debug-content {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+}
+
+.attachment-info {
+	background: #f8f8f8;
+	border-radius: 12px;
+	padding: 16px;
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+}
+
+.attachment-debug-name {
+	font-size: 1em;
+	font-weight: 600;
+	color: #1a1a2e;
+	word-break: break-word;
+}
+
+.attachment-debug-details {
+	font-size: 0.85rem;
+	color: #666;
+	display: flex;
+	align-items: center;
+	gap: 4px;
+}
+
+.attachment-confirm-text {
+	font-size: 0.9rem;
+	color: #666;
+	margin: 0 0 8px 0;
+	line-height: 1.4;
+	font-weight: 500;
+}
+
+.attachment-debug-buttons {
+	display: flex;
+	gap: 12px;
+	justify-content: flex-end;
+	margin-top: 8px;
+
+	&.disabled {
+		opacity: 0.6;
+		pointer-events: none;
+	}
+}
+
+// Progress Bar Styles
+.attachment-copy-progress-section {
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+	padding: 16px;
+	background: #f9f9f9;
+	border-radius: 12px;
+	margin: 12px 0;
+}
+
+.attachment-copy-progress-status {
+	font-size: 0.9rem;
+	color: #666;
+	font-weight: 500;
+	text-align: center;
+}
+
+.attachment-copy-progress-bar-container {
+	width: 100%;
+	height: 8px;
+	background: #e0e0e0;
+	border-radius: 4px;
+	overflow: hidden;
+	border: 1px solid #ddd;
+}
+
+.attachment-copy-progress-bar-fill {
+	height: 100%;
+	background: linear-gradient(90deg, #ff6b4a 0%, #ff9500 100%);
+	border-radius: 4px;
+	transition: width 0.3s ease;
+	box-shadow: 0 0 8px rgba(255, 107, 74, 0.4);
+}
+
+.attachment-copy-progress-percent {
+	font-size: 0.85rem;
+	color: #ff6b4a;
+	font-weight: 600;
+	text-align: center;
+}
+
+.debug-confirm-btn {
+	flex: 1;
+	padding: 12px 16px;
+	border: none;
+	border-radius: 8px;
+	background: linear-gradient(135deg, #ff6b4a 0%, #ff9500 100%);
+	color: #fff;
+	font-weight: 600;
+	font-size: 0.9rem;
+	cursor: pointer;
+	transition: all 0.2s ease;
+
+	&:hover:not(:disabled) {
+		box-shadow: 0 4px 12px rgba(255, 107, 74, 0.35);
+	}
+
+	&:active:not(:disabled) {
+		transform: scale(0.98);
+	}
+
+	&:disabled {
+		opacity: 0.7;
+		cursor: not-allowed;
+	}
+}
+
+.debug-cancel-btn {
+	flex: 1;
+	padding: 12px 16px;
+	border: 1px solid #ddd;
+	border-radius: 8px;
+	background: #fff;
+	color: #666;
+	font-weight: 600;
+	font-size: 0.9rem;
+	cursor: pointer;
+	transition: all 0.2s ease;
+
+	&:hover:not(:disabled) {
+		background: #f5f5f5;
+	}
+
+	&:active:not(:disabled) {
+		transform: scale(0.98);
+	}
+
+	&:disabled {
+		opacity: 0.7;
+		cursor: not-allowed;
 	}
 }

@@ -55,7 +55,7 @@
         <ion-icon name="help-circle-outline"></ion-icon>
         <span>Help</span>
       </li>
-      <li class="menu-item" (click)="logout()">
+      <li class="menu-item" (click)="logout(); closeSidebar(); $event.stopPropagation()" data-action="logout">
         <ion-icon name="log-out-outline"></ion-icon>
         <span>Log Out</span>
       </li>
@@ -240,7 +240,7 @@
         <div class="header-title">
           <span>Message</span>
         </div>
-        <button class="menu-btn">
+        <button class="menu-btn" (click)="openAttachmentSheet()">
           <ion-icon name="ellipsis-horizontal-outline"></ion-icon>
         </button>
       </div>
@@ -371,14 +371,88 @@
             <div class="attachment-detail-info">
               <div class="attachment-detail-type">
                 <ion-icon [name]="getAttachmentPreviewIcon(selectedAttachment)"></ion-icon>
-                <span>{{ selectedAttachment?.type || 'File' }}</span>
+                <span *ngIf="selectedAttachment?.type !== 'session'">{{ selectedAttachment?.type || 'File' }}</span>
+                <span *ngIf="selectedAttachment?.type === 'session'">Session</span>
               </div>
               <div class="attachment-detail-size" *ngIf="selectedAttachment?.size">
                 Size: {{ (selectedAttachment.size / 1024).toFixed(2) }} KB
               </div>
+              <div class="attachment-detail-session-info" *ngIf="selectedAttachment?.type === 'session'">
+                <div *ngIf="selectedAttachment?.imageCount">
+                  <strong>Images:</strong> {{ selectedAttachment.imageCount }}
+                </div>
+                <div *ngIf="selectedAttachment?.totalBoundingBoxes">
+                  <strong>Bounding Boxes:</strong> {{ selectedAttachment.totalBoundingBoxes }}
+                </div>
+                <div *ngIf="selectedAttachment?.created">
+                  <strong>Created:</strong> {{ selectedAttachment.created | date:'medium' }}
+                </div>
+              </div>
+              <button *ngIf="selectedAttachment?.type === 'session'" class="attachment-debug-btn" (click)="onAttachmentDebugClick(selectedAttachment)" type="button" title="Debug: Print session and images to console">
+                <ion-icon name="bug-outline"></ion-icon>
+                Debug Session
+              </button>
             </div>
           </div>
         </ng-template>
+      </div>
+    </div>
+
+    <!-- Attachment Debug Dialog Overlay -->
+    <div *ngIf="isAttachmentDebugDialogOpen" class="attachment-debug-overlay" (click)="!isAttachmentCopyInProgress && closeAttachmentDebugDialog()">
+      <div class="attachment-debug-dialog" [ngClass]="attachmentDebugState" (click)="$event.stopPropagation()">
+        
+        <!-- INACTIVE STATE: Confirmation Dialog -->
+        <ng-container *ngIf="attachmentDebugState === 'inactive'">
+          <div class="attachment-debug-header">
+            <h2>Do you want to share this file</h2>
+          </div>
+          <div class="attachment-debug-content">
+            <div *ngIf="selectedAttachmentForDebug" class="attachment-info">
+              <p class="attachment-confirm-text">Confirm sharing of this session and its images to user,</p>
+              <div class="attachment-debug-name">{{ selectedAttachmentForDebug.name }}</div>
+              <div class="attachment-debug-details" *ngIf="selectedAttachmentForDebug.type === 'session'">
+                <span>{{ selectedAttachmentForDebug.imageCount || 0 }} Images</span>
+                <span>·</span>
+                <span>{{ selectedAttachmentForDebug.created | date:'short' }}</span>
+              </div>
+            </div>
+          </div>
+          <div class="attachment-debug-buttons">
+            <button class="debug-confirm-btn" (click)="confirmAttachmentDebugAction(selectedAttachmentForDebug)" type="button">
+              Confirm share
+            </button>
+            <button class="debug-cancel-btn" (click)="closeAttachmentDebugDialog()" type="button">
+              Cancel
+            </button>
+          </div>
+        </ng-container>
+
+        <!-- ACTIVE STATE: Sharing Progress Dialog -->
+        <ng-container *ngIf="attachmentDebugState === 'active'">
+          <div class="attachment-debug-header">
+            <h2>Sharing your session and session images to user</h2>
+          </div>
+          <div class="attachment-debug-content">
+            <div *ngIf="selectedAttachmentForDebug" class="attachment-info">
+              <div class="attachment-debug-name">{{ selectedAttachmentForDebug.name }}</div>
+              <div class="attachment-debug-details" *ngIf="selectedAttachmentForDebug.type === 'session'">
+                <span>{{ selectedAttachmentForDebug.imageCount || 0 }} Images</span>
+                <span>·</span>
+                <span>{{ selectedAttachmentForDebug.created | date:'short' }}</span>
+              </div>
+            </div>
+          </div>
+          <!-- Progress Bar Section (shown during active state) -->
+          <div class="attachment-copy-progress-section">
+            <div class="attachment-copy-progress-status">{{ attachmentCopyStatusText }}</div>
+            <div class="attachment-copy-progress-bar-container">
+              <div class="attachment-copy-progress-bar-fill" [style.width.%]="attachmentCopyProgress"></div>
+            </div>
+            <div class="attachment-copy-progress-percent">Sharing in progress: {{ attachmentCopyProgress }}%</div>
+          </div>
+        </ng-container>
+        
       </div>
     </div>
 

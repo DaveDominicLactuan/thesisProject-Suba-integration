@@ -73,120 +73,32 @@ ngOnInit(): void {
 private async initialize(): Promise<void> {
   try {
     console.log('[HomePage2.initialize] ===== INITIALIZE START =====');
-    console.log('[HomePage2.initialize] Auth currentUser at initialize start:', this.auth3.getCurrentUser()?.uid || 'null');
+    const currentUser = this.auth3.getCurrentUser();
+    console.log('[HomePage2.initialize] Auth currentUser at initialize start:', currentUser?.uid || 'null');
 
-    const cachedUid = this.resolveCachedUid();
-    if (cachedUid) {
-      this.refreshCacheWarmStatus(cachedUid);
+    // Check if user is already logged in
+    const isAlreadyLoggedIn = !!currentUser;
 
-      const cachedProfile = this.userPrefetchCache.getCachedUserProfile(cachedUid);
-      if (cachedProfile) {
-        this.firstName = cachedProfile.firstName || this.firstName;
-        this.lastName = cachedProfile.lastName || this.lastName;
-        this.email = cachedProfile.email || this.email;
-        this.userID = cachedProfile.userID || cachedProfile.uid || this.userID;
-      }
-      await this.hydrateLocalImageStorageFromCache(cachedUid);
-      this.userPrefetchCache.warmUserDataInBackground(cachedUid, 'home-page2-initialize').finally(() => {
-        this.refreshCacheWarmStatus(cachedUid);
+    if (isAlreadyLoggedIn) {
+      console.log('[HomePage2.initialize] User ALREADY logged in. Immediately loading locally stored profile for UID:', currentUser!.uid);
+      await this.loadUserProfileForLoggedInUser(currentUser!.uid);
+      
+      // Then optionally refresh auth/profile in background after initial load completes
+      this.refreshUserProfileInBackground(currentUser!.uid).catch((err) => {
+        console.warn('[HomePage2.initialize] Background profile refresh failed:', err);
       });
-    }
-    
-    // Ensure Firebase auth state is ready before fetching profile
-    // wait for up to 8 seconds for auth from firebase and current user profile from firestore
-    if (!this.auth3.getCurrentUser()) {
-      console.log('[HomePage2.initialize] getCurrentUser() is null, calling waitForAuthUser(15000)...');
-      const waitResult = await this.auth3.waitForAuthUser(15000);
-      console.log('[HomePage2.initialize] waitForAuthUser completed. Result:', waitResult?.uid || 'null');
     } else {
-      console.log('[HomePage2.initialize] getCurrentUser() already available:', this.auth3.getCurrentUser()?.uid);
+      console.log('[HomePage2.initialize] User NOT logged in. Using existing auth wait flow...');
+      await this.loadUserProfileWithAuthWait();
     }
-    
-    console.log('[HomePage2.initialize] Auth currentUser before getUserProfile:', this.auth3.getCurrentUser()?.uid || 'null');
-    console.log('[HomePage2.initialize] About to call getUserProfile()...');
-    
-   // stores current user profile data in profile variables 
-    const profile = await this.auth3.getUserProfile();
-    console.log('[HomePage2.initialize] getUserProfile succeeded. Profile:', profile);
-    
-    this.firstName = profile['firstName'];
-    this.lastName = profile['lastName'];
-    this.engineeringID = profile['engineeringID'] || '';
-    this.email = profile['email'] || '';
-    this.userID = profile['userID'] || '';
-    // Store current userId to localStorage for offline reference
-    this.storeCurrentUserId();
-    // Read role from Firestore profile (authoritative source)
-    this.userRole = profile['role'] || (this.engineeringID ? 'engineer' : 'user');
-    //gets username from firatName and lastName
-    this.userName = (this.firstName && this.lastName) ? `${this.firstName} ${this.lastName}` : (this.email || null);
-    //prints the current user profile to console
-    console.log('[HomePage2.initialize] user profile loaded', {
-      firstName: this.firstName,
-      lastName: this.lastName,
-      email: this.email,
-      engineeringID: this.engineeringID,
-      userID: this.userID,
-      userRole: this.userRole,
-      userName: this.userName
-    });
-
-    // ✅ Start background sync user's sessions/images from Firestore to local storage
-    const resolvedUserId = this.userID || this.auth3.getCurrentUser()?.uid || '';
-    this.userID = resolvedUserId || this.userID;
-    this.loadPersistedSyncStatus(resolvedUserId);
-    this.loadPersistedLocation(resolvedUserId);
-    if (resolvedUserId) {
-      this.refreshCacheWarmStatus(resolvedUserId);
-      this.userPrefetchCache.warmUserDataInBackground(resolvedUserId, 'home-page2-profile-ready').finally(() => {
-        this.refreshCacheWarmStatus(resolvedUserId);
-      });
-    }
-    
-    // Fetch office location markers early in app flow for offline fallback
-    try {
-      await this.fetchOfficeLocationMarkerData();
-    } catch (err) {
-      console.error('[HomePage2.initialize] Failed to fetch office location markers:', err);
-    }
-    
-    console.log('[HomePage2.initialize] Starting initial background sync check for user:', resolvedUserId || 'none');
-    this.startUserSyncInBackground(resolvedUserId, true);
 
     console.log('[HomePage2.initialize] ===== INITIALIZE END (success) =====');
-    // Persist/refresh local user data for downstream use, and for long term offline use
-    try {
-      localStorage.setItem('userData', JSON.stringify({
-        username: this.userName || '',
-        userRole: this.userRole || 'user',
-        firstName: this.firstName || '',
-        lastName: this.lastName || '',
-        engineeringID: this.engineeringID || '',
-        email: this.email || '',
-        userID: this.userID || ''
-      }));
-      localStorage.setItem('isLoggedIn', 'true');
-    } catch {}
-     // Also persist user profile in sessionStorage for current session, short lived and cleared when closed
-     try {
-       sessionStorage.setItem('userProfile', JSON.stringify({
-         username: this.userName || '',
-         userRole: this.userRole || 'user',
-         firstName: this.firstName || '',
-         lastName: this.lastName || '',
-         engineeringID: this.engineeringID || '',
-         email: this.email || '',
-         userID: this.userID || ''
-       }));
-       sessionStorage.setItem('isLoggedInSession', 'true');
-     } catch {}
   } catch (error) {
     console.error('[HomePage2.initialize] ERROR in initialize:', error);
     console.error('[HomePage2.initialize] Error type:', error instanceof Error ? error.message : 'unknown');
-    console.error('[HomePage2.initialize] Full error object:', JSON.stringify(error, null, 2));
-    console.log('[HomePage2.initialize] Auth currentUser during error:', this.auth3.getCurrentUser()?.uid || 'null');
+    console.error('[HomePage2.initialize] Auth currentUser during error:', this.auth3.getCurrentUser()?.uid || 'null');
     
-    // Fallback: try to load previously saved user data
+    // Fallback: try to load previously saved user data from localStorage
     try {
       const cached = localStorage.getItem('userData');
       if (cached) {
@@ -198,10 +110,218 @@ private async initialize(): Promise<void> {
         this.email = data.email || null;
         this.engineeringID = data.engineeringID || null;
         this.userID = data.userID || null;
-        console.log('[HomePage2.initialize] loaded user profile from cache', data);
+        console.log('[HomePage2.initialize] loaded user profile from localStorage cache', data);
       }
     } catch {}
     console.log('[HomePage2.initialize] ===== INITIALIZE END (with error) =====');
+  }
+}
+
+/**
+ * Load user profile immediately for an already logged-in user.
+ * Uses locally cached/stored profile and prefetched data for fastest load.
+ */
+private async loadUserProfileForLoggedInUser(uid: string): Promise<void> {
+  console.log('[HomePage2.loadUserProfileForLoggedInUser] Loading profile for logged-in user:', uid);
+  
+  try {
+    // Step 1: Load from cache/prefetch if available
+    const cachedProfile = this.userPrefetchCache.getCachedUserProfile(uid);
+    if (cachedProfile) {
+      console.log('[HomePage2.loadUserProfileForLoggedInUser] Found cached profile, loading immediately');
+      this.applyProfileData(cachedProfile);
+      this.userID = cachedProfile.userID || cachedProfile.uid || uid;
+    }
+
+    // Step 2: Hydrate local image storage from cache
+    await this.hydrateLocalImageStorageFromCache(uid);
+
+    // Step 3: Load persisted sync/location status
+    this.loadPersistedSyncStatus(uid);
+    this.loadPersistedLocation(uid);
+    this.refreshCacheWarmStatus(uid);
+
+    // Step 4: Fetch office location markers
+    try {
+      await this.fetchOfficeLocationMarkerData();
+    } catch (err) {
+      console.error('[HomePage2.loadUserProfileForLoggedInUser] Failed to fetch office markers:', err);
+    }
+
+    // Step 5: Start background sync
+    this.startUserSyncInBackground(uid, true);
+
+    // Step 6: Persist user data to localStorage
+    this.persistUserProfileToStorage();
+
+    console.log('[HomePage2.loadUserProfileForLoggedInUser] Profile loading completed for user:', uid);
+  } catch (error) {
+    console.error('[HomePage2.loadUserProfileForLoggedInUser] Error loading profile:', error);
+    throw error;
+  }
+}
+
+/**
+ * Refresh user profile in background without blocking initial UI load.
+ * Fetches latest profile from Firestore and updates cached data.
+ */
+private async refreshUserProfileInBackground(uid: string): Promise<void> {
+  try {
+    console.log('[HomePage2.refreshUserProfileInBackground] Refreshing profile in background for:', uid);
+    
+    const profile = await this.auth3.getUserProfile();
+    console.log('[HomePage2.refreshUserProfileInBackground] Got fresh profile from Firestore:', profile);
+    
+    // Update component properties with latest data
+    this.applyProfileData(profile);
+    this.userID = profile.userID || profile.uid || uid;
+    this.storeCurrentUserId();
+
+    // Update cache with latest data
+    this.userPrefetchCache.warmUserDataInBackground(uid, 'home-page2-refresh').finally(() => {
+      this.refreshCacheWarmStatus(uid);
+    });
+
+    // Refresh persisted storage
+    this.persistUserProfileToStorage();
+
+    console.log('[HomePage2.refreshUserProfileInBackground] Background profile refresh completed');
+  } catch (error) {
+    console.error('[HomePage2.refreshUserProfileInBackground] Failed to refresh profile:', error);
+    throw error;
+  }
+}
+
+/**
+ * Original auth wait flow: wait for Firebase auth, then fetch profile from Firestore.
+ * Used when user is not already logged in (e.g., fresh app start or post-login redirect).
+ */
+private async loadUserProfileWithAuthWait(): Promise<void> {
+  try {
+    console.log('[HomePage2.loadUserProfileWithAuthWait] Starting auth wait flow...');
+
+    // Attempt to load from cache first to improve perceived performance
+    const cachedUid = this.resolveCachedUid();
+    if (cachedUid) {
+      console.log('[HomePage2.loadUserProfileWithAuthWait] Found cached UID, preloading profile:', cachedUid);
+      try {
+        const cachedProfile = this.userPrefetchCache.getCachedUserProfile(cachedUid);
+        if (cachedProfile) {
+          this.applyProfileData(cachedProfile);
+          this.userID = cachedProfile.userID || cachedProfile.uid || cachedUid;
+        }
+        await this.hydrateLocalImageStorageFromCache(cachedUid);
+        this.loadPersistedSyncStatus(cachedUid);
+        this.loadPersistedLocation(cachedUid);
+      } catch (err) {
+        console.warn('[HomePage2.loadUserProfileWithAuthWait] Failed to preload cached profile:', err);
+      }
+    }
+
+    // Wait for auth from Firebase (up to 15 seconds)
+    console.log('[HomePage2.loadUserProfileWithAuthWait] Waiting for Firebase auth...');
+    const waitResult = await this.auth3.waitForAuthUser(15000);
+    console.log('[HomePage2.loadUserProfileWithAuthWait] Auth wait completed. User:', waitResult?.uid || 'null');
+
+    if (!waitResult) {
+      console.warn('[HomePage2.loadUserProfileWithAuthWait] No user authenticated after timeout');
+      return;
+    }
+
+    // Fetch fresh profile from Firestore
+    console.log('[HomePage2.loadUserProfileWithAuthWait] Fetching fresh profile from Firestore...');
+    const profile = await this.auth3.getUserProfile();
+    console.log('[HomePage2.loadUserProfileWithAuthWait] Got fresh profile:', profile);
+
+    // Apply all profile data
+    this.applyProfileData(profile);
+    this.userID = profile.userID || profile.uid || waitResult.uid;
+    this.storeCurrentUserId();
+
+    // Hydrate image storage from cache
+    await this.hydrateLocalImageStorageFromCache(this.userID || waitResult.uid);
+
+    // Load persisted status
+    const resolvedUserId = this.userID || waitResult.uid;
+    this.loadPersistedSyncStatus(resolvedUserId);
+    this.loadPersistedLocation(resolvedUserId);
+    this.refreshCacheWarmStatus(resolvedUserId);
+
+    // Fetch office location markers
+    try {
+      await this.fetchOfficeLocationMarkerData();
+    } catch (err) {
+      console.error('[HomePage2.loadUserProfileWithAuthWait] Failed to fetch office markers:', err);
+    }
+
+    // Start background sync
+    this.startUserSyncInBackground(resolvedUserId, true);
+
+    // Persist to storage
+    this.persistUserProfileToStorage();
+
+    console.log('[HomePage2.loadUserProfileWithAuthWait] Auth wait flow completed successfully');
+  } catch (error) {
+    console.error('[HomePage2.loadUserProfileWithAuthWait] Error in auth wait flow:', error);
+    throw error;
+  }
+}
+
+/**
+ * Apply profile data to component properties.
+ * Centralizes the logic for setting firstName, lastName, email, etc.
+ */
+private applyProfileData(profile: any): void {
+  this.firstName = profile['firstName'] || null;
+  this.lastName = profile['lastName'] || null;
+  this.engineeringID = profile['engineeringID'] || '';
+  this.email = profile['email'] || null;
+  this.userRole = profile['role'] || (this.engineeringID ? 'engineer' : 'user');
+  this.userName = (this.firstName && this.lastName) 
+    ? `${this.firstName} ${this.lastName}` 
+    : (this.email || null);
+  
+  console.log('[HomePage2.applyProfileData] Profile applied:', {
+    firstName: this.firstName,
+    lastName: this.lastName,
+    email: this.email,
+    engineeringID: this.engineeringID,
+    userRole: this.userRole,
+    userName: this.userName
+  });
+}
+
+/**
+ * Persist current user profile to localStorage and sessionStorage.
+ * Called after profile data is loaded and updated.
+ */
+private persistUserProfileToStorage(): void {
+  try {
+    // Persist to localStorage for long-term offline access
+    localStorage.setItem('userData', JSON.stringify({
+      username: this.userName || '',
+      userRole: this.userRole || 'user',
+      firstName: this.firstName || '',
+      lastName: this.lastName || '',
+      engineeringID: this.engineeringID || '',
+      email: this.email || '',
+      userID: this.userID || ''
+    }));
+    localStorage.setItem('isLoggedIn', 'true');
+
+    // Also persist to sessionStorage for current session
+    sessionStorage.setItem('userProfile', JSON.stringify({
+      username: this.userName || '',
+      userRole: this.userRole || 'user',
+      firstName: this.firstName || '',
+      lastName: this.lastName || '',
+      engineeringID: this.engineeringID || '',
+      email: this.email || '',
+      userID: this.userID || ''
+    }));
+    sessionStorage.setItem('isLoggedInSession', 'true');
+  } catch (error) {
+    console.warn('[HomePage2.persistUserProfileToStorage] Failed to persist profile to storage:', error);
   }
 }
 
@@ -916,60 +1036,40 @@ private async initialize(): Promise<void> {
 
   /** Shared logout flow used by overlay button and menu item. */
   async logout(closeOverlay: boolean = false) {
-    const currentUid = this.userID || this.auth3.getCurrentUser()?.uid || '';
-    if (currentUid) {
-      this.clearSyncStateForUser(currentUid);
-      this.clearPersistedLocation(currentUid);
+    console.log('[HomePage2.logout] Logout initiated');
+    
+    // Close sidebar immediately to provide user feedback
+    this.isSidebarOpen = false;
+    
+    // Get current user ID before we start clearing
+    const currentUserId = this.userID || this.auth3.getCurrentUser()?.uid || '';
+    
+    // Clear location-related data
+    if (currentUserId) {
+      this.clearPersistedLocation(currentUserId);
     }
+    
+    // Clear all user-related data
+    try {
+      await this.clearAllUserData(currentUserId);
+    } catch (error) {
+      console.error('[HomePage2.logout] Error during data cleanup:', error);
+    }
+
+    // Clear sync state for user
+    if (currentUserId) {
+      this.clearSyncStateForUser(currentUserId);
+    }
+    
     this.currentLocation = null;
     this.locationStatusText = 'No location captured';
     this.locationErrorText = '';
     this.syncStatusState = 'idle';
     this.syncStatusText = 'Not synced';
     this.cacheWarmStatusText = 'Not synced';
+    
     try {
       await this.auth3.logout();
-    } catch {}
-    
-    // Clear all locally stored sessions and images
-    try {
-      // Clear all images from ImageStorageService and Ionic Storage
-      if (this.imageStorage && typeof this.imageStorage.clear === 'function') {
-        await this.imageStorage.clear();
-        console.log('[HomePage2.logout] Cleared all images from storage');
-      }
-    } catch (e) {
-      console.warn('[HomePage2.logout] Failed to clear images', e);
-    }
-
-    // Clear sessions from Ionic Storage
-    try {
-      // Access the Storage instance from imageStorage to clear sessions
-      if ((this.imageStorage as any)._storage) {
-        await (this.imageStorage as any)._storage?.remove('stored_image_sessions');
-        console.log('[HomePage2.logout] Cleared all sessions from storage');
-      }
-    } catch (e) {
-      console.warn('[HomePage2.logout] Failed to clear sessions', e);
-    }
-
-    // Clear other user-related local storage
-    try { 
-      localStorage.setItem('isLoggedIn', 'false'); 
-    } catch {}
-    try { 
-      localStorage.removeItem('userData'); 
-    } catch {}
-    try {
-      localStorage.removeItem('userProfile');
-    } catch {}
-    try {
-      localStorage.removeItem('currentSessionId');
-    } catch {}
-    
-    // Clear sessionStorage as well
-    try {
-      sessionStorage.removeItem('userProfile');
     } catch {}
     
     this.isLoggedIn = false;
@@ -983,6 +1083,85 @@ private async initialize(): Promise<void> {
     } catch {
       this.router.navigate(['/landing-page']);
     }
+  }
+
+  /**
+   * Centralized function to clear ALL user-related data from local and session storage.
+   * Called on logout to ensure no user data persists for the next login.
+   */
+  private async clearAllUserData(userId: string): Promise<void> {
+    console.log('[HomePage2.clearAllUserData] Beginning complete user data cleanup', { userId });
+
+    // Clear localStorage keys
+    const localStorageKeys = [
+      'isLoggedIn',
+      'userData',
+      'userProfile',
+      'currentSessionId',
+      'currentUserId'
+    ];
+
+    for (const key of localStorageKeys) {
+      try {
+        localStorage.removeItem(key);
+      } catch (e) {
+        console.warn(`[HomePage2.clearAllUserData] Failed to remove localStorage key: ${key}`, e);
+      }
+    }
+
+    // Clear sessionStorage keys
+    const sessionStorageKeys = [
+      'userProfile',
+      'isLoggedInSession'
+    ];
+
+    for (const key of sessionStorageKeys) {
+      try {
+        sessionStorage.removeItem(key);
+      } catch (e) {
+        console.warn(`[HomePage2.clearAllUserData] Failed to remove sessionStorage key: ${key}`, e);
+      }
+    }
+
+    // Clear user-specific storage keys (dynamic keys based on userId)
+    if (userId) {
+      const userSpecificKeys = [
+        `user_sync_status_${userId}`,
+        `user_sync_bootstrap_done_${userId}`,
+        `user_current_location_${userId}`
+      ];
+
+      for (const key of userSpecificKeys) {
+        try {
+          localStorage.removeItem(key);
+          sessionStorage.removeItem(key);
+        } catch (e) {
+          console.warn(`[HomePage2.clearAllUserData] Failed to remove user-specific key: ${key}`, e);
+        }
+      }
+    }
+
+    // Clear sessions and images from ImageStorageService
+    try {
+      if (this.imageStorage && typeof this.imageStorage.clear === 'function') {
+        await this.imageStorage.clear();
+        console.log('[HomePage2.clearAllUserData] Cleared all images from storage');
+      }
+    } catch (e) {
+      console.warn('[HomePage2.clearAllUserData] Failed to clear images', e);
+    }
+
+    // Clear sessions from Ionic Storage
+    try {
+      if ((this.imageStorage as any)._storage) {
+        await (this.imageStorage as any)._storage?.remove('stored_image_sessions');
+        console.log('[HomePage2.clearAllUserData] Cleared all sessions from storage');
+      }
+    } catch (e) {
+      console.warn('[HomePage2.clearAllUserData] Failed to clear sessions', e);
+    }
+
+    console.log('[HomePage2.clearAllUserData] Complete user data cleanup finished');
   }
 
   /**
