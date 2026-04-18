@@ -37,6 +37,29 @@ export class SessionPagePage implements OnInit, OnDestroy {
   isSessionConfirmDialogOpen: boolean = false;
   selectedSessionForConfirm: any = null;
 
+  // --- Session Loading/Progress Dialog State ---
+  isSessionLoadingDialogOpen: boolean = false;
+  selectedSessionForLoading: any = null;
+  sessionLoadingProgress: number = 0;
+  sessionLoadingStatusText: string = 'Loading session images from S3...';
+  sessionLoadingImageCount: { current: number; total: number } = { current: 0, total: 0 };
+
+  // --- Session Delete Confirmation Dialog State ---
+  isSessionDeleteConfirmDialogOpen: boolean = false;
+  selectedSessionForDelete: any = null;
+
+  // --- Session Delete Progress Dialog State ---
+  isSessionDeleteProgressDialogOpen: boolean = false;
+  selectedSessionForDeleteProgress: any = null;
+  sessionDeleteProgress: number = 0;
+  sessionDeleteStatusText: string = 'Preparing deletion...';
+  sessionDeleteStageCount: { current: number; total: number } = { current: 0, total: 0 };
+
+  // --- Session ID Tracking for Local Storage ---
+  private readonly MAX_SESSION_IDS = 5;
+  private sessionIdTrackingKey = 'sessionIdTracking';
+  private sessionIdListKey = 'storedSessionIds';
+
   /** Inject auth, router, and image storage services for navigation and data. */
   constructor(private formBuilder: FormBuilder, private router: Router, private authService: AuthService, private navCtrl: NavController, private auth3: Auth3Service, private imageStorage: ImageStorageService, private platform: Platform) {
 
@@ -50,87 +73,146 @@ ngOnInit(): void {
 
 /** Perform async initialization tasks (profile + sessions). */
 private async initialize(): Promise<void> {
+  console.log('[SessionPage.initialize] ===== PAGE INIT START =====');
   try {
-    // Ensure Firebase auth state is ready before fetching profile
-    // wait for up to 8 seconds for auth from firebase and current user profile from firestore
+    // Step 1: Try to load profile from localStorage first for immediate UI update
+    // This is the fastest path for already-logged-in users
+    const cachedUserData = this.loadCachedUserProfile();
+    if (cachedUserData) {
+      console.log('[SessionPage.initialize] Loaded user profile from cache (fast path)');
+    }
+
+    // Step 2: Load sessions immediately from local storage for quick UI display
+    // Don't wait for Firestore — display what we have locally first
+    console.log('[SessionPage.initialize] Loading sessions from local storage (non-blocking)...');
+    await this.loadSessions().catch(e => console.warn('[SessionPage.initialize] loadSessions failed:', e));
+
+    // Step 3: Ensure Firebase auth state is ready and fetch fresh profile from Firestore
+    // This runs in parallel and will update UI if data changed
+    this.loadUserProfileWithAuthWait().catch(error => {
+      console.error('[SessionPage.initialize] Profile loading failed:', error);
+    });
+
+    // Step 4: Start background sync for Firestore data without blocking UI
+    const resolvedUserId = this.userID || this.auth3.getCurrentUser()?.uid || '';
+    if (resolvedUserId) {
+      this.startUserSyncInBackground(resolvedUserId);
+    }
+  } catch (error) {
+    console.error('[SessionPage.initialize] Fatal initialization error:', error);
+  }
+}
+
+/**
+ * Load user profile immediately from localStorage for already logged-in users.
+ * Maximum speed, no network calls.
+ */
+private loadCachedUserProfile(): boolean {
+  try {
+    const cached = localStorage.getItem('userData');
+    if (cached) {
+      const data = JSON.parse(cached);
+      this.userID = data.userID || null;
+      this.firstName = data.firstName || null;
+      this.lastName = data.lastName || null;
+      this.userName = data.username || null;
+      this.userRole = data.userRole || 'user';
+      this.email = data.email || null;
+      this.engineeringID = data.engineeringID || null;
+      console.log('[SessionPage.loadCachedUserProfile] Loaded from cache:', data);
+      return true;
+    }
+  } catch (e) {
+    console.warn('[SessionPage.loadCachedUserProfile] Failed to load cache:', e);
+  }
+  return false;
+}
+
+/**
+ * Fetch fresh user profile from Firestore and update local data.
+ * Called after cache load so it can refresh stale data without blocking initial UI.
+ */
+private async loadUserProfileWithAuthWait(): Promise<void> {
+  try {
+    // Wait for auth to be ready
     if (!this.auth3.getCurrentUser()) {
-      console.log('[HomePage2] waiting for auth state…');
+      console.log('[SessionPage.loadUserProfileWithAuthWait] Waiting for auth state...');
       await this.waitForUserAuth(8000);
     }
-   // stores current user profile data in profile variables 
+
+    // Fetch fresh profile from Firestore
     const profile = await this.auth3.getUserProfile();
-    // Get userID from authenticated user (Firebase UID from auth.currentUser)
     const currentUser = this.auth3.getCurrentUser();
-    this.userID = currentUser?.uid || profile['userID'] || null;
-    this.firstName = profile['firstName'];
-    this.lastName = profile['lastName'];
-    this.engineeringID = profile['engineeringID'] || '';
-    this.email = profile['email'] || '';
-    // Read role from Firestore profile (authoritative source)
+    
+    // Update profile data
+    this.userID = currentUser?.uid || profile['userID'] || this.userID;
+    this.firstName = profile['firstName'] || this.firstName;
+    this.lastName = profile['lastName'] || this.lastName;
+    this.engineeringID = profile['engineeringID'] || this.engineeringID || '';
+    this.email = profile['email'] || this.email || '';
     this.userRole = profile['role'] || (this.engineeringID ? 'engineer' : 'user');
-    //gets username from firatName and lastName
-    this.userName = (this.firstName && this.lastName) ? `${this.firstName} ${this.lastName}` : (this.email || null);
-    //prints the current user profile to console
-    console.log('[SessionPage] user profile loaded', {
+    this.userName = (this.firstName && this.lastName)
+      ? `${this.firstName} ${this.lastName}`
+      : (this.email || this.userName);
+    this.isLoggedIn = true;
+
+    console.log('[SessionPage.loadUserProfileWithAuthWait] Profile refreshed:', {
       userID: this.userID,
       firstName: this.firstName,
-      lastName: this.lastName,
-      email: this.email,
-      engineeringID: this.engineeringID,
-      userRole: this.userRole,
       userName: this.userName
     });
 
-    // Read shared sync status produced by HomePage2 background sync
-    const resolvedUserId = this.userID || this.auth3.getCurrentUser()?.uid || '';
-    this.userID = resolvedUserId || this.userID;
-    this.loadPersistedSyncStatus(resolvedUserId);
-    console.log('[SessionPage.initialize] Loaded sync status for user:', resolvedUserId || 'none');
-
-    // Persist/refresh local user data for downstream use, and for long term offline use
-    try {
-      localStorage.setItem('userData', JSON.stringify({
-        userID: this.userID || '',
-        username: this.userName || '',
-        userRole: this.userRole || 'user',
-        firstName: this.firstName || '',
-        lastName: this.lastName || '',
-        engineeringID: this.engineeringID || '',
-        email: this.email || ''
-      }));
-      localStorage.setItem('isLoggedIn', 'true');
-    } catch {}
-     // Also persist user profile in sessionStorage for current session, short lived and cleared when closed
-     try {
-       sessionStorage.setItem('userProfile', JSON.stringify({
-         userID: this.userID || '',
-         username: this.userName || '',
-         userRole: this.userRole || 'user',
-         firstName: this.firstName || '',
-         lastName: this.lastName || '',
-         engineeringID: this.engineeringID || '',
-         email: this.email || ''
-       }));
-       sessionStorage.setItem('isLoggedInSession', 'true');
-     } catch {}
+    // Save updated profile to localStorage
+    this.persistUserProfileToStorage();
   } catch (error) {
-    console.error(error);
-    // Fallback: try to load previously saved user data
-    try {
-      const cached = localStorage.getItem('userData');
-      if (cached) {
-        const data = JSON.parse(cached);
-        this.userID = data.userID || null;
-        this.firstName = data.firstName || null;
-        this.lastName = data.lastName || null;
-        this.userName = data.username || null;
-        this.userRole = data.userRole || 'user';
-        this.email = data.email || null;
-        this.engineeringID = data.engineeringID || null;
-        console.log('[SessionPage] loaded user profile from cache', data);
-      }
-    } catch {}
+    console.warn('[SessionPage.loadUserProfileWithAuthWait] Profile refresh failed:', error);
+    // Keep using cached profile
   }
+}
+
+/**
+ * Persist current user profile to localStorage.
+ */
+private persistUserProfileToStorage(): void {
+  try {
+    const profileData = {
+      userID: this.userID || '',
+      username: this.userName || '',
+      userRole: this.userRole || 'user',
+      firstName: this.firstName || '',
+      lastName: this.lastName || '',
+      engineeringID: this.engineeringID || '',
+      email: this.email || ''
+    };
+    localStorage.setItem('userData', JSON.stringify(profileData));
+    localStorage.setItem('isLoggedIn', 'true');
+    
+    sessionStorage.setItem('userProfile', JSON.stringify(profileData));
+    sessionStorage.setItem('isLoggedInSession', 'true');
+  } catch (e) {
+    console.warn('[SessionPage.persistUserProfileToStorage] Failed:', e);
+  }
+}
+
+/**
+ * Start background sync of user data from Firestore without blocking UI.
+ * Runs continuously to keep local data in sync.
+ */
+private startUserSyncInBackground(userId: string): void {
+  if (!userId) return;
+  
+  console.log('[SessionPage.startUserSyncInBackground] Starting background sync for user:', userId);
+  
+  // Run sync without awaiting — don't block the page
+  this.syncUserDataFromFirestore(userId)
+    .then(() => {
+      console.log('[SessionPage.startUserSyncInBackground] Background sync completed');
+      // Reload sessions to reflect any changes from Firestore
+      return this.loadSessions();
+    })
+    .catch(error => {
+      console.warn('[SessionPage.startUserSyncInBackground] Background sync failed:', error);
+    });
 }
 
   // Wait for Firebase auth to emit a user or timeout
@@ -173,9 +255,16 @@ private async initialize(): Promise<void> {
   ionViewWillEnter() {
     // Ensure any existing back button handlers are cleared before entering
     this.removeBackButtonHandler();
-    this.loadSessions();
+    
+    // Refresh sessions and sync status
+    this.loadSessions().catch(e => console.warn('[SessionPage.ionViewWillEnter] loadSessions failed:', e));
+    
     const uid = this.userID || this.auth3.getCurrentUser()?.uid || '';
-    if (uid) this.loadPersistedSyncStatus(uid);
+    if (uid) {
+      this.loadPersistedSyncStatus(uid);
+      // Optionally refresh Firestore sync on page re-entry
+      this.startUserSyncInBackground(uid);
+    }
   }
 
   private getSyncStatusStorageKey(userId: string): string {
@@ -221,7 +310,7 @@ private async initialize(): Promise<void> {
   }
 
   /** Load sessions from Firestore first (to get all user sessions), then local storage. Compute image counts and filter by current user's ID. */
-  async loadSessions() {
+  async loadSessions(): Promise<void> {
     try {
       // ========== USER ID RESOLUTION ==========
       // Get current user ID from Firebase auth, localStorage, or sessionStorage
@@ -606,25 +695,179 @@ private async initialize(): Promise<void> {
   // Show confirmation dialog when session is clicked
   onSessionItemClick(session: any, event?: Event): void {
     if (event) event.stopPropagation();
-    this.selectedSessionForConfirm = session;
-    this.isSessionConfirmDialogOpen = true;
-    console.log('[SessionPage] Session click detected. Debug info:');
-    this.debugPrintSessionData(session);
+    console.log('[SessionPage] Session click detected. Starting load process for session:', session.id);
+    this.loadAndNavigateToSession(session);
+  }
+
+  // Close loading dialog without action
+  closeSessionLoadingDialog(): void {
+    this.isSessionLoadingDialogOpen = false;
+    this.selectedSessionForLoading = null;
+    this.sessionLoadingProgress = 0;
+    this.sessionLoadingStatusText = 'Loading session images from S3...';
+    this.sessionLoadingImageCount = { current: 0, total: 0 };
+  }
+
+  // Load session from S3 and show progress, then navigate to feedback page
+  private async loadAndNavigateToSession(session: any): Promise<void> {
+    try {
+      this.selectedSessionForLoading = session;
+      this.isSessionLoadingDialogOpen = true;
+      this.sessionLoadingProgress = 0;
+      this.sessionLoadingStatusText = 'Preparing to load session...';
+      this.sessionLoadingImageCount = { current: 0, total: 0 };
+
+      // Select the first image for feedback-page
+      if (session && session.imageKeys && session.imageKeys.length > 0) {
+        const key = session.imageKeys[0];
+        if (this.imageStorage && typeof this.imageStorage.selectImageByOriginal === 'function') {
+          this.imageStorage.selectImageByOriginal(key);
+        }
+      }
+
+      // Fetch S3 images with progress tracking
+      const svc: any = this.imageStorage as any;
+      const sessionId = session?.id || null;
+      const userId = this.userID || null;
+
+      if (sessionId && userId && typeof svc.fetchSessionImagesFromS3 === 'function') {
+        try {
+          console.log('[SessionPage] Starting S3 fetch for session:', { sessionId, userId });
+          
+          // Track this sessionId for local storage management
+          this.trackSessionIdForLocalStorage(sessionId);
+
+          // Fetch images with progress callback
+          await svc.fetchSessionImagesFromS3(
+            sessionId,
+            userId,
+            (current: number, total: number) => {
+              this.sessionLoadingImageCount = { current, total };
+              const percentage = total > 0 ? Math.round((current / total) * 100) : 0;
+              this.sessionLoadingProgress = percentage;
+              this.sessionLoadingStatusText = `Loading images from S3... (${current}/${total})`;
+              console.log(`[SessionPage] S3 fetch progress: ${current}/${total} (${percentage}%)`);
+            }
+          );
+
+          this.sessionLoadingStatusText = '✅ Session images loaded!';
+          this.sessionLoadingProgress = 100;
+          console.log('[SessionPage] ✅ S3 images fetched successfully for session:', sessionId);
+
+          // Brief delay to show success message before navigating
+          await new Promise(resolve => setTimeout(resolve, 500));
+        } catch (error) {
+          this.sessionLoadingStatusText = '⚠️ Images loaded (some may be from cache)';
+          console.warn('[SessionPage] Warning during S3 fetch:', error);
+          await new Promise(resolve => setTimeout(resolve, 500));
+        }
+      } else {
+        console.warn('[SessionPage] Cannot fetch S3 images - missing sessionId, userId, or fetchSessionImagesFromS3 method', {
+          sessionId,
+          userId,
+          hasMethod: typeof svc.fetchSessionImagesFromS3 === 'function'
+        });
+        this.sessionLoadingStatusText = 'Preparing session...';
+        this.sessionLoadingProgress = 50;
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
+
+      // Close dialog and navigate
+      this.closeSessionLoadingDialog();
+
+      // Remove HomePage back handler before navigating
+      try { this.removeBackButtonHandler(); } catch (e) { /* ignore */ }
+
+      // Build params and navigate
+      const params: any = {};
+      if (session && session.id) params.sessionId = session.id;
+      this.router.navigate(['/feedback-page'], { queryParams: params });
+    } catch (e) {
+      console.error('[SessionPage] loadAndNavigateToSession failed:', e);
+      this.closeSessionLoadingDialog();
+      // Try navigation anyway as fallback
+      this.router.navigate(['/feedback-page']);
+    }
+  }
+
+  // Track sessionId for local storage management (keep at least 5 unique sessionIds)
+  private trackSessionIdForLocalStorage(sessionId: string): void {
+    try {
+      let storedSessions: { sessionId: string; timestamp: number }[] = [];
+      
+      // Load existing session tracking
+      const storedStr = localStorage.getItem(this.sessionIdListKey);
+      if (storedStr) {
+        try {
+          storedSessions = JSON.parse(storedStr);
+        } catch (e) {
+          storedSessions = [];
+        }
+      }
+
+      // Check if this sessionId already exists
+      const exists = storedSessions.some(s => s.sessionId === sessionId);
+      if (!exists) {
+        // Add new sessionId with timestamp
+        storedSessions.push({
+          sessionId,
+          timestamp: Date.now()
+        });
+        console.log(`[SessionPage] Added new sessionId: ${sessionId}`);
+
+        // If we exceed max, delete the oldest
+        if (storedSessions.length > this.MAX_SESSION_IDS) {
+          // Sort by timestamp and remove oldest
+          storedSessions.sort((a, b) => a.timestamp - b.timestamp);
+          const removedSession = storedSessions.shift();
+          console.log(`[SessionPage] Removing oldest sessionId: ${removedSession?.sessionId}`);
+
+          // Delete associated images from local storage
+          if (removedSession) {
+            this.deleteSessionImagesFromLocalStorage(removedSession.sessionId);
+          }
+        }
+
+        // Save updated list
+        localStorage.setItem(this.sessionIdListKey, JSON.stringify(storedSessions));
+      } else {
+        console.log(`[SessionPage] SessionId already tracked: ${sessionId}`);
+      }
+    } catch (e) {
+      console.warn('[SessionPage] Error tracking sessionId:', e);
+    }
+  }
+
+  // Delete all images belonging to a specific sessionId from local storage
+  private deleteSessionImagesFromLocalStorage(sessionId: string): void {
+    try {
+      // Get all images from ImageStorageService
+      const svc: any = this.imageStorage as any;
+      
+      if (typeof svc.removeSessionById === 'function') {
+        // If service has a removal method, use it
+        (svc as any).removeSessionById(sessionId);
+        console.log(`[SessionPage] Removed session images for sessionId: ${sessionId}`);
+      } else {
+        console.warn(`[SessionPage] ImageStorageService doesn't have removeSessionById method`);
+      }
+    } catch (e) {
+      console.warn('[SessionPage] Error deleting session images from local storage:', e);
+    }
+  }
+
+  // Confirm session action: kept for backward compatibility (legacy method)
+  async confirmSessionAction(session: any): Promise<void> {
+    console.log('[SessionPage] Session confirmed via legacy method');
+    this.closeSessionConfirmDialog();
+    // Continue with new flow
+    await this.loadAndNavigateToSession(session);
   }
 
   // Close confirmation dialog without action
   closeSessionConfirmDialog(): void {
     this.isSessionConfirmDialogOpen = false;
     this.selectedSessionForConfirm = null;
-  }
-
-  // Confirm session action: print debug and then navigate
-  async confirmSessionAction(session: any): Promise<void> {
-    console.log('[SessionPage] Session confirmed. Printing full debug info:');
-    await this.debugPrintSessionData(session);
-    this.closeSessionConfirmDialog();
-    // Now proceed with navigation
-    await this.goToSession(session);
   }
 
   // Debug method: print session object and related images from Firestore/S3
@@ -886,23 +1129,85 @@ private async initialize(): Promise<void> {
       if (ev) ev.stopPropagation();
 
       // Step 2: Validate the session object and its ID
-      if (!session || !session.id) return;
-
-      // Step 3: Confirm deletion with the user
-      if (typeof (this.imageStorage as any).removeSession === 'function') {
-        const ok = confirm('Delete session "' + (session.name || session.id) + '"? This cannot be undone.');
-        if (!ok) return;
-
-        // Step 4: Remove the session using ImageStorageService
-        (this.imageStorage as any).removeSession(session.id);
-
-        // Step 5: Refresh the session list
-        await this.loadSessions();
+      if (!session || !session.id) {
+        console.warn('[SessionPage.deleteSession] Invalid session object');
+        return;
       }
+
+      // Step 3: Show confirmation dialog
+      this.selectedSessionForDelete = session;
+      this.isSessionDeleteConfirmDialogOpen = true;
     } catch (e) {
       // Step 6: Handle any errors that occur during the process
-      console.warn('deleteSession failed', e);
+      console.warn('[SessionPage.deleteSession] Error showing confirmation dialog:', e);
     }
+  }
+
+  // Close delete confirmation dialog
+  closeSessionDeleteConfirmDialog(): void {
+    this.isSessionDeleteConfirmDialogOpen = false;
+    this.selectedSessionForDelete = null;
+  }
+
+  // Confirm deletion and start the deletion process
+  async confirmSessionDeletion(session: any): Promise<void> {
+    try {
+      if (!session || !session.id) return;
+
+      // Close confirmation dialog
+      this.closeSessionDeleteConfirmDialog();
+
+      // Show progress dialog
+      this.selectedSessionForDeleteProgress = session;
+      this.isSessionDeleteProgressDialogOpen = true;
+      this.sessionDeleteProgress = 0;
+      this.sessionDeleteStatusText = 'Preparing deletion...';
+      this.sessionDeleteStageCount = { current: 0, total: 0 };
+
+      // Delete session and all related resources
+      const success = await this.imageStorage.deleteSessionAndResources(
+        session.id,
+        (stage: string, current: number, total: number) => {
+          // Update progress dialog
+          this.sessionDeleteStatusText = stage;
+          this.sessionDeleteStageCount = { current, total };
+          this.sessionDeleteProgress = Math.round((current / total) * 100);
+        }
+      );
+
+      if (success) {
+        // Delay before closing to show completion
+        await new Promise(resolve => setTimeout(resolve, 500));
+        this.closeSessionDeleteProgressDialog();
+        
+        // Also delete from local storage
+        this.deleteSessionImagesFromLocalStorage(session.id);
+        
+        // Refresh the sessions list
+        await this.loadSessions();
+
+        // Show success message
+        console.log(`[SessionPage] Session "${session.name}" deleted successfully`);
+      } else {
+        this.sessionDeleteStatusText = 'Deletion failed';
+        await new Promise(resolve => setTimeout(resolve, 1500));
+        this.closeSessionDeleteProgressDialog();
+      }
+    } catch (e) {
+      console.error('[SessionPage.confirmSessionDeletion] Error during deletion:', e);
+      this.sessionDeleteStatusText = 'Error during deletion';
+      await new Promise(resolve => setTimeout(resolve, 1500));
+      this.closeSessionDeleteProgressDialog();
+    }
+  }
+
+  // Close delete progress dialog
+  closeSessionDeleteProgressDialog(): void {
+    this.isSessionDeleteProgressDialogOpen = false;
+    this.selectedSessionForDeleteProgress = null;
+    this.sessionDeleteProgress = 0;
+    this.sessionDeleteStatusText = 'Preparing deletion...';
+    this.sessionDeleteStageCount = { current: 0, total: 0 };
   }
 
 

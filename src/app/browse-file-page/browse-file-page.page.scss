@@ -11,15 +11,15 @@
 /* Image above gradient header */
 .home-page-img {
   position: fixed;
-  top: -2.7%;
+  top: -13%;
   left: 0;
   right: 0;
   width: 100%;
   height: 300px;
   z-index: 9; /* below gradient header but above page base */
   object-fit: cover;
-  border-bottom-left-radius: 11%;
-  border-bottom-right-radius: 11%;
+  border-bottom-left-radius: 30%;
+  border-bottom-right-radius: 30%;
   opacity: 0.8; /* soften background image */
 
 }
@@ -27,13 +27,13 @@
 /* Orange gradient header at the top */
 .gradient-header {
   position: fixed;
-  top: 0;
+  top: -10%;
   left: -10%;
   right: 0;
   height: 280px;
   width: 120%;
-  border-bottom-left-radius: 25%;
-  border-bottom-right-radius: 25%;
+  border-bottom-left-radius: 45%;
+  border-bottom-right-radius: 45%;
   background: linear-gradient(to top, #ff8c00, #ffb347);
   z-index: 8; /* slightly above image so gradient is visible */
   box-shadow: 0 4px 12px rgba(255, 149, 0, 0.15);
@@ -498,17 +498,19 @@ ion-content.home-page {
   border-bottom-left-radius: 8px;
   background-color: #fff;
   box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
-  height: 430px;
+  height: 515px;
+  width: 96.6%;
   overflow-y: auto;
   position: relative;
-  top: 31%;
+  top: 21%;
+  left: -2.9%;
   gap: 5px;
   z-index: 20;
 }
 
 /* Sessions summary pill */
 .sessions-summary {
-   width: 90.8%;
+   width: 96.5%;
    height: 50px;
   margin: 16px;
   padding: 16px;
@@ -525,7 +527,8 @@ ion-content.home-page {
   justify-content: space-between;
   gap: 8px;
   position: relative;
-  top: 35%;
+  top: 25%;
+  left: -3%;
   z-index: 20;
 
 
@@ -848,6 +851,38 @@ ion-menu ion-item:hover {
   color: black;
 }
 
+.menu-item .sync-status-pill {
+  margin-left: auto;
+  font-size: 0.72rem;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  line-height: 1.3;
+}
+
+.menu-item .sync-status-pill.idle {
+  color: #666;
+  background: #f2f2f2;
+}
+
+.menu-item .sync-status-pill.syncing {
+  color: #8a5a00;
+  background: #fff3d6;
+  border-color: #ffe1a3;
+}
+
+.menu-item .sync-status-pill.completed {
+  color: #166534;
+  background: #dcfce7;
+  border-color: #86efac;
+}
+
+.menu-item .sync-status-pill.error {
+  color: #991b1b;
+  background: #fee2e2;
+  border-color: #fecaca;
+}
+
 .menu-btn {
   display: flex;
   align-items: center;
@@ -861,6 +896,145 @@ ion-menu ion-item:hover {
 
 .menu-btn:hover {
   background-color: #e0e0e0;
+}
+
+/* --- Session Confirmation Dialog Styles --- */
+.session-confirm-overlay {
+  position: fixed;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+}
+
+.session-confirm-dialog {
+  background: #ffffff;
+  border-radius: 20px;
+  padding: 28px 24px;
+  max-width: 340px;
+  width: 90%;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  border: 2px solid #ff6b4a;
+}
+
+.session-confirm-header {
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+
+  h2 {
+    margin: 0;
+    font-size: 1.3rem;
+    font-weight: 700;
+    color: #1a1a2e;
+    line-height: 1.3;
+  }
+
+  p {
+    margin: 0;
+    font-size: 1rem;
+    color: #555;
+    line-height: 1.4;
+  }
+}
+
+.session-confirm-content {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.session-info {
+  background: #f9f9f9;
+  border-radius: 12px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.session-confirm-name {
+  font-size: 1rem;
+  font-weight: 600;
+  color: #1a1a2e;
+  word-break: break-word;
+}
+
+.session-confirm-details {
+  font-size: 0.85rem;
+  color: #888;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.session-confirm-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.confirm-btn,
+.cancel-btn {
+  padding: 14px 24px;
+  border: none;
+  border-radius: 12px;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  text-align: center;
+}
+
+.confirm-btn {
+  background: linear-gradient(135deg, #ff6b4a 0%, #ff9500 100%);
+  color: #fff;
+
+  &:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(255, 107, 74, 0.3);
+  }
+
+  &:active {
+    transform: translateY(0);
+  }
+}
+
+.cancel-btn {
+  background: #f0f0f0;
+  color: #555;
+  border: 1px solid #ddd;
+
+  &:hover {
+    background: #e8e8e8;
+  }
+
+  &:active {
+    background: #e0e0e0;
+  }
+}
+
+// Delete confirmation button (destructive action variant)
+.confirm-btn.delete-confirm {
+  background: linear-gradient(135deg, #e63946 0%, #f44336 100%);
+  
+  &:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(230, 57, 70, 0.3);
+  }
+
+  &:active {
+    transform: translateY(0);
+  }
 }
 
 .top-left-corner {

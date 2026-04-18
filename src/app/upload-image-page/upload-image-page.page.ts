@@ -957,6 +957,26 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
     return fallbackName || this.generateFilename();
   }
 
+  /**
+   * Shorten the image title by removing userID, sessionId, and img1 prefixes.
+   * Example: "userID:abc123sessionId:xyz789img1crack1041120261109.jpg" → "crack1041120261109.jpg"
+   * Handles cases where these prefixes don't exist.
+   */
+  getShortImageTitle(fullTitle: string): string {
+    if (!fullTitle) return '';
+    
+    // Remove userID: prefix if it exists (format: userID:someIdValue)
+    let shortened = fullTitle.replace(/^userID:[^s]*/i, '');
+    
+    // Remove sessionId: prefix if it exists (format: sessionId:someIdValue)
+    shortened = shortened.replace(/^sessionId:[^i]*/i, '');
+    
+    // Remove img1, img2, etc. prefix if it exists (format: img{N})
+    shortened = shortened.replace(/^img\d+/i, '');
+    
+    return shortened || fullTitle; // Return original if nothing was removed
+  }
+
   ngOnDestroy() {
     this.mediaStream?.getTracks().forEach(track => track.stop());
     

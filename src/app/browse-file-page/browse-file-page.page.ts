@@ -21,6 +21,7 @@ export class BrowseFilePagePage implements OnInit, OnDestroy {
   lastName: string | null = null;
   email: string | null = null;
   engineeringID: string | null = null;
+  userID: string | null = null; // Firebase UID - used to filter sessions by user
   sessions: any[] = [];
   lastSessionDisplayName: string | null = null;
   private backButtonSub: any; // hardware back handler
@@ -29,6 +30,35 @@ export class BrowseFilePagePage implements OnInit, OnDestroy {
   isSidebarOpen: boolean = false;
   isSortOverlayOpen: boolean = false;
   currentSort: string = 'time-newest'; // default sorting
+  syncStatusText: string = 'Not synced';
+  syncStatusState: 'idle' | 'syncing' | 'completed' | 'error' = 'idle';
+  
+  // --- Session Confirmation Dialog State ---
+  isSessionConfirmDialogOpen: boolean = false;
+  selectedSessionForConfirm: any = null;
+
+  // --- Session Loading/Progress Dialog State ---
+  isSessionLoadingDialogOpen: boolean = false;
+  selectedSessionForLoading: any = null;
+  sessionLoadingProgress: number = 0;
+  sessionLoadingStatusText: string = 'Loading session images from S3...';
+  sessionLoadingImageCount: { current: number; total: number } = { current: 0, total: 0 };
+
+  // --- Session Delete Confirmation Dialog State ---
+  isSessionDeleteConfirmDialogOpen: boolean = false;
+  selectedSessionForDelete: any = null;
+
+  // --- Session Delete Progress Dialog State ---
+  isSessionDeleteProgressDialogOpen: boolean = false;
+  selectedSessionForDeleteProgress: any = null;
+  sessionDeleteProgress: number = 0;
+  sessionDeleteStatusText: string = 'Preparing deletion...';
+  sessionDeleteStageCount: { current: number; total: number } = { current: 0, total: 0 };
+
+  // --- Session ID Tracking for Local Storage ---
+  private readonly MAX_SESSION_IDS = 5;
+  private sessionIdTrackingKey = 'sessionIdTracking';
+  private sessionIdListKey = 'storedSessionIds';
 
   /** Inject auth, router, and image storage services for navigation and data. */
   constructor(private formBuilder: FormBuilder, private router: Router, private authService: AuthService, private navCtrl: NavController, private auth3: Auth3Service, private imageStorage: ImageStorageService, private platform: Platform) {
@@ -43,73 +73,146 @@ ngOnInit(): void {
 
 /** Perform async initialization tasks (profile + sessions). */
 private async initialize(): Promise<void> {
+  console.log('[BrowseFilePage.initialize] ===== PAGE INIT START =====');
   try {
-    // Ensure Firebase auth state is ready before fetching profile
-    // wait for up to 8 seconds for auth from firebase and current user profile from firestore
+    // Step 1: Try to load profile from localStorage first for immediate UI update
+    // This is the fastest path for already-logged-in users
+    const cachedUserData = this.loadCachedUserProfile();
+    if (cachedUserData) {
+      console.log('[BrowseFilePage.initialize] Loaded user profile from cache (fast path)');
+    }
+
+    // Step 2: Load sessions immediately from local storage for quick UI display
+    // Don't wait for Firestore — display what we have locally first
+    console.log('[BrowseFilePage.initialize] Loading sessions from local storage (non-blocking)...');
+    await this.loadSessions().catch(e => console.warn('[BrowseFilePage.initialize] loadSessions failed:', e));
+
+    // Step 3: Ensure Firebase auth state is ready and fetch fresh profile from Firestore
+    // This runs in parallel and will update UI if data changed
+    this.loadUserProfileWithAuthWait().catch(error => {
+      console.error('[BrowseFilePage.initialize] Profile loading failed:', error);
+    });
+
+    // Step 4: Start background sync for Firestore data without blocking UI
+    const resolvedUserId = this.userID || this.auth3.getCurrentUser()?.uid || '';
+    if (resolvedUserId) {
+      this.startUserSyncInBackground(resolvedUserId);
+    }
+  } catch (error) {
+    console.error('[BrowseFilePage.initialize] Fatal initialization error:', error);
+  }
+}
+
+/**
+ * Load user profile immediately from localStorage for already logged-in users.
+ * Maximum speed, no network calls.
+ */
+private loadCachedUserProfile(): boolean {
+  try {
+    const cached = localStorage.getItem('userData');
+    if (cached) {
+      const data = JSON.parse(cached);
+      this.userID = data.userID || null;
+      this.firstName = data.firstName || null;
+      this.lastName = data.lastName || null;
+      this.userName = data.username || null;
+      this.userRole = data.userRole || 'user';
+      this.email = data.email || null;
+      this.engineeringID = data.engineeringID || null;
+      console.log('[BrowseFilePage.loadCachedUserProfile] Loaded from cache:', data);
+      return true;
+    }
+  } catch (e) {
+    console.warn('[BrowseFilePage.loadCachedUserProfile] Failed to load cache:', e);
+  }
+  return false;
+}
+
+/**
+ * Fetch fresh user profile from Firestore and update local data.
+ * Called after cache load so it can refresh stale data without blocking initial UI.
+ */
+private async loadUserProfileWithAuthWait(): Promise<void> {
+  try {
+    // Wait for auth to be ready
     if (!this.auth3.getCurrentUser()) {
-      console.log('[HomePage2] waiting for auth state…');
+      console.log('[BrowseFilePage.loadUserProfileWithAuthWait] Waiting for auth state...');
       await this.waitForUserAuth(8000);
     }
-   // stores current user profile data in profile variables 
+
+    // Fetch fresh profile from Firestore
     const profile = await this.auth3.getUserProfile();
-    this.firstName = profile['firstName'];
-    this.lastName = profile['lastName'];
-    this.engineeringID = profile['engineeringID'] || '';
-    this.email = profile['email'] || '';
-    // Read role from Firestore profile (authoritative source)
+    const currentUser = this.auth3.getCurrentUser();
+    
+    // Update profile data
+    this.userID = currentUser?.uid || profile['userID'] || this.userID;
+    this.firstName = profile['firstName'] || this.firstName;
+    this.lastName = profile['lastName'] || this.lastName;
+    this.engineeringID = profile['engineeringID'] || this.engineeringID || '';
+    this.email = profile['email'] || this.email || '';
     this.userRole = profile['role'] || (this.engineeringID ? 'engineer' : 'user');
-    //gets username from firatName and lastName
-    this.userName = (this.firstName && this.lastName) ? `${this.firstName} ${this.lastName}` : (this.email || null);
-    //prints the current user profile to console
-    console.log('[HomePage2] user profile loaded', {
+    this.userName = (this.firstName && this.lastName)
+      ? `${this.firstName} ${this.lastName}`
+      : (this.email || this.userName);
+    this.isLoggedIn = true;
+
+    console.log('[BrowseFilePage.loadUserProfileWithAuthWait] Profile refreshed:', {
+      userID: this.userID,
       firstName: this.firstName,
-      lastName: this.lastName,
-      email: this.email,
-      engineeringID: this.engineeringID,
-      userRole: this.userRole,
       userName: this.userName
     });
-    // Persist/refresh local user data for downstream use, and for long term offline use
-    try {
-      localStorage.setItem('userData', JSON.stringify({
-        username: this.userName || '',
-        userRole: this.userRole || 'user',
-        firstName: this.firstName || '',
-        lastName: this.lastName || '',
-        engineeringID: this.engineeringID || '',
-        email: this.email || ''
-      }));
-      localStorage.setItem('isLoggedIn', 'true');
-    } catch {}
-     // Also persist user profile in sessionStorage for current session, short lived and cleared when closed
-     try {
-       sessionStorage.setItem('userProfile', JSON.stringify({
-         username: this.userName || '',
-         userRole: this.userRole || 'user',
-         firstName: this.firstName || '',
-         lastName: this.lastName || '',
-         engineeringID: this.engineeringID || '',
-         email: this.email || ''
-       }));
-       sessionStorage.setItem('isLoggedInSession', 'true');
-     } catch {}
+
+    // Save updated profile to localStorage
+    this.persistUserProfileToStorage();
   } catch (error) {
-    console.error(error);
-    // Fallback: try to load previously saved user data
-    try {
-      const cached = localStorage.getItem('userData');
-      if (cached) {
-        const data = JSON.parse(cached);
-        this.firstName = data.firstName || null;
-        this.lastName = data.lastName || null;
-        this.userName = data.username || null;
-        this.userRole = data.userRole || 'user';
-        this.email = data.email || null;
-        this.engineeringID = data.engineeringID || null;
-        console.log('[HomePage2] loaded user profile from cache', data);
-      }
-    } catch {}
+    console.warn('[BrowseFilePage.loadUserProfileWithAuthWait] Profile refresh failed:', error);
+    // Keep using cached profile
   }
+}
+
+/**
+ * Persist current user profile to localStorage.
+ */
+private persistUserProfileToStorage(): void {
+  try {
+    const profileData = {
+      userID: this.userID || '',
+      username: this.userName || '',
+      userRole: this.userRole || 'user',
+      firstName: this.firstName || '',
+      lastName: this.lastName || '',
+      engineeringID: this.engineeringID || '',
+      email: this.email || ''
+    };
+    localStorage.setItem('userData', JSON.stringify(profileData));
+    localStorage.setItem('isLoggedIn', 'true');
+    
+    sessionStorage.setItem('userProfile', JSON.stringify(profileData));
+    sessionStorage.setItem('isLoggedInSession', 'true');
+  } catch (e) {
+    console.warn('[BrowseFilePage.persistUserProfileToStorage] Failed:', e);
+  }
+}
+
+/**
+ * Start background sync of user data from Firestore without blocking UI.
+ * Runs continuously to keep local data in sync.
+ */
+private startUserSyncInBackground(userId: string): void {
+  if (!userId) return;
+  
+  console.log('[BrowseFilePage.startUserSyncInBackground] Starting background sync for user:', userId);
+  
+  // Run sync without awaiting — don't block the page
+  this.syncUserDataFromFirestore(userId)
+    .then(() => {
+      console.log('[BrowseFilePage.startUserSyncInBackground] Background sync completed');
+      // Reload sessions to reflect any changes from Firestore
+      return this.loadSessions();
+    })
+    .catch(error => {
+      console.warn('[BrowseFilePage.startUserSyncInBackground] Background sync failed:', error);
+    });
 }
 
   // Wait for Firebase auth to emit a user or timeout
@@ -152,7 +255,44 @@ private async initialize(): Promise<void> {
   ionViewWillEnter() {
     // Ensure any existing back button handlers are cleared before entering
     this.removeBackButtonHandler();
-    this.loadSessions();
+    
+    // Refresh sessions and sync status
+    this.loadSessions().catch(e => console.warn('[BrowseFilePage.ionViewWillEnter] loadSessions failed:', e));
+    
+    const uid = this.userID || this.auth3.getCurrentUser()?.uid || '';
+    if (uid) {
+      this.loadPersistedSyncStatus(uid);
+      // Optionally refresh Firestore sync on page re-entry
+      this.startUserSyncInBackground(uid);
+    }
+  }
+
+  private getSyncStatusStorageKey(userId: string): string {
+    return `user_sync_status_${userId}`;
+  }
+
+  private getSyncBootstrapDoneKey(userId: string): string {
+    return `user_sync_bootstrap_done_${userId}`;
+  }
+
+  private clearSyncStateForUser(userId: string): void {
+    if (!userId) return;
+    try { localStorage.removeItem(this.getSyncStatusStorageKey(userId)); } catch {}
+    try { sessionStorage.removeItem(this.getSyncBootstrapDoneKey(userId)); } catch {}
+  }
+
+  private loadPersistedSyncStatus(userId: string): void {
+    if (!userId) return;
+    try {
+      const raw = localStorage.getItem(this.getSyncStatusStorageKey(userId));
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      this.syncStatusState = parsed?.state || 'idle';
+      this.syncStatusText = parsed?.text || 'Not synced';
+    } catch {
+      this.syncStatusState = 'idle';
+      this.syncStatusText = 'Not synced';
+    }
   }
 
   /** Register hardware back handler only while this view is active, 
@@ -169,12 +309,94 @@ private async initialize(): Promise<void> {
     this.removeBackButtonHandler();
   }
 
-  /** Load sessions from ImageStorageService and compute image counts. */
-  async loadSessions() {
+  /** Load sessions from Firestore first (to get all user sessions), then local storage. Compute image counts and filter by current user's ID. */
+  async loadSessions(): Promise<void> {
     try {
-      //Safely read sessions from ImageStorageService, create a copy and stores it.
-      const s = (this.imageStorage.getSessions && typeof this.imageStorage.getSessions === 'function') ? this.imageStorage.getSessions() : [];
-      const sessionsRaw = Array.isArray(s) ? s.slice() : [];
+      // ========== USER ID RESOLUTION ==========
+      // Get current user ID from Firebase auth, localStorage, or sessionStorage
+      let currentUserID = this.userID;
+      if (!currentUserID) {
+        // Try to get from localStorage
+        try {
+          const userData = localStorage.getItem('userData');
+          if (userData) {
+            const parsed = JSON.parse(userData);
+            currentUserID = parsed.userID || null;
+          }
+        } catch {}
+      }
+      if (!currentUserID) {
+        // Try to get from sessionStorage
+        try {
+          const sessionProfile = sessionStorage.getItem('userProfile');
+          if (sessionProfile) {
+            const parsed = JSON.parse(sessionProfile);
+            currentUserID = parsed.userID || null;
+          }
+        } catch {}
+      }
+      if (!currentUserID) {
+        // Try to get from authenticated Firebase user
+        try {
+          currentUserID = this.auth3.getCurrentUser()?.uid || null;
+        } catch {}
+      }
+
+      console.log('[BrowseFilePage.loadSessions] Current user ID:', currentUserID);
+
+      // ========== FETCH FROM FIRESTORE ==========
+      // Fetch sessions from Firestore first to ensure we get all sessions (like chat-page does)
+      let sessionsRaw: any[] = [];
+      if (currentUserID) {
+        try {
+          console.log('[BrowseFilePage.loadSessions] Fetching sessions from Firestore for user:', currentUserID);
+          const firebaseSessions = await this.auth3.getUserSessions(currentUserID);
+          sessionsRaw = Array.isArray(firebaseSessions) ? firebaseSessions : [];
+          console.log('[BrowseFilePage.loadSessions] Fetched', sessionsRaw.length, 'sessions from Firestore');
+
+          // Sync Firestore sessions to local storage for offline support
+          for (const fsSession of sessionsRaw) {
+            const session = {
+              id: fsSession.id || fsSession.sessionId || `s-${Date.now()}`,
+              name: fsSession.name || 'Untitled Session',
+              imageKeys: Array.isArray(fsSession.imageKeys) ? fsSession.imageKeys : [],
+              created: fsSession.created || new Date().toISOString(),
+              userId: currentUserID
+            };
+            try {
+              this.imageStorage.addSessionIfNotExists(session as any);
+            } catch (e) {
+              console.warn('[BrowseFilePage.loadSessions] Failed to add session to local storage:', session.id, e);
+            }
+          }
+        } catch (error) {
+          console.warn('[BrowseFilePage.loadSessions] Failed to fetch sessions from Firestore, falling back to local storage:', error);
+          // Fallback to local storage if Firestore fetch fails
+          const s = (this.imageStorage.getSessions && typeof this.imageStorage.getSessions === 'function') ? this.imageStorage.getSessions() : [];
+          sessionsRaw = Array.isArray(s) ? s.slice() : [];
+        }
+      } else {
+        // No user ID available, use local storage only
+        const s = (this.imageStorage.getSessions && typeof this.imageStorage.getSessions === 'function') ? this.imageStorage.getSessions() : [];
+        sessionsRaw = Array.isArray(s) ? s.slice() : [];
+      }
+
+      // Filter sessions to only include those belonging to the current user
+      // Sessions without userId are legacy sessions (show them for backward compatibility)
+      // Sessions with userId must match the current user's ID
+      const filteredSessions = sessionsRaw.filter((sess: any) => {
+        // If session has no userId, include it (backward compatibility with old sessions)
+        if (!sess.userId) {
+          console.log('[BrowseFilePage.loadSessions] Including legacy session (no userId):', sess.id);
+          return true;
+        }
+        // If session has userId, only include if it matches current user
+        const isOwnSession = sess.userId === currentUserID;
+        if (!isOwnSession) {
+          console.log('[BrowseFilePage.loadSessions] Excluding session from different user:', sess.id, 'session userId:', sess.userId, 'current user:', currentUserID);
+        }
+        return isOwnSession;
+      });
 
       // compute image counts by comparing session imageKeys with stored images with 
       // geAllImages or getImages if fails into a arrayt allImages from the imageStorage not in sessions
@@ -198,12 +420,13 @@ private async initialize(): Promise<void> {
         if (!Array.isArray(allImages)) allImages = [];
       }
 
-      // counts how many imageKeys or images in the sessions are present in allImages
-      this.sessions = sessionsRaw.map((sess: any) => {
+      // counts how many imageKeys or images in the filtered sessions are present in allImages
+      this.sessions = filteredSessions.map((sess: any) => {
         const keys = Array.isArray(sess.imageKeys) ? sess.imageKeys : [];
-        const imageCount = keys.reduce((acc: number, k: string) => acc + (allImages.findIndex(ai => ai.original === k) !== -1 ? 1 : 0), 0);
+        const imageCount = keys.reduce((acc: number, k: string) => acc + (allImages.findIndex(ai => ai.filename === k) !== -1 ? 1 : 0), 0);
         return { ...sess, imageCount };
       });
+      console.log('[BrowseFilePage.loadSessions] Displaying', this.sessions.length, 'sessions for user', currentUserID);
       // if Image Storage Service recorded a last created session or last used/created session,
       //  show its name at top of the summary list
       try {
@@ -225,17 +448,93 @@ private async initialize(): Promise<void> {
     }
   }
 
-  // Additional methods can be added here
+  /**
+   * Sync user's sessions and images from Firestore to local ImageStorageService.
+   * Runs in background and deduplicates local writes.
+   */
+  private async syncUserDataFromFirestore(userId: string): Promise<void> {
+    if (!userId) {
+      console.warn('[BrowseFilePage.syncUserDataFromFirestore] No userId provided, skipping sync');
+      return;
+    }
 
-  /** Navigate to legacy camera page route. */
-  goToHomePage() {
-    this.router.navigate(['/camera-page']);
-    console.log('camera page');
+    try {
+      console.log('[BrowseFilePage.syncUserDataFromFirestore] Starting sync for userId:', userId);
+
+      // Fetch user sessions from Firestore
+      const firebaseSessions = await this.auth3.getUserSessions(userId);
+      console.log('[BrowseFilePage.syncUserDataFromFirestore] Fetched', firebaseSessions.length, 'sessions from Firestore');
+
+      // Fetch user images from Firestore
+      const firestoreImages = await this.auth3.getUserImages(userId);
+      console.log('[BrowseFilePage.syncUserDataFromFirestore] Fetched', firestoreImages.length, 'images from Firestore');
+
+      let sessionsAdded = 0;
+      let imagesAdded = 0;
+
+      for (const fsSession of firebaseSessions) {
+        const session = {
+          id: fsSession.id || fsSession.sessionId || `s-${Date.now()}`,
+          name: fsSession.name || 'Untitled Session',
+          imageKeys: Array.isArray(fsSession.imageKeys) ? fsSession.imageKeys : [],
+          created: fsSession.created || new Date().toISOString(),
+          userId: userId
+        };
+
+        const added = this.imageStorage.addSessionIfNotExists(session as any);
+        if (added) {
+          sessionsAdded += 1;
+          console.log('[BrowseFilePage.syncUserDataFromFirestore] Added session to local storage:', session.id);
+        }
+      }
+
+      for (const fsImage of firestoreImages) {
+        const storedImage = {
+          original: fsImage.original || '',
+          withBoxes: fsImage.withBoxes || fsImage.original || '',
+          boxes: Array.isArray(fsImage.boxes) ? fsImage.boxes : [],
+          faceDetected: !!fsImage.faceDetected,
+          faceData: Array.isArray(fsImage.faceData) ? fsImage.faceData : [],
+          timestamp: fsImage.timestamp || new Date().toISOString(),
+          detectionMessage: fsImage.detectionMessage || '',
+          filename: fsImage.filename || fsImage.id || '',
+          statusMessage: fsImage.statusMessage || '',
+          hasPrediction: !!fsImage.hasPrediction,
+          prediction: fsImage.prediction || undefined,
+          userId: userId,
+          sessionId: fsImage.sessionId || undefined
+        };
+
+        const added = await this.imageStorage.addImageIfNotExists(storedImage as any, storedImage.sessionId);
+        if (added) {
+          imagesAdded += 1;
+          console.log('[BrowseFilePage.syncUserDataFromFirestore] Added image to local storage:', storedImage.filename || 'unnamed');
+        }
+      }
+
+      console.log('[BrowseFilePage.syncUserDataFromFirestore] Sync completed successfully', {
+        sessionsFetched: firebaseSessions.length,
+        sessionsAdded,
+        imagesFetched: firestoreImages.length,
+        imagesAdded
+      });
+    } catch (error) {
+      console.error('[BrowseFilePage.syncUserDataFromFirestore] ERROR during sync:', error);
+      throw error;
+    }
   }
+
+  // Additional methods can be added here
   
   /** Navigate to enhanced camera page with sessions support. */
   goToCameraPage2() {
     this.router.navigate(['/camera-page2']);
+    console.log('camera page');
+  }
+
+  /** Navigate to enhanced camera page with sessions support. */
+  goToHomePage() {
+    this.router.navigate(['/home-page2']);
     console.log('camera page');
   }
 
@@ -263,12 +562,21 @@ private async initialize(): Promise<void> {
     console.log('pdf 2 page');
   }
 
+  /** Navigate to profile page. */
+  goToProfilePage() {
+    this.router.navigate(['/profile-page']);
+    console.log('Navigating to profile page');
+  }
+
   /** Shared logout flow used by overlay button and menu item. */
   async logout(closeOverlay: boolean = false) {
     console.log('[BrowseFilePage.logout] Logout initiated');
     
+    // Close sidebar immediately to provide user feedback
+    this.isSidebarOpen = false;
+    
     // Get current user ID before we start clearing
-    const currentUserId = this.auth3.getCurrentUser()?.uid || '';
+    const currentUserId = this.userID || this.auth3.getCurrentUser()?.uid || '';
     
     // Clear all user-related data
     try {
@@ -276,6 +584,14 @@ private async initialize(): Promise<void> {
     } catch (error) {
       console.error('[BrowseFilePage.logout] Error during data cleanup:', error);
     }
+
+    // Clear sync state for user
+    if (currentUserId) {
+      this.clearSyncStateForUser(currentUserId);
+    }
+    
+    this.syncStatusState = 'idle';
+    this.syncStatusText = 'Not synced';
     
     try {
       await this.auth3.logout();
@@ -374,11 +690,259 @@ private async initialize(): Promise<void> {
   /**
    * Open the Feedback page pre-selecting a session. Select its first image in
    * ImageStorageService so detail UIs can initialize accordingly.
+   * Before navigating, fetch S3 images from the session to ensure they're available.
    */
+  // Show confirmation dialog when session is clicked
+  onSessionItemClick(session: any, event?: Event): void {
+    if (event) event.stopPropagation();
+    console.log('[BrowseFilePage] Session click detected. Starting load process for session:', session.id);
+    this.loadAndNavigateToSession(session);
+  }
+
+  // Close loading dialog without action
+  closeSessionLoadingDialog(): void {
+    this.isSessionLoadingDialogOpen = false;
+    this.selectedSessionForLoading = null;
+    this.sessionLoadingProgress = 0;
+    this.sessionLoadingStatusText = 'Loading session images from S3...';
+    this.sessionLoadingImageCount = { current: 0, total: 0 };
+  }
+
+  // Load session from S3 and show progress, then navigate to feedback page
+  private async loadAndNavigateToSession(session: any): Promise<void> {
+    try {
+      this.selectedSessionForLoading = session;
+      this.isSessionLoadingDialogOpen = true;
+      this.sessionLoadingProgress = 0;
+      this.sessionLoadingStatusText = 'Preparing to load session...';
+      this.sessionLoadingImageCount = { current: 0, total: 0 };
+
+      // Select the first image for feedback-page
+      if (session && session.imageKeys && session.imageKeys.length > 0) {
+        const key = session.imageKeys[0];
+        if (this.imageStorage && typeof this.imageStorage.selectImageByOriginal === 'function') {
+          this.imageStorage.selectImageByOriginal(key);
+        }
+      }
+
+      // Fetch S3 images with progress tracking
+      const svc: any = this.imageStorage as any;
+      const sessionId = session?.id || null;
+      const userId = this.userID || null;
+
+      if (sessionId && userId && typeof svc.fetchSessionImagesFromS3 === 'function') {
+        try {
+          console.log('[BrowseFilePage] Starting S3 fetch for session:', { sessionId, userId });
+          
+          // Track this sessionId for local storage management
+          this.trackSessionIdForLocalStorage(sessionId);
+
+          // Fetch images with progress callback
+          await svc.fetchSessionImagesFromS3(
+            sessionId,
+            userId,
+            (current: number, total: number) => {
+              this.sessionLoadingImageCount = { current, total };
+              const percentage = total > 0 ? Math.round((current / total) * 100) : 0;
+              this.sessionLoadingProgress = percentage;
+              this.sessionLoadingStatusText = `Loading images from S3... (${current}/${total})`;
+              console.log(`[BrowseFilePage] S3 fetch progress: ${current}/${total} (${percentage}%)`);
+            }
+          );
+
+          this.sessionLoadingStatusText = '✅ Session images loaded!';
+          this.sessionLoadingProgress = 100;
+          console.log('[BrowseFilePage] ✅ S3 images fetched successfully for session:', sessionId);
+
+          // Brief delay to show success message before navigating
+          await new Promise(resolve => setTimeout(resolve, 500));
+        } catch (error) {
+          this.sessionLoadingStatusText = '⚠️ Images loaded (some may be from cache)';
+          console.warn('[BrowseFilePage] Warning during S3 fetch:', error);
+          await new Promise(resolve => setTimeout(resolve, 500));
+        }
+      } else {
+        console.warn('[BrowseFilePage] Cannot fetch S3 images - missing sessionId, userId, or fetchSessionImagesFromS3 method', {
+          sessionId,
+          userId,
+          hasMethod: typeof svc.fetchSessionImagesFromS3 === 'function'
+        });
+        this.sessionLoadingStatusText = 'Preparing session...';
+        this.sessionLoadingProgress = 50;
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
+
+      // Close dialog and navigate
+      this.closeSessionLoadingDialog();
+
+      // Remove HomePage back handler before navigating
+      try { this.removeBackButtonHandler(); } catch (e) { /* ignore */ }
+
+      // Build params and navigate
+      const params: any = {};
+      if (session && session.id) params.sessionId = session.id;
+      this.router.navigate(['/feedback-page'], { queryParams: params });
+    } catch (e) {
+      console.error('[BrowseFilePage] loadAndNavigateToSession failed:', e);
+      this.closeSessionLoadingDialog();
+      // Try navigation anyway as fallback
+      this.router.navigate(['/feedback-page']);
+    }
+  }
+
+  // Track sessionId for local storage management (keep at least 5 unique sessionIds)
+  private trackSessionIdForLocalStorage(sessionId: string): void {
+    try {
+      let storedSessions: { sessionId: string; timestamp: number }[] = [];
+      
+      // Load existing session tracking
+      const storedStr = localStorage.getItem(this.sessionIdListKey);
+      if (storedStr) {
+        try {
+          storedSessions = JSON.parse(storedStr);
+        } catch (e) {
+          storedSessions = [];
+        }
+      }
+
+      // Check if this sessionId already exists
+      const exists = storedSessions.some(s => s.sessionId === sessionId);
+      if (!exists) {
+        // Add new sessionId with timestamp
+        storedSessions.push({
+          sessionId,
+          timestamp: Date.now()
+        });
+        console.log(`[BrowseFilePage] Added new sessionId: ${sessionId}`);
+
+        // If we exceed max, delete the oldest
+        if (storedSessions.length > this.MAX_SESSION_IDS) {
+          // Sort by timestamp and remove oldest
+          storedSessions.sort((a, b) => a.timestamp - b.timestamp);
+          const removedSession = storedSessions.shift();
+          console.log(`[BrowseFilePage] Removing oldest sessionId: ${removedSession?.sessionId}`);
+
+          // Delete associated images from local storage
+          if (removedSession) {
+            this.deleteSessionImagesFromLocalStorage(removedSession.sessionId);
+          }
+        }
+
+        // Save updated list
+        localStorage.setItem(this.sessionIdListKey, JSON.stringify(storedSessions));
+      } else {
+        console.log(`[BrowseFilePage] SessionId already tracked: ${sessionId}`);
+      }
+    } catch (e) {
+      console.warn('[BrowseFilePage] Error tracking sessionId:', e);
+    }
+  }
+
+  // Delete all images belonging to a specific sessionId from local storage
+  private deleteSessionImagesFromLocalStorage(sessionId: string): void {
+    try {
+      // Get all images from ImageStorageService
+      const svc: any = this.imageStorage as any;
+      
+      if (typeof svc.removeSessionById === 'function') {
+        // If service has a removal method, use it
+        (svc as any).removeSessionById(sessionId);
+        console.log(`[BrowseFilePage] Removed session images for sessionId: ${sessionId}`);
+      } else {
+        console.warn(`[BrowseFilePage] ImageStorageService doesn't have removeSessionById method`);
+      }
+    } catch (e) {
+      console.warn('[BrowseFilePage] Error deleting session images from local storage:', e);
+    }
+  }
+
+  // Confirm session action: kept for backward compatibility (legacy method)
+  async confirmSessionAction(session: any): Promise<void> {
+    console.log('[BrowseFilePage] Session confirmed via legacy method');
+    this.closeSessionConfirmDialog();
+    // Continue with new flow
+    await this.loadAndNavigateToSession(session);
+  }
+
+  // Close confirmation dialog without action
+  closeSessionConfirmDialog(): void {
+    this.isSessionConfirmDialogOpen = false;
+    this.selectedSessionForConfirm = null;
+  }
+
+  // Debug method: print session object and related images from Firestore/S3
+  private async debugPrintSessionData(session: any): Promise<void> {
+    try {
+      console.log('========== SESSION DEBUG INFO ==========');
+      console.log('Session Object:', JSON.parse(JSON.stringify(session)));
+      
+      if (session && session.id) {
+        console.log('\n--- Session Images ---');
+        console.log('Session ID:', session.id);
+        console.log('Image Keys Count:', session.imageKeys?.length || 0);
+        console.log('Image Keys:', session.imageKeys);
+
+        // Get all stored images
+        let allImages: any[] = [];
+        try {
+          if (typeof (this.imageStorage as any).getAllImages === 'function') {
+            const res = (this.imageStorage as any).getAllImages();
+            allImages = (res && typeof (res as Promise<any>).then === 'function') ? await res : res;
+          } else if (typeof (this.imageStorage as any).getImages === 'function') {
+            const res = (this.imageStorage as any).getImages();
+            allImages = (res && typeof (res as Promise<any>).then === 'function') ? await res : res;
+          }
+          if (!Array.isArray(allImages)) allImages = [];
+        } catch (e) {
+          console.warn('[BrowseFilePage] Failed to get all images:', e);
+          allImages = [];
+        }
+
+        console.log('\n--- All Stored Images ---');
+        console.log('Total Stored Images:', allImages.length);
+        allImages.forEach((img: any, idx: number) => {
+          console.log(`Image ${idx + 1}:`, {
+            filename: img.filename,
+            timestamp: img.timestamp,
+            hasPrediction: !!img.prediction,
+            hasOriginal: !!img.original,
+            hasWithBoxes: !!img.withBoxes,
+            s3Keys: {
+              originalS3Key: img.originalS3Key,
+              withBoxesS3Key: img.withBoxesS3Key
+            },
+            sessionId: img.sessionId
+          });
+        });
+
+        // Print images for this specific session
+        const sessionImages = allImages.filter((img: any) => 
+          session.imageKeys?.includes(img.filename) || 
+          session.imageKeys?.includes(img.original)
+        );
+        console.log(`\n--- Images in this Session (${sessionImages.length} total) ---`);
+        sessionImages.forEach((img: any, idx: number) => {
+          console.log(`Session Image ${idx + 1}:`, {
+            filename: img.filename,
+            prediction: img.prediction,
+            statusMessage: img.statusMessage,
+            s3URLs: {
+              original: img.originalS3Url,
+              withBoxes: img.withBoxesS3Url
+            }
+          });
+        });
+      }
+      console.log('========== END DEBUG INFO ==========\n');
+    } catch (e) {
+      console.error('[BrowseFilePage] Error during debug print:', e);
+    }
+  }
+
   async goToSession(session: any) {
     // pick the first image in session and prepare the destination(feedback-page) to load it and 
     // display that first image when the session is selected
-     try {
+    try {
       if (session && session.imageKeys && session.imageKeys.length > 0) {
         const key = session.imageKeys[0];
         if (this.imageStorage && typeof this.imageStorage.selectImageByOriginal === 'function') {
@@ -386,19 +950,173 @@ private async initialize(): Promise<void> {
         }
       }
     } catch (e) { console.warn('goToSession warning', e); }
+    
     try {
-      // Ensure HomePage back handler is removed before naviagting 
+      // Ensure HomePage back handler is removed before navigating 
       // to feedback-page to keep the logic and behavior of back button is kept inside the home-page
       try { this.removeBackButtonHandler(); } catch (e) { /* ignore */ }
 
-      //build the parameters for the current session to be selected and displayed 
+      // Create and show loading spinner for S3 fetch
+      const spinnerContainer = document.createElement('div');
+      spinnerContainer.id = 'session-fetch-spinner';
+      spinnerContainer.style.position = 'fixed';
+      spinnerContainer.style.top = '50%';
+      spinnerContainer.style.left = '50%';
+      spinnerContainer.style.transform = 'translate(-50%, -50%)';
+      spinnerContainer.style.zIndex = '10000';
+      spinnerContainer.style.textAlign = 'center';
+      spinnerContainer.style.backgroundColor = 'rgba(0, 0, 0, 0.3)';
+      spinnerContainer.style.width = '100%';
+      spinnerContainer.style.height = '100%';
+      spinnerContainer.style.display = 'flex';
+      spinnerContainer.style.justifyContent = 'center';
+      spinnerContainer.style.alignItems = 'center';
+
+      const spinner = document.createElement('div');
+      spinner.style.border = '4px solid rgba(255, 81, 47, 0.3)';
+      spinner.style.borderTop = '4px solid #ff512f';
+      spinner.style.borderRadius = '50%';
+      spinner.style.width = '40px';
+      spinner.style.height = '40px';
+      spinner.style.animation = 'spin 1s linear infinite';
+      spinner.style.margin = '0 auto 10px';
+
+      // Add CSS animation for spinner if not already present
+      if (!document.getElementById('session-spinner-animation')) {
+        const style = document.createElement('style');
+        style.id = 'session-spinner-animation';
+        style.innerHTML = `
+          @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+          }
+        `;
+        document.head.appendChild(style);
+      }
+
+      const spinnerBox = document.createElement('div');
+      spinnerBox.style.backgroundColor = 'white';
+      spinnerBox.style.padding = '30px';
+      spinnerBox.style.borderRadius = '10px';
+      spinnerBox.style.boxShadow = '0 4px 15px rgba(0, 0, 0, 0.2)';
+      spinnerBox.style.minWidth = '320px';
+
+      const spinnerText = document.createElement('div');
+      spinnerText.innerText = 'Loading session images from S3...';
+      spinnerText.style.color = '#333';
+      spinnerText.style.marginTop = '10px';
+      spinnerText.style.fontSize = '14px';
+      spinnerText.style.maxWidth = '300px';
+      spinnerText.style.wordWrap = 'break-word';
+
+      // Create progress bar container
+      const progressBarContainer = document.createElement('div');
+      progressBarContainer.style.marginTop = '20px';
+      progressBarContainer.style.width = '100%';
+      progressBarContainer.style.maxWidth = '280px';
+      progressBarContainer.style.margin = '20px auto 0';
+
+      // Progress bar background (empty)
+      const progressBarBackground = document.createElement('div');
+      progressBarBackground.style.width = '100%';
+      progressBarBackground.style.height = '8px';
+      progressBarBackground.style.backgroundColor = '#e0e0e0';
+      progressBarBackground.style.borderRadius = '4px';
+      progressBarBackground.style.overflow = 'hidden';
+      progressBarBackground.style.border = '1px solid #ccc';
+
+      // Progress bar fill (animated)
+      const progressBarFill = document.createElement('div');
+      progressBarFill.style.height = '100%';
+      progressBarFill.style.width = '0%';
+      progressBarFill.style.backgroundColor = '#ff512f';
+      progressBarFill.style.borderRadius = '4px';
+      progressBarFill.style.transition = 'width 0.3s ease';
+
+      progressBarBackground.appendChild(progressBarFill);
+
+      // Progress percentage text
+      const progressText = document.createElement('div');
+      progressText.innerText = '0%';
+      progressText.style.fontSize = '12px';
+      progressText.style.color = '#666';
+      progressText.style.marginTop = '8px';
+      progressText.style.textAlign = 'center';
+
+      progressBarContainer.appendChild(progressBarBackground);
+      progressBarContainer.appendChild(progressText);
+
+      spinnerBox.appendChild(spinner);
+      spinnerBox.appendChild(spinnerText);
+      spinnerBox.appendChild(progressBarContainer);
+      spinnerContainer.appendChild(spinnerBox);
+      document.body.appendChild(spinnerContainer);
+
+      // Fetch S3 images with progress tracking
+      const svc: any = this.imageStorage as any;
+      const sessionId = session?.id || null;
+      const userId = this.userID || null;
+
+      if (sessionId && userId && typeof svc.fetchSessionImagesFromS3 === 'function') {
+        try {
+          console.log('[BrowseFilePage] Starting S3 fetch for session:', { sessionId, userId });
+          
+          // Fetch images with progress callback to update spinner text and progress bar
+          await svc.fetchSessionImagesFromS3(
+            sessionId,
+            userId,
+            (current: number, total: number) => {
+              const percentage = total > 0 ? Math.round((current / total) * 100) : 0;
+              progressBarFill.style.width = `${percentage}%`;
+              progressText.innerText = `${percentage}% (${current}/${total} images)`;
+              spinnerText.innerText = `Loading images from S3...\n(${current}/${total} images)`;
+              console.log(`[BrowseFilePage] S3 fetch progress: ${current}/${total} (${percentage}%)`);
+            }
+          );
+
+          spinnerText.innerText = '✅ Session images loaded!';
+          progressBarFill.style.width = '100%';
+          progressText.innerText = '100%';
+          console.log('[BrowseFilePage] ✅ S3 images fetched successfully for session:', sessionId);
+
+          // Brief delay to show success message before navigating
+          await new Promise(resolve => setTimeout(resolve, 500));
+        } catch (error) {
+          spinnerText.innerText = '⚠️ Images may not be fully loaded, but continuing...';
+          console.warn('[BrowseFilePage] Warning during S3 fetch:', error);
+          // Continue anyway - some images may be available locally
+          await new Promise(resolve => setTimeout(resolve, 500));
+        }
+      } else {
+        console.warn('[BrowseFilePage] Cannot fetch S3 images - missing sessionId, userId, or fetchSessionImagesFromS3 method', {
+          sessionId,
+          userId,
+          hasMethod: typeof svc.fetchSessionImagesFromS3 === 'function'
+        });
+        spinnerText.innerText = 'Preparing session...';
+        progressBarFill.style.width = '50%';
+        progressText.innerText = '50%';
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
+
+      // Remove spinner and navigate
+      try { spinnerContainer.remove(); } catch (e) { /* ignore */ }
+
+      // Build the parameters for the current session to be selected and displayed 
       // in feedback-page with the session.id
       const params: any = {};
       if (session && session.id) params.sessionId = session.id;
       // Navigate to feedback page and include sessionId so feedback page can load the session
       this.router.navigate(['/feedback-page'], { queryParams: params });
     } catch (e) {
-      console.warn('Navigation to feedback page failed, falling back', e);
+      console.error('[BrowseFilePage] Navigation to feedback page failed:', e);
+      // Clean up spinner if it exists
+      try {
+        const spinner = document.getElementById('session-fetch-spinner');
+        if (spinner) spinner.remove();
+      } catch (err) { /* ignore */ }
+      
+      // Fallback to navigation without S3 fetch
       this.router.navigate(['/feedback-page']);
     }
   }
@@ -411,23 +1129,85 @@ private async initialize(): Promise<void> {
       if (ev) ev.stopPropagation();
 
       // Step 2: Validate the session object and its ID
-      if (!session || !session.id) return;
-
-      // Step 3: Confirm deletion with the user
-      if (typeof (this.imageStorage as any).removeSession === 'function') {
-        const ok = confirm('Delete session "' + (session.name || session.id) + '"? This cannot be undone.');
-        if (!ok) return;
-
-        // Step 4: Remove the session using ImageStorageService
-        (this.imageStorage as any).removeSession(session.id);
-
-        // Step 5: Refresh the session list
-        await this.loadSessions();
+      if (!session || !session.id) {
+        console.warn('[BrowseFilePage.deleteSession] Invalid session object');
+        return;
       }
+
+      // Step 3: Show confirmation dialog
+      this.selectedSessionForDelete = session;
+      this.isSessionDeleteConfirmDialogOpen = true;
     } catch (e) {
       // Step 6: Handle any errors that occur during the process
-      console.warn('deleteSession failed', e);
+      console.warn('[BrowseFilePage.deleteSession] Error showing confirmation dialog:', e);
     }
+  }
+
+  // Close delete confirmation dialog
+  closeSessionDeleteConfirmDialog(): void {
+    this.isSessionDeleteConfirmDialogOpen = false;
+    this.selectedSessionForDelete = null;
+  }
+
+  // Confirm deletion and start the deletion process
+  async confirmSessionDeletion(session: any): Promise<void> {
+    try {
+      if (!session || !session.id) return;
+
+      // Close confirmation dialog
+      this.closeSessionDeleteConfirmDialog();
+
+      // Show progress dialog
+      this.selectedSessionForDeleteProgress = session;
+      this.isSessionDeleteProgressDialogOpen = true;
+      this.sessionDeleteProgress = 0;
+      this.sessionDeleteStatusText = 'Preparing deletion...';
+      this.sessionDeleteStageCount = { current: 0, total: 0 };
+
+      // Delete session and all related resources
+      const success = await this.imageStorage.deleteSessionAndResources(
+        session.id,
+        (stage: string, current: number, total: number) => {
+          // Update progress dialog
+          this.sessionDeleteStatusText = stage;
+          this.sessionDeleteStageCount = { current, total };
+          this.sessionDeleteProgress = Math.round((current / total) * 100);
+        }
+      );
+
+      if (success) {
+        // Delay before closing to show completion
+        await new Promise(resolve => setTimeout(resolve, 500));
+        this.closeSessionDeleteProgressDialog();
+        
+        // Also delete from local storage
+        this.deleteSessionImagesFromLocalStorage(session.id);
+        
+        // Refresh the sessions list
+        await this.loadSessions();
+
+        // Show success message
+        console.log(`[BrowseFilePage] Session "${session.name}" deleted successfully`);
+      } else {
+        this.sessionDeleteStatusText = 'Deletion failed';
+        await new Promise(resolve => setTimeout(resolve, 1500));
+        this.closeSessionDeleteProgressDialog();
+      }
+    } catch (e) {
+      console.error('[BrowseFilePage.confirmSessionDeletion] Error during deletion:', e);
+      this.sessionDeleteStatusText = 'Error during deletion';
+      await new Promise(resolve => setTimeout(resolve, 1500));
+      this.closeSessionDeleteProgressDialog();
+    }
+  }
+
+  // Close delete progress dialog
+  closeSessionDeleteProgressDialog(): void {
+    this.isSessionDeleteProgressDialogOpen = false;
+    this.selectedSessionForDeleteProgress = null;
+    this.sessionDeleteProgress = 0;
+    this.sessionDeleteStatusText = 'Preparing deletion...';
+    this.sessionDeleteStageCount = { current: 0, total: 0 };
   }
 
 
@@ -821,7 +1601,7 @@ private async initialize(): Promise<void> {
     // No local back subscription: page-level handler will close the overlay when present
   }
 
-  /** Register back button handler for closing overlays only (no app exit). */
+  /** Register back button handler for closing overlays and navigating back. */
   private registerBackButtonHandler() {
     try {
       this.removeBackButtonHandler();
@@ -847,14 +1627,14 @@ private async initialize(): Promise<void> {
             return;
           }
           
-          // No overlays open - allow default back navigation
-          // (navigate back in history or let other handlers process)
+          // No overlays open - navigate back to previous page
+          this.navCtrl.back();
         } catch (e) {
-          console.warn('[SessionPage] back button handler error', e);
+          console.warn('[BrowseFilePage] back button handler error', e);
         }
       });
     } catch (e) {
-      console.warn('[SessionPage] registerBackButtonHandler failed', e);
+      console.warn('[BrowseFilePage] registerBackButtonHandler failed', e);
     }
   }
 
@@ -941,5 +1721,78 @@ private async initialize(): Promise<void> {
     
     // Close overlay after sorting
     this.closeSortOverlay();
+  }
+
+  /**
+   * Get the userId stored in localStorage.
+   */
+  private getStoredUserId(): string | null {
+    try {
+      return localStorage.getItem('currentUserId');
+    } catch (error) {
+      console.error('[BrowseFilePage.getStoredUserId] Failed to retrieve stored userId:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Print current user ID and stored user ID to console for debugging.
+   */
+  printUserIdStatus(): void {
+    const storedUserId = this.getStoredUserId();
+    const currentUserId = this.auth3.getCurrentUser()?.uid || this.userID || null;
+
+    console.log('[BrowseFilePage.printUserIdStatus] User ID Status:', {
+      storedUserId: storedUserId || 'Not stored',
+      currentUserId: currentUserId || 'Not available',
+      match: storedUserId === currentUserId
+    });
+
+    // Also print to alert for immediate visibility
+    alert(`User ID Status:\n\nStored: ${storedUserId || 'Not stored'}\nCurrent: ${currentUserId || 'Not available'}\n\nMatch: ${storedUserId === currentUserId ? 'Yes ✓' : 'No ✗'}`);
+  }
+
+  /**
+   * Print all session objects currently displayed in the sessions list to console.
+   */
+  printSessionsList(): void {
+    console.log('[BrowseFilePage.printSessionsList] Total sessions:', this.sessions.length);
+    
+    if (!this.sessions || this.sessions.length === 0) {
+      console.log('[BrowseFilePage.printSessionsList] No sessions to display');
+      alert('No sessions to display');
+      return;
+    }
+
+    console.log('[BrowseFilePage.printSessionsList] Full sessions array:', this.sessions);
+    
+    // Print each session with details
+    this.sessions.forEach((session, index) => {
+      console.log(`[BrowseFilePage.printSessionsList] Session ${index}:`, {
+        id: session.id,
+        name: session.name,
+        created: session.created,
+        imageCount: session.imageKeys?.length || 0,
+        imageKeys: session.imageKeys || [],
+        userId: session.userId
+      });
+    });
+
+    // Also create a summary alert
+    const summary = this.sessions.map((s, i) => 
+      `Session ${i + 1}: ${s.name || 'Untitled'} (${s.imageKeys?.length || 0} images)`
+    ).join('\n');
+    
+    alert(`Sessions List (${this.sessions.length} total):\n\n${summary}`);
+  }
+
+  /**
+   * Check if there are any sessions for the current user.
+   */
+  hasUserSessions(): boolean {
+    if (!this.sessions || this.sessions.length === 0) {
+      return false;
+    }
+    return this.sessions.some(session => session.userId === this.userID);
   }
 }

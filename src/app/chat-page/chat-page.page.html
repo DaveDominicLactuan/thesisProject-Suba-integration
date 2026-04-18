@@ -452,6 +452,34 @@
             <div class="attachment-copy-progress-percent">Sharing in progress: {{ attachmentCopyProgress }}%</div>
           </div>
         </ng-container>
+
+        <!-- COMPLETED STATE: Sharing Success Dialog -->
+        <ng-container *ngIf="attachmentDebugState === 'completed'">
+          <div class="attachment-debug-header">
+            <h2>Sharing Completed</h2>
+          </div>
+          <div class="attachment-debug-content">
+            <div *ngIf="selectedAttachmentForDebug" class="attachment-info">
+              <div style="text-align: center; margin-bottom: 16px;">
+                <ion-icon name="checkmark-circle-outline" style="font-size: 48px; color: #4CAF50;"></ion-icon>
+              </div>
+              <p style="margin: 0 0 16px 0; font-size: 16px; color: #333; text-align: center;">
+                Session and images shared successfully!
+              </p>
+              <div class="attachment-debug-name">{{ selectedAttachmentForDebug.name }}</div>
+              <div class="attachment-debug-details" *ngIf="selectedAttachmentForDebug.type === 'session'">
+                <span>{{ selectedAttachmentForDebug.imageCount || 0 }} Images</span>
+                <span>·</span>
+                <span>{{ selectedAttachmentForDebug.created | date:'short' }}</span>
+              </div>
+            </div>
+          </div>
+          <div class="attachment-debug-buttons">
+            <button class="debug-confirm-btn" (click)="confirmSharingComplete()" type="button">
+              Done
+            </button>
+          </div>
+        </ng-container>
         
       </div>
     </div>
@@ -600,7 +628,7 @@
               </button>
 
               <h2 class="map-sheet-name">
-                {{ selectedMapEngineer ? getMapSheetEngineerName(selectedMapEngineer) : 'Engineer Name Here' }}
+                {{ selectedMapEngineer ? getMapSheetEngineerName(selectedMapEngineer) : '' }}
               </h2>
               <div class="map-sheet-rating-row">
                 <span class="map-sheet-stars">★★★★☆</span>

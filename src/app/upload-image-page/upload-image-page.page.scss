@@ -218,6 +218,13 @@ form, input, optgroup, select {
 	flex: 1;
 	text-align: center;
 	margin-right: -20px;
+	max-width: 220px;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	display: inline-block;
+	margin-left: auto;
+	margin-right: auto;
 }
 
 /* Toggle switch styles (used in top-bar) */

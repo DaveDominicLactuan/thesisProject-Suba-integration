@@ -90,9 +90,13 @@ export class CameraPage2Page implements AfterViewInit {
   levelRollDeg: number = 0;
   private levelThresholdDeg: number = 1.0;
   private levelTargetRoll: number = 0; // Target roll angle for smooth interpolation
-  private levelSmoothingFactor: number = 0.15; // Lower = smoother but slower (0-1)
+  private levelSmoothingFactor: number = 0.4; // Increased from 0.15 for more responsive movement (0-1)
   private levelAnimationFrameId?: number; // RAF ID for cleanup
   private lastRawRoll: number = 0; // Track last raw value for velocity calculation
+  private deadZoneDeg: number = 0.3; // Ignore movements smaller than this to filter noise
+  private velocityDampingFactor: number = 0.7; // Apply damping to sudden changes (0-1, higher = more damping)
+  private lastProcessedRoll: number = 0; // Track the last applied roll for velocity calculation
+  private extremeChangeThreshold: number = 15; // Flag changes > this as potential sporadic movements
   flashDurationMs: number = 120; // visual flash length
   cooldownMs: number = 500; // minimum time between pictures
   private backButtonSub: any; // hardware back handler
@@ -101,8 +105,28 @@ export class CameraPage2Page implements AfterViewInit {
     if (typeof event.gamma !== 'number') return;
 
     const rawRoll = event.gamma;
-    // Store target and let RAF loop handle smooth interpolation
-    this.levelTargetRoll = Math.max(-45, Math.min(45, rawRoll));
+    const boundedRoll = Math.max(-45, Math.min(45, rawRoll));
+    
+    // Apply dead zone filtering: ignore small movements
+    const changeDelta = Math.abs(boundedRoll - this.lastProcessedRoll);
+    if (changeDelta < this.deadZoneDeg) {
+      return; // Ignore small noise
+    }
+    
+    // Detect and dampen extreme/sporadic movements
+    let targetRoll = boundedRoll;
+    if (changeDelta > this.extremeChangeThreshold) {
+      // Large sudden change detected - apply velocity damping
+      // Blend between current and new value to prevent jitter
+      targetRoll = this.lastProcessedRoll + (boundedRoll - this.lastProcessedRoll) * this.velocityDampingFactor;
+      console.log('[Level] Extreme movement detected, applying damping:', {changeDelta, original: boundedRoll, damped: targetRoll});
+    }
+    
+    // Update target for smooth interpolation loop
+    this.levelTargetRoll = targetRoll;
+    this.lastProcessedRoll = targetRoll; // Track processed value for velocity calculation
+    
+    // Update level status
     this.isPhoneLeveled = Math.abs(rawRoll) <= this.levelThresholdDeg;
   };
   // session management
@@ -885,12 +909,15 @@ export class CameraPage2Page implements AfterViewInit {
       this.isPhoneLeveled = false;
       this.levelRollDeg = 0;
       this.levelTargetRoll = 0;
+      // Initialize processed roll to current value to establish baseline
+      this.lastProcessedRoll = 0;
       
       // Add event listener for raw orientation data
       window.addEventListener('deviceorientation', this.orientationHandler, true);
       
       // Start smooth interpolation loop for responsive updates
       this.startLevelSmoothingLoop();
+      console.log('[Level] Level guide enabled with improved responsiveness and guardrails');
     } catch (e) {
       console.warn('[CameraPage2] toggleLevelGuide failed', e);
       this.disableLevelGuide();
@@ -908,7 +935,11 @@ export class CameraPage2Page implements AfterViewInit {
       
       // Only update if there's a meaningful change to avoid excessive redraws
       if (Math.abs(angleDelta) > 0.01) {
+        // Apply improved smoothing with faster responsiveness
         this.levelRollDeg += angleDelta * this.levelSmoothingFactor;
+        
+        // Ensure we stay within reasonable bounds to prevent drift
+        this.levelRollDeg = Math.max(-45, Math.min(45, this.levelRollDeg));
       } else if (Math.abs(angleDelta) > 0) {
         // Snap to target if very close to avoid oscillation
         this.levelRollDeg = this.levelTargetRoll;
@@ -927,6 +958,7 @@ export class CameraPage2Page implements AfterViewInit {
     this.isPhoneLeveled = false;
     this.levelRollDeg = 0;
     this.levelTargetRoll = 0;
+    this.lastProcessedRoll = 0; // Reset processed roll on disable
     
     // Cancel RAF loop
     if (this.levelAnimationFrameId) {
@@ -1026,7 +1058,7 @@ export class CameraPage2Page implements AfterViewInit {
       topBar.style.padding = '4px 8px';
 
       const title = document.createElement('div');
-      title.textContent = this.selectedImageTitle || 'No Image Selected';
+      title.textContent = this.getShortImageTitle(this.selectedImageTitle) || 'No Image Selected';
       title.style.fontWeight = '600';
       title.style.marginBottom = '4px';
       title.style.color = 'black';
@@ -1739,6 +1771,26 @@ export class CameraPage2Page implements AfterViewInit {
         if (e.target === backdrop) cleanup(null);
       });
     });
+  }
+
+  /**
+   * Shorten the image title by removing userID, sessionId, and img prefixes.
+   * Example: "userID:abc123sessionId:xyz789img1crack1041120261109.jpg" → "crack1041120261109.jpg"
+   * Handles cases where these prefixes don't exist.
+   */
+  getShortImageTitle(fullTitle: string): string {
+    if (!fullTitle) return '';
+    
+    // Remove userID: prefix if it exists (format: userID:someIdValue)
+    let shortened = fullTitle.replace(/^userID:[^s]*/i, '');
+    
+    // Remove sessionId: prefix if it exists (format: sessionId:someIdValue)
+    shortened = shortened.replace(/^sessionId:[^i]*/i, '');
+    
+    // Remove img1, img2, etc. prefix if it exists (format: img{N})
+    shortened = shortened.replace(/^img\d+/i, '');
+    
+    return shortened || fullTitle; // Return original if nothing was removed
   }
 
 

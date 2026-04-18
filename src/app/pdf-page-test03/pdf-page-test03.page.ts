@@ -170,6 +170,36 @@ export class PdfPageTest03Page {
       }
     }
 
+    /**
+     * Calculate dynamic image height based on actual image dimensions
+     * Maintains aspect ratio while constraining width to 250
+     * If dimensions not available, defaults to 333 (approximately 4:3 ratio with width=250)
+     */
+    private calculateDynamicImageHeight(img: any): number {
+      try {
+        // Try to get image dimensions from various possible properties
+        const width = img?.width || img?.originalWidth || img?.imgWidth || null;
+        const height = img?.height || img?.originalHeight || img?.imgHeight || null;
+
+        // If both dimensions are available and non-zero, calculate proportional height
+        if (width && height && width > 0 && height > 0) {
+          const aspectRatio = height / width;
+          const constrainedWidth = 250;
+          const calculatedHeight = Math.round(constrainedWidth * aspectRatio);
+          console.log(`[PDF] Calculated height: ${calculatedHeight} (from ${width}x${height}, ratio: ${aspectRatio.toFixed(2)})`);
+          // Ensure height is reasonable (between 100 and 600)
+          return Math.max(100, Math.min(600, calculatedHeight));
+        }
+
+        // Fallback: if no dimensions, use default height of 333 (4:3 aspect ratio with width=250)
+        console.log('[PDF] No image dimensions available, using default height of 333');
+        return 333;
+      } catch (err) {
+        console.warn('[PDF] Error calculating image height:', err);
+        return 333; // safe fallback
+      }
+    }
+
     // store incoming session id if any
     sessionId: string | null = null;
   
@@ -226,12 +256,20 @@ export class PdfPageTest03Page {
     
               // Log the result of extracting images for debugging/verification
               this.logImageProcessingResult(i, !!originalImg, !!withBoxesImg, type, shape, severity);
+
+              // Calculate dynamic height based on image dimensions
+              const imgHeight = this.calculateDynamicImageHeight(img);
+              const withBoxesHeight = this.calculateDynamicImageHeight({
+                ...img,
+                width: img?.withBoxesWidth,
+                height: img?.withBoxesHeight
+              });
     
-              // images as two columns
+              // images as two columns with dynamic heights
               content.push({
                 columns: [
-                  { image: originalImg, width: 250, height: 500, alignment: 'center' },
-                  { image: withBoxesImg, width: 250, height: 500, alignment: 'center' }
+                  { image: originalImg, width: 250, height: imgHeight, alignment: 'center' },
+                  { image: withBoxesImg, width: 250, height: withBoxesHeight, alignment: 'center' }
                 ],
                 columnGap: 10,
                 margin: [0, 0, 0, 20]

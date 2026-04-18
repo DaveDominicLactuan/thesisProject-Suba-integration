@@ -51,7 +51,7 @@
     </button> -->
     
     <!-- Center label showing current toggle state and selected image title -->
-    <span class="top-title" styles="5px";>{{ selectedImageTitle || (showWithBoxes ? 'With Boxes' : 'Original') }}</span>
+    <span class="top-title" [title]="selectedImageTitle">{{ getShortImageTitle(selectedImageTitle) || (showWithBoxes ? 'With Boxes' : 'Original') }}</span>
 
     <div class="toggle-wrapper">
       <label class="switch">

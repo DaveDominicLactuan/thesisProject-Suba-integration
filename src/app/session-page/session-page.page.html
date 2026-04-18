@@ -169,6 +169,153 @@
     </div>
   </div>
 
+  <!-- Session Loading Progress Dialog Overlay -->
+  <div *ngIf="isSessionLoadingDialogOpen" class="session-confirm-overlay" (click)="closeSessionLoadingDialog()">
+    <div class="session-confirm-dialog" (click)="$event.stopPropagation()">
+      <div class="session-confirm-header">
+        <h2>Loading Session</h2>
+        <p>Fetching and preparing session images...</p>
+      </div>
+      <div class="session-confirm-content">
+        <div *ngIf="selectedSessionForLoading" class="session-info">
+          <div class="session-confirm-name">{{ selectedSessionForLoading.name }}</div>
+          <div class="session-confirm-details">
+            <span>{{ selectedSessionForLoading.imageKeys?.length || 0 }} Images</span>
+            <span>·</span>
+            <span>{{ selectedSessionForLoading.created | date:'short' }}</span>
+          </div>
+        </div>
+
+        <!-- Progress Section -->
+        <div class="session-loading-progress" style="margin-top: 24px;">
+          <div style="display: flex; justify-content: center; margin-bottom: 16px;">
+            <div style="
+              border: 4px solid rgba(255, 81, 47, 0.3);
+              border-top: 4px solid #ff512f;
+              border-radius: 50%;
+              width: 40px;
+              height: 40px;
+              animation: spin 1s linear infinite;
+            "></div>
+          </div>
+
+          <div style="text-align: center; color: #666; margin-bottom: 16px; font-size: 14px;">
+            {{ sessionLoadingStatusText }}
+          </div>
+
+          <div *ngIf="sessionLoadingImageCount.total > 0" style="text-align: center; color: #999; font-size: 12px; margin-bottom: 12px;">
+            {{ sessionLoadingImageCount.current }}/{{ sessionLoadingImageCount.total }} images loaded
+          </div>
+
+          <!-- Progress Bar -->
+          <div style="width: 100%; height: 8px; background: #e0e0e0; border-radius: 4px; overflow: hidden; border: 1px solid #ccc;">
+            <div [style.width.%]="sessionLoadingProgress" style="
+              height: 100%;
+              background: linear-gradient(90deg, #ff512f, #ff9800);
+              border-radius: 4px;
+              transition: width 0.3s ease;
+            "></div>
+          </div>
+
+          <div style="text-align: center; color: #666; font-size: 12px; margin-top: 8px;">
+            {{ sessionLoadingProgress }}%
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Session Delete Confirmation Dialog Overlay -->
+  <div *ngIf="isSessionDeleteConfirmDialogOpen" class="session-confirm-overlay" (click)="closeSessionDeleteConfirmDialog()">
+    <div class="session-confirm-dialog" (click)="$event.stopPropagation()">
+      <div class="session-confirm-header">
+        <h2>Delete Session?</h2>
+        <p>This will permanently delete the session, all images, and S3 data. This cannot be undone.</p>
+      </div>
+      <div class="session-confirm-content">
+        <div *ngIf="selectedSessionForDelete" class="session-info">
+          <div class="session-confirm-name">{{ selectedSessionForDelete.name }}</div>
+          <div class="session-confirm-details">
+            <span>{{ selectedSessionForDelete.imageKeys?.length || 0 }} Images</span>
+            <span>·</span>
+            <span>{{ selectedSessionForDelete.created | date:'short' }}</span>
+          </div>
+        </div>
+      </div>
+      <div class="session-confirm-buttons">
+        <button class="confirm-btn delete-confirm" (click)="confirmSessionDeletion(selectedSessionForDelete)">
+          Delete Permanently
+        </button>
+        <button class="cancel-btn" (click)="closeSessionDeleteConfirmDialog()">
+          Cancel
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Session Delete Progress Dialog Overlay -->
+  <div *ngIf="isSessionDeleteProgressDialogOpen" class="session-confirm-overlay" (click)="closeSessionDeleteProgressDialog()">
+    <div class="session-confirm-dialog" (click)="$event.stopPropagation()">
+      <div class="session-confirm-header">
+        <h2>Deleting Session</h2>
+        <p>Removing session data and S3 objects...</p>
+      </div>
+      <div class="session-confirm-content">
+        <div *ngIf="selectedSessionForDeleteProgress" class="session-info">
+          <div class="session-confirm-name">{{ selectedSessionForDeleteProgress.name }}</div>
+          <div class="session-confirm-details">
+            <span>{{ selectedSessionForDeleteProgress.imageKeys?.length || 0 }} Images</span>
+            <span>·</span>
+            <span>{{ selectedSessionForDeleteProgress.created | date:'short' }}</span>
+          </div>
+        </div>
+
+        <!-- Progress Section -->
+        <div class="session-loading-progress" style="margin-top: 24px;">
+          <div style="display: flex; justify-content: center; margin-bottom: 16px;">
+            <div style="
+              border: 4px solid rgba(255, 81, 47, 0.3);
+              border-top: 4px solid #ff512f;
+              border-radius: 50%;
+              width: 40px;
+              height: 40px;
+              animation: spin 1s linear infinite;
+            "></div>
+          </div>
+
+          <div style="text-align: center; color: #666; margin-bottom: 16px; font-size: 14px;">
+            {{ sessionDeleteStatusText }}
+          </div>
+
+          <div *ngIf="sessionDeleteStageCount.total > 0" style="text-align: center; color: #999; font-size: 12px; margin-bottom: 12px;">
+            {{ sessionDeleteStageCount.current }}/{{ sessionDeleteStageCount.total }} operations completed
+          </div>
+
+          <!-- Progress Bar -->
+          <div style="width: 100%; height: 8px; background: #e0e0e0; border-radius: 4px; overflow: hidden; border: 1px solid #ccc;">
+            <div [style.width.%]="sessionDeleteProgress" style="
+              height: 100%;
+              background: linear-gradient(90deg, #ff512f, #ff9800);
+              border-radius: 4px;
+              transition: width 0.3s ease;
+            "></div>
+          </div>
+
+          <div style="text-align: center; color: #666; font-size: 12px; margin-top: 8px;">
+            {{ sessionDeleteProgress }}%
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <style>
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+  </style>
+
 <ion-content id="main-content" class="home-page" (click)="closeSidebar()">
  
 </ion-content>

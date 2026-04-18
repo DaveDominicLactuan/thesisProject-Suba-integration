@@ -102,11 +102,21 @@ regForm!: FormGroup; // our single form
     return new Promise((resolve) => setTimeout(resolve, 0));
   }
 
+  /**
+   * Generate a unique ID for pending engineer accounts.
+   * Uses timestamp + random string to ensure uniqueness without Firebase Auth.
+   */
+  private generatePendingAccountId(): string {
+    const timestamp = Date.now();
+    const randomStr = Math.random().toString(36).substring(2, 9);
+    return `pending_${timestamp}_${randomStr}`;
+  }
 
 // Function to handle registration
 /**
- * Handle registration: validate form & role, call Auth3Service.register for registration using credentials,
- * then navigate to landing on success or show error on failure.
+ * Handle registration based on selectedRole:
+ * - For engineers: skip Firebase Auth creation, write to pendingAccounts collection only, show approval notice
+ * - For users: create Firebase Auth user, write to users collection, save office location, navigate to landing
  */
 async onRegister() {
   if (this.isRegistering) {
@@ -166,59 +176,77 @@ async onRegister() {
   await this.waitForUiPaint();
 
   try {
-    // Call the auth service to register a new user with provided credentials
-    // selectedRole already contains 'engineer' or 'user'
-    const userCredential = await this.auth3.register(
-      email ?? '',           // Email address (use empty string if null)
-      password ?? '',        // Password (use empty string if null)
-      firstName ?? '',       // First name (use empty string if null)
-      lastName ?? '',        // Last name (use empty string if null)
-      engineeringID ?? '',   // Engineering ID (use empty string if null)
-      this.selectedRole ?? 'user', // User role ('engineer' or 'user')
-      false                  // isAdmin
-    );
-   
-    // Log that the registration call succeeded at the auth layer
-    const createdUid = userCredential?.user?.uid;
-    console.log('[RegistrationPage] Auth registration succeeded for', email, 'uid=', createdUid);
+    if (this.selectedRole === 'engineer') {
+      // ENGINEER FLOW: Create pending account (no Firebase Auth yet)
+      console.log('[RegistrationPage] Processing engineer registration as pending account');
+      
+      // Generate a unique ID for the pending account (no Firebase Auth user yet)
+      const pendingUid = this.generatePendingAccountId();
+      
+      // Create pending account payload
+      const pendingPayload = {
+        userID: pendingUid,
+        firstName: firstName ?? '',
+        lastName: lastName ?? '',
+        prcNumber: engineeringID ?? '',
+        email: email ?? '',
+        password: password ?? '', // Store hashed password later by admin? Or delete after review
+        role: 'engineer',
+        officeLocation: {
+          latitude: officeLatitude ?? null,
+          longitude: officeLongitude ?? null
+        },
+        ifAdmin: false,
+        createdAt: new Date(),
+        status: 'pending',
+        approvedAt: null,
+        approvedBy: null
+      };
 
-    // Auth3Service.register() already writes the user profile to Firestore
-    // so we skip the redundant write here. Just log success.
-    try {
-      const uid = userCredential?.user?.uid;
-      if (uid) {
-        console.log(`[RegistrationPage] Firestore profile written via Auth3Service for uid: ${uid}`);
+      console.log('[RegistrationPage] Pending engineer account payload:', pendingPayload);
+      
+      // Write to pendingAccounts collection only (no Firebase Auth user created)
+      await setDoc(doc(this.firestore, 'pendingAccounts', pendingUid), pendingPayload);
+      console.log('[RegistrationPage] Pending engineer account written with id:', pendingUid);
 
-        // Also create a pending account record for administrative review/approval
-        try {
-          console.log('[RegistrationPage] Attempting to write pending account record', {
-            uid,
-            email,
-            role: this.selectedRole,
-            hasEngineeringId: !!engineeringID
-          });
-          const pendingPayload = {
-            userID: uid,
-            firstName: firstName ?? '',
-            lastName: lastName ?? '',
-            prcNumber: engineeringID ?? '',
-            email: email ?? '',
-            role: this.selectedRole ?? 'user',
-            officeLocation: {
-              latitude: officeLatitude ?? null,
-              longitude: officeLongitude ?? null
-            },
-            ifAdmin: false,
-            createdAt: new Date(),
-            status: 'pending',
-            approvedAt: null,
-            approvedBy: null
-          };
-          console.log('[RegistrationPage] Pending account payload:', pendingPayload);
-          await setDoc(doc(this.firestore, 'pendingAccounts', uid), pendingPayload);
-          console.log(`[RegistrationPage] Pending account record written for uid: ${uid}`);
+      // Set success message
+      this.registrationSuccess = 'Account request submitted successfully. Your account is under review.';
+      console.log('[RegistrationPage] engineer account pending', {
+        email,
+        firstName,
+        lastName,
+        engineeringID,
+        pendingUid
+      });
 
-          // Save office location to the 'officeLocations' collection
+      // Show the admin-notice overlay for engineer approval workflow
+      this.showNoticeWindow();
+    } else {
+      // USER FLOW: Create Firebase Auth user and regular user profile
+      console.log('[RegistrationPage] Processing user registration with Firebase Auth');
+      
+      // Call the auth service to register a new user with provided credentials
+      const userCredential = await this.auth3.register(
+        email ?? '',           // Email address
+        password ?? '',        // Password
+        firstName ?? '',       // First name
+        lastName ?? '',        // Last name
+        engineeringID ?? '',   // Engineering ID (empty for users)
+        this.selectedRole ?? 'user', // User role
+        false                  // isAdmin
+      );
+     
+      // Log that the registration call succeeded at the auth layer
+      const createdUid = userCredential?.user?.uid;
+      console.log('[RegistrationPage] Auth registration succeeded for', email, 'uid=', createdUid);
+
+      // Auth3Service.register() already writes the user profile to Firestore users collection
+      try {
+        const uid = userCredential?.user?.uid;
+        if (uid) {
+          console.log(`[RegistrationPage] Firestore user profile written via Auth3Service for uid: ${uid}`);
+
+          // Save office location for users
           try {
             await this.auth3.saveOfficeLocation(uid, {
               email: email ?? '',
@@ -234,38 +262,25 @@ async onRegister() {
           } catch (locationErr) {
             console.warn('[RegistrationPage] Failed to save office location:', locationErr);
           }
-        } catch (pendingErr) {
-          console.warn('[RegistrationPage] Failed to write pending account record:', pendingErr);
-          console.warn('[RegistrationPage] Pending account write failed details:', {
-            uid,
-            email,
-            role: this.selectedRole
-          });
+        } else {
+          console.warn('[RegistrationPage] could not determine uid after register; profile not written');
         }
-      } else {
-        console.warn('[RegistrationPage] could not determine uid after register; profile not written');
+      } catch (fireErr) {
+        console.warn('[RegistrationPage] Firestore write failed:', fireErr);
       }
-    } catch (fireErr) {
-      console.warn('[RegistrationPage] Firestore write failed:', fireErr);
-    }
 
-    // If registration succeeds, set success message and navigate to login
-    this.registrationSuccess = 'Account created successfully. You can now sign in.';
-    console.log('[RegistrationPage] account created', {
-      email,
-      firstName,
-      lastName,
-      engineeringID,
-      role: this.selectedRole,
-      officeLatitude,
-      officeLongitude
-    });
-    // Give the success message a brief moment before redirecting to login
-    // For engineer role show the admin-notice modal and wait for user confirmation
-    if (this.selectedRole === 'engineer') {
-      this.showNoticeWindow();
-    } else {
-      // Non-engineer: short delay then navigate
+      // Set success message and navigate
+      this.registrationSuccess = 'Account created successfully. You can now sign in.';
+      console.log('[RegistrationPage] user account created', {
+        email,
+        firstName,
+        lastName,
+        role: this.selectedRole,
+        officeLatitude,
+        officeLongitude
+      });
+
+      // Non-engineer: short delay then navigate to landing page
       setTimeout(() => {
         this.router.navigate(['/landing-page']);
       }, 400);

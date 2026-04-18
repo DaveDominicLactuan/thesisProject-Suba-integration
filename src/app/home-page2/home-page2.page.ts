@@ -54,7 +54,6 @@ export class HomePage2Page implements OnInit, OnDestroy {
   isLocationAvailable: boolean = false;
   isLocationDataFetched: boolean = false;
   private locationCheckInterval: any = null;
-  private hasPromptedForLocationOnEnter: boolean = false;
 
   /** Inject auth, router, and image storage services for navigation and data. */
   constructor(private formBuilder: FormBuilder, private router: Router, private authService: AuthService, private navCtrl: NavController, private auth3: Auth3Service, private imageStorage: ImageStorageService, private platform: Platform, private firestore: Firestore, private userPrefetchCache: UserPrefetchCacheService) {
@@ -433,8 +432,6 @@ private persistUserProfileToStorage(): void {
     if (uid) {
       this.loadPersistedSyncStatus(uid);
       this.loadPersistedLocation(uid);
-      // Prompt for location on first enter
-      this.promptForLocationOnFirstEnter();
       // Start periodic location check
       this.startLocationCheckInterval();
     }
@@ -1701,30 +1698,7 @@ private persistUserProfileToStorage(): void {
   }
 
 
-  /**
-   * Prompt user the first time they enter the page to enable location.
-   * Shows a confirmation prompt asking to enable location for optimal app use.
-   */
-  private promptForLocationOnFirstEnter(): void {
-    // Only prompt once per session
-    if (this.hasPromptedForLocationOnEnter) {
-      return;
-    }
-    this.hasPromptedForLocationOnEnter = true;
 
-    const result = confirm('Enable location for optimum use of the application?\n\nThis allows us to show your current location and provide location-based features.');
-    if (result) {
-      console.log('[HomePage2.promptForLocationOnFirstEnter] User accepted location prompt');
-      this.isLocationAvailable = true;
-      // Immediately try to get location
-      this.getAndStoreCurrentLocation().catch((err) => {
-        console.warn('[HomePage2.promptForLocationOnFirstEnter] Failed to get location:', err);
-      });
-    } else {
-      console.log('[HomePage2.promptForLocationOnFirstEnter] User declined location prompt');
-      this.isLocationAvailable = false;
-    }
-  }
 
   /**
    * Start a periodic interval to check and fetch location every 5 seconds.

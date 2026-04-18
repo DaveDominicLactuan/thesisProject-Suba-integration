@@ -4,7 +4,7 @@ import { BehaviorSubject, Observable } from 'rxjs';
 import { Auth } from '@angular/fire/auth';
 import { onAuthStateChanged } from 'firebase/auth';
 import { Firestore, collection, doc, setDoc, deleteDoc, getDocs, query, where, writeBatch } from '@angular/fire/firestore';
-import { S3Client, PutObjectCommand, ListObjectsV2Command, GetObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, PutObjectCommand, ListObjectsV2Command, GetObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
 import { fromCognitoIdentityPool } from '@aws-sdk/credential-providers';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'; // NEW IMPORT
 
@@ -1257,6 +1257,167 @@ export class ImageStorageService {
     return false;
   }
 
+  // ==================== S3 Deletion Methods ====================
+
+  /**
+   * Delete a single S3 object by key
+   * @param s3Key The S3 object key to delete
+   * @returns Promise<boolean> True if deletion succeeded
+   */
+  async deleteS3Object(s3Key: string): Promise<boolean> {
+    try {
+      if (!s3Key || s3Key.trim() === '') {
+        console.warn('[ImageStorageService.deleteS3Object] Empty S3 key provided');
+        return false;
+      }
+
+      await this.s3Client.send(new DeleteObjectCommand({
+        Bucket: this.bucketName,
+        Key: s3Key,
+      }));
+
+      console.log(`✅ S3 object deleted: ${s3Key}`);
+      return true;
+    } catch (error) {
+      console.error('[ImageStorageService.deleteS3Object] Error deleting S3 object:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Delete multiple S3 objects by array of keys
+   * @param s3Keys Array of S3 object keys to delete
+   * @param onProgress Optional callback for progress updates: (current: number, total: number) => void
+   * @returns Promise with deletion results
+   */
+  async deleteMultipleS3Objects(
+    s3Keys: string[],
+    onProgress?: (current: number, total: number) => void
+  ): Promise<{ successful: number; failed: number }> {
+    const results = { successful: 0, failed: 0 };
+
+    for (let i = 0; i < s3Keys.length; i++) {
+      const key = s3Keys[i];
+      const deleted = await this.deleteS3Object(key);
+      if (deleted) {
+        results.successful++;
+      } else {
+        results.failed++;
+      }
+      
+      // Call progress callback if provided
+      if (onProgress) {
+        onProgress(i + 1, s3Keys.length);
+      }
+    }
+
+    console.log(`[ImageStorageService.deleteMultipleS3Objects] Deleted ${results.successful}/${s3Keys.length} S3 objects`);
+    return results;
+  }
+
+  /**
+   * Delete a session and all its related resources (Firestore session, images, and S3 objects)
+   * @param sessionId The session ID to delete
+   * @param onProgress Optional callback for progress updates: (stage: string, current: number, total: number) => void
+   * @returns Promise<boolean> True if deletion succeeded
+   */
+  async deleteSessionAndResources(
+    sessionId: string,
+    onProgress?: (stage: string, current: number, total: number) => void
+  ): Promise<boolean> {
+    try {
+      if (!sessionId || sessionId.trim() === '') {
+        console.error('[ImageStorageService.deleteSessionAndResources] Invalid session ID');
+        return false;
+      }
+
+      // Stage 1: Find all images in the session locally
+      console.log(`[ImageStorageService] Starting deletion for session: ${sessionId}`);
+      const session = this.sessions.find(s => s.id === sessionId);
+      if (!session) {
+        console.warn('[ImageStorageService] Session not found locally:', sessionId);
+        return false;
+      }
+
+      const imageKeysToDelete = [...(session.imageKeys || [])];
+      console.log(`[ImageStorageService] Found ${imageKeysToDelete.length} images in session`);
+
+      // Stage 2: Collect S3 keys from all images in the session
+      if (onProgress) onProgress('Collecting S3 keys...', 0, imageKeysToDelete.length);
+      const s3KeysToDelete: string[] = [];
+      
+      for (let i = 0; i < imageKeysToDelete.length; i++) {
+        const imageKey = imageKeysToDelete[i];
+        const image = this.images.find(img => img.filename === imageKey);
+        
+        if (image) {
+          if (image.originalS3Key) s3KeysToDelete.push(image.originalS3Key);
+          if (image.withBoxesS3Key) s3KeysToDelete.push(image.withBoxesS3Key);
+        }
+        
+        if (onProgress) onProgress('Collecting S3 keys...', i + 1, imageKeysToDelete.length);
+      }
+
+      console.log(`[ImageStorageService] Collected ${s3KeysToDelete.length} S3 keys to delete`);
+
+      // Stage 3: Delete S3 objects
+      if (s3KeysToDelete.length > 0) {
+        if (onProgress) onProgress('Deleting S3 objects...', 0, s3KeysToDelete.length);
+        
+        for (let i = 0; i < s3KeysToDelete.length; i++) {
+          await this.deleteS3Object(s3KeysToDelete[i]);
+          if (onProgress) onProgress('Deleting S3 objects...', i + 1, s3KeysToDelete.length);
+        }
+      }
+
+      // Stage 4: Delete images from local storage and Firestore
+      if (onProgress) onProgress('Deleting images from storage...', 0, imageKeysToDelete.length);
+      
+      for (let i = 0; i < imageKeysToDelete.length; i++) {
+        const imageKey = imageKeysToDelete[i];
+        
+        // Delete from local storage
+        const imageIndex = this.images.findIndex(img => img.filename === imageKey);
+        if (imageIndex >= 0) {
+          const removedImage = this.images[imageIndex];
+          this.images.splice(imageIndex, 1);
+          
+          // Delete from Firestore
+          try {
+            await this.deleteImageFromFirestore(removedImage);
+          } catch (e) {
+            console.warn('[ImageStorageService] Failed to delete image from Firestore:', e);
+          }
+        }
+        
+        if (onProgress) onProgress('Deleting images from storage...', i + 1, imageKeysToDelete.length);
+      }
+
+      // Stage 5: Delete session from local storage
+      if (onProgress) onProgress('Deleting session...', 0, 1);
+      this.removeSession(sessionId);
+      if (onProgress) onProgress('Deleting session...', 1, 1);
+
+      // Stage 6: Delete session from Firestore
+      if (onProgress) onProgress('Finalizing...', 0, 1);
+      await this.deleteSessionFromFirestore(sessionId);
+      
+      // Reset session counter
+      this.resetSessionCounter(sessionId);
+
+      // Persist changes to local storage
+      await this._storage?.set(this.STORAGE_KEY, this.images);
+      await this.persistSessions();
+
+      if (onProgress) onProgress('Finalizing...', 1, 1);
+      console.log(`✅ Session and all resources deleted successfully: ${sessionId}`);
+      return true;
+    } catch (error) {
+      console.error('[ImageStorageService.deleteSessionAndResources] Error:', error);
+      throw error;
+    }
+  }
+
   // ==================== Firestore Helper Methods ====================
 
   /**
@@ -1380,5 +1541,174 @@ export class ImageStorageService {
       throw error;
     }
   }
+
+  /**
+   * Transform an image filename to use a new userId
+   * Format: userID:oldUserIdpart...sessionId:sessionIdpart...
+   * Replace the old userId with new userId while preserving the rest
+   * @param originalKey Original image key/filename
+   * @param newUserId New user ID to use
+   * @returns Transformed filename with new userId
+   */
+  transformImageFilenameUserId(originalKey: string, newUserId: string): string {
+    // Format: userID:abc123sessionId:xyz789img1crack1041120261109original.jpg
+    // Extract parts and rebuild with new userId
+    const userIdMatch = originalKey.match(/userID:([^:]+)/);
+    const sessionIdMatch = originalKey.match(/sessionId:([^i]+)/);
+    
+    if (!sessionIdMatch) {
+      // If format is not recognized, just add userId prefix
+      return `userID:${newUserId}${originalKey}`;
+    }
+
+    const sessionId = sessionIdMatch[1];
+    const afterSessionId = originalKey.substring(originalKey.indexOf(sessionId) + sessionId.length);
+    
+    return `userID:${newUserId}sessionId:${sessionId}${afterSessionId}`;
+  }
+
+  /**
+   * Copy a session with transformed filenames for a new user
+   * This creates a new session from an existing one, transforming image filenames and userId
+   * @param originalSession Original session to copy
+   * @param newUserId New user ID for the copy
+   * @param onProgress Optional progress callback
+   * @returns Promise<ImageSession> The new copied session
+   */
+  async copySessionForUser(
+    originalSession: any,
+    newUserId: string,
+    onProgress?: (current: number, total: number, status: string) => void
+  ): Promise<ImageSession> {
+    try {
+      const updateProgress = (current: number, total: number, status: string) => {
+        if (onProgress) {
+          onProgress(Math.min(current, total), total, status);
+        }
+      };
+
+      updateProgress(5, 100, 'Initializing session copy...');
+
+      // Step 1: Create NEW session with unique ID
+      const newSessionId = `s-${Date.now()}`;
+      console.log('[ImageStorageService] Original session ID:', originalSession.id);
+      console.log('[ImageStorageService] New copied session ID:', newSessionId);
+
+      const newSession: ImageSession = {
+        id: newSessionId,
+        name: originalSession.name,
+        imageKeys: [],
+        created: new Date().toISOString(),
+        totalBoundingBoxes: originalSession.totalBoundingBoxes || 0,
+        userId: newUserId,
+        sessionId: newSessionId
+      };
+
+      updateProgress(15, 100, 'Fetching images from S3...');
+
+      // Step 2: Fetch and transform images
+      const transformedImages: StoredImage[] = [];
+      const sessionImageKeys = originalSession.imageKeys || [];
+      const totalImages = sessionImageKeys.length;
+
+      for (let i = 0; i < totalImages; i++) {
+        const imageKey = sessionImageKeys[i];
+        const originalImage = this.selectImageByKey(imageKey);
+
+        if (!originalImage) {
+          console.warn('[ImageStorageService] Original image not found:', imageKey);
+          continue;
+        }
+
+        updateProgress(
+          15 + ((i) / totalImages) * 40,
+          100,
+          `Fetching image ${i + 1}/${totalImages} from S3...`
+        );
+
+        // Fetch from S3 if URLs exist
+        let originalDataUrl = originalImage.original;
+        let withBoxesDataUrl = originalImage.withBoxes;
+
+        if (originalImage.originalS3Key) {
+          try {
+            const fetchedOriginal = await this.fetchS3ObjectAsDataUrl(originalImage.originalS3Key);
+            if (fetchedOriginal) originalDataUrl = fetchedOriginal;
+          } catch (e) {
+            console.warn('[ImageStorageService] Failed to fetch original from S3:', e);
+          }
+        }
+
+        if (originalImage.withBoxesS3Key) {
+          try {
+            const fetchedWithBoxes = await this.fetchS3ObjectAsDataUrl(originalImage.withBoxesS3Key);
+            if (fetchedWithBoxes) withBoxesDataUrl = fetchedWithBoxes;
+          } catch (e) {
+            console.warn('[ImageStorageService] Failed to fetch withBoxes from S3:', e);
+          }
+        }
+
+        // Transform filename to use new userId
+        const newFilename = this.transformImageFilenameUserId(imageKey, newUserId);
+
+        const transformedImage: StoredImage = {
+          ...originalImage,
+          original: originalDataUrl,
+          withBoxes: withBoxesDataUrl,
+          filename: newFilename,
+          userId: newUserId,
+          sessionId: newSession.id
+        };
+
+        transformedImages.push(transformedImage);
+        console.log('[ImageStorageService] Transformed image:', newFilename);
+      }
+
+      // Update session imageKeys with new filenames
+      newSession.imageKeys = transformedImages.map(img => img.filename);
+
+      updateProgress(60, 100, 'Storing images locally...');
+
+      // Step 3: Store transformed images
+      for (let i = 0; i < transformedImages.length; i++) {
+        const image = transformedImages[i];
+        this.setEntryForImage(image.filename, image);
+        await this.saveImageToUser(newUserId, image);
+        updateProgress(60 + ((i + 1) / transformedImages.length) * 25, 100, `Storing image ${i + 1}/${transformedImages.length}...`);
+      }
+
+      updateProgress(85, 100, 'Saving session...');
+
+      // Step 4: Save session to user
+      await this.saveSessionToUser(newUserId, newSession);
+
+      updateProgress(100, 100, 'Session copy completed!');
+
+      console.log('[ImageStorageService] ====== SESSION COPY COMPLETED ======');
+      console.log('[ImageStorageService] ORIGINAL SESSION (unchanged):');
+      console.log(`  - ID: ${originalSession.id}`);
+      console.log(`  - User: ${originalSession.userId}`);
+      console.log(`  - Name: ${originalSession.name}`);
+      console.log(`  - Images: ${originalSession.imageKeys?.length || 0}`);
+      console.log('[ImageStorageService] NEW COPIED SESSION (current user):');
+      console.log(`  - ID: ${newSession.id}`);
+      console.log(`  - User: ${newUserId}`);
+      console.log(`  - Name: ${newSession.name}`);
+      console.log(`  - Images: ${transformedImages.length}`);
+      console.log('[ImageStorageService] ====== END SESSION COPY ======');
+
+      return newSession;
+    } catch (error) {
+      console.error('[ImageStorageService] Error during session copy:', error);
+      throw error;
+    }
+  }
+
+  // /**
+  //  * Get entry for an image by key (helper method for external use)
+  //  */
+  // getEntryForImage(imageKey: string): StoredImage | undefined {
+  //   return this.selectImageByKey(imageKey);
+  // }
   
 }

@@ -454,20 +454,46 @@ export class ChatPagePage implements OnInit, OnDestroy {
     }
   }
 
-  // Confirm debug action: copy session to current user with transformed filenames
+  // Confirm debug action: copy session to chat recipient with transformed filenames and S3 uploads
   async confirmAttachmentDebugAction(attachment: any): Promise<void> {
-    console.log('[ChatPage] Attachment copy action initiated...');
+    console.log('[ChatPage] Attachment share action initiated...');
     
     if (attachment?.type !== 'session' || !attachment?.id) {
-      console.error('[ChatPage] Invalid attachment for copy operation');
+      console.error('[ChatPage] Invalid attachment for share operation');
       alert('Invalid session attachment');
       return;
     }
 
     // SECURITY: Validate that the attachment belongs to the current user
     if (!this.validateSessionBelongsToCurrentUser(attachment)) {
-      console.error('[ChatPage] SECURITY: Cannot copy session - belongs to different user');
-      alert('Security error: Cannot copy session from another user');
+      console.error('[ChatPage] SECURITY: Cannot share session - belongs to different user');
+      alert('Security error: Cannot share session from another user');
+      return;
+    }
+
+    // Get receiver's user ID from active chat using helper function
+    let receiverUserId = this.extractReceiverUserIdFromChat(this.activeChat);
+    
+    // Fallback: check if we stored it during openChat
+    if (!receiverUserId && (this.activeChat as any)?._recipientUserId) {
+      receiverUserId = (this.activeChat as any)._recipientUserId;
+      console.log('[ChatPage.confirmAttachmentDebugAction] Using stored recipient ID:', receiverUserId);
+    }
+    
+    if (!receiverUserId) {
+      console.error('[ChatPage.confirmAttachmentDebugAction] Cannot determine receiver user ID. Active chat details:');
+      console.error('  Active chat:', this.activeChat);
+      console.error('  Is chat open?', this.isChatOpen);
+      console.error('  Chat keys:', this.activeChat ? Object.keys(this.activeChat) : 'No activeChat');
+      alert('Error: Cannot determine recipient. Please ensure a chat is properly opened. Check console for details.');
+      return;
+    }
+
+    const currentUserId = this.auth3.getCurrentUser()?.uid || this.userID;
+    
+    if (!currentUserId) {
+      console.error('[ChatPage] Cannot determine current user ID');
+      alert('Error: Cannot determine current user');
       return;
     }
 
@@ -477,22 +503,19 @@ export class ChatPagePage implements OnInit, OnDestroy {
       this.attachmentCopyProgress = 0;
       this.attachmentCopyStatusText = 'Initializing...';
 
-      const currentUserId = this.auth3.getCurrentUser()?.uid || this.userID;
-      
-      if (!currentUserId) {
-        throw new Error('Cannot determine current user ID');
-      }
+      console.log('[ChatPage] ====== SESSION SHARE INITIATED ======');
+      console.log('[ChatPage] Sender (current user):', currentUserId);
+      console.log('[ChatPage] Receiver (chat recipient):', receiverUserId);
+      console.log('[ChatPage] Original session ID:', attachment.id);
 
-      console.log('[ChatPage] Starting session copy. Current user:', currentUserId);
       this.updateCopyProgress(5, 'Loading session data...');
 
       // Step 1: Debug print original data
       console.log('[ChatPage] Original attachment:');
       await this.debugPrintAttachmentData(attachment);
 
-      // Step 2: Create NEW session with unique ID (copy, not replacement)
+      // Step 2: Create NEW session with unique ID for receiver (copy, not replacement)
       const newSessionId = `s-${Date.now()}`; // Generate NEW unique session ID
-      console.log('[ChatPage] Original session ID:', attachment.id);
       console.log('[ChatPage] New copied session ID:', newSessionId);
       
       const newSession: any = {
@@ -501,13 +524,13 @@ export class ChatPagePage implements OnInit, OnDestroy {
         imageKeys: [], // Will be populated with new image filenames
         created: new Date().toISOString(), // New creation timestamp
         totalBoundingBoxes: attachment.totalBoundingBoxes || 0,
-        userId: currentUserId, // Current user owns the copy
+        userId: receiverUserId, // RECEIVER OWNS the copy
         sessionId: newSessionId
       };
 
       this.updateCopyProgress(15, 'Fetching images from S3...');
 
-      // Step 3: Fetch and transform images
+      // Step 3: Fetch original images and transform for receiver
       const transformedImages: any[] = [];
       const sessionImageKeys = attachment.imageKeys || [];
       const totalImages = sessionImageKeys.length;
@@ -522,7 +545,7 @@ export class ChatPagePage implements OnInit, OnDestroy {
         }
 
         this.updateCopyProgress(
-          15 + ((i) / totalImages) * 40,
+          15 + ((i) / totalImages) * 30,
           `Fetching image ${i + 1}/${totalImages} from S3...`
         );
 
@@ -550,46 +573,110 @@ export class ChatPagePage implements OnInit, OnDestroy {
           }
         }
 
-        // Transform filename to use new userId
-        const newFilename = this.transformImageFilenameUserId(imageKey, currentUserId);
+        // Transform filename to use receiver's userId
+        const newFilename = this.transformImageFilenameUserId(imageKey, receiverUserId);
+        const newWithBoxesFilename = (originalImage.filename || imageKey).includes('withBoxes') 
+          ? this.transformImageFilenameUserId(
+              (this.imageStorage as any).buildWithBoxesFilename(imageKey),
+              receiverUserId
+            )
+          : this.transformImageFilenameUserId(
+              (this.imageStorage as any).buildWithBoxesFilename(imageKey),
+              receiverUserId
+            );
+
+        console.log('[ChatPage] Transforming image:');
+        console.log(`  Original key: ${imageKey}`);
+        console.log(`  New key (original): ${newFilename}`);
+        console.log(`  New key (withBoxes): ${newWithBoxesFilename}`);
+        console.log(`  Old userId in key: ${attachment.userId}`);
+        console.log(`  New userId in key: ${receiverUserId}`);
 
         const transformedImage = {
           ...originalImage,
           original: originalDataUrl,
           withBoxes: withBoxesDataUrl,
           filename: newFilename,
-          userId: currentUserId,
-          sessionId: newSession.id
+          userId: receiverUserId,
+          sessionId: newSession.id,
+          originalKey: imageKey, // Store original key for logging
+          // Transform S3 keys to use new userId
+          originalS3Key: originalImage.originalS3Key 
+            ? this.transformImageFilenameUserId(originalImage.originalS3Key, receiverUserId)
+            : undefined,
+          withBoxesS3Key: originalImage.withBoxesS3Key 
+            ? this.transformImageFilenameUserId(originalImage.withBoxesS3Key, receiverUserId)
+            : undefined
         };
 
         transformedImages.push(transformedImage);
-        console.log('[ChatPage] Transformed image:', newFilename);
       }
 
       // Update session imageKeys with new filenames
       newSession.imageKeys = transformedImages.map(img => img.filename);
 
-      this.updateCopyProgress(60, 'Storing images locally...');
+      this.updateCopyProgress(50, 'Uploading images to S3 with new user ID...');
 
-      // Step 4: Store transformed images using ImageStorageService
+      // Step 4: Upload transformed images to S3 with new keys
+      const s3UploadResults: any[] = [];
+      for (let i = 0; i < transformedImages.length; i++) {
+        const image = transformedImages[i];
+        
+        this.updateCopyProgress(
+          50 + ((i) / transformedImages.length) * 20,
+          `Uploading image ${i + 1}/${transformedImages.length} to S3...`
+        );
+
+        try {
+          // Upload original image to S3 with new key
+          if (image.original && image.originalS3Key) {
+            const uploadResult = await (this.imageStorage as any).uploadSessionImageOriginal(
+              image.original,
+              newSession.id,
+              image.filename
+            );
+            console.log('[ChatPage] Uploaded original to S3:', uploadResult?.s3Key);
+            image.originalS3Url = uploadResult?.url;
+          }
+
+          // Upload withBoxes image to S3 with new key
+          if (image.withBoxes && image.withBoxesS3Key) {
+            const uploadResult = await (this.imageStorage as any).uploadSessionImageWithBoxes(
+              image.withBoxes,
+              newSession.id,
+              image.filename
+            );
+            console.log('[ChatPage] Uploaded withBoxes to S3:', uploadResult?.s3Key);
+            image.withBoxesS3Url = uploadResult?.url;
+          }
+
+          s3UploadResults.push(image);
+        } catch (e) {
+          console.warn('[ChatPage] S3 upload warning for image:', image.filename, e);
+        }
+      }
+
+      this.updateCopyProgress(72, 'Storing images locally...');
+
+      // Step 5: Store transformed images using ImageStorageService
       for (let i = 0; i < transformedImages.length; i++) {
         const image = transformedImages[i];
         await (this.imageStorage as any).addImage(image, newSession.id);
         
         this.updateCopyProgress(
-          60 + ((i + 1) / transformedImages.length) * 20,
+          72 + ((i + 1) / transformedImages.length) * 12,
           `Storing image ${i + 1}/${transformedImages.length}...`
         );
       }
 
-      this.updateCopyProgress(85, 'Saving session...');
+      this.updateCopyProgress(87, 'Saving session...');
 
-      // Step 5: Save session to user
-      await (this.imageStorage as any).saveSessionToUser(currentUserId, newSession);
+      // Step 6: Save session to receiver's user record
+      await (this.imageStorage as any).saveSessionToUser(receiverUserId, newSession);
 
-      this.updateCopyProgress(92, 'Storing to Firestore...');
+      this.updateCopyProgress(94, 'Storing to Firestore...');
 
-      // Step 6: Persist to Firestore
+      // Step 7: Persist session with images to Firestore
       try {
         await (this.imageStorage as any).saveSessionWithImagesToFirestore(newSession.id);
       } catch (e) {
@@ -598,45 +685,195 @@ export class ChatPagePage implements OnInit, OnDestroy {
 
       this.updateCopyProgress(100, 'Complete!');
 
-      console.log('[ChatPage] ====== SESSION COPY COMPLETED ======');
-      console.log('[ChatPage] ORIGINAL SESSION (unchanged):');
+      console.log('[ChatPage] ====== SESSION SHARE COMPLETED ======');
+      console.log('[ChatPage] ORIGINAL SESSION (sender):');
       console.log(`  - ID: ${attachment.id}`);
-      console.log(`  - User: ${attachment.userId}`);
+      console.log(`  - Owner (sender): ${attachment.userId} (${currentUserId})`);
       console.log(`  - Name: ${attachment.name}`);
       console.log(`  - Images: ${attachment.imageKeys?.length || 0}`);
       
-      console.log('[ChatPage] NEW COPIED SESSION (current user):');
+      console.log('[ChatPage] NEW SHARED SESSION (receiver):');
       console.log(`  - ID: ${newSession.id}`);
-      console.log(`  - User: ${currentUserId}`);
+      console.log(`  - Owner (receiver): ${receiverUserId}`);
       console.log(`  - Name: ${newSession.name}`);
       console.log(`  - Images: ${transformedImages.length}`);
+      
+      console.log('[ChatPage] User ID Transformation:');
+      console.log(`  - From: ${attachment.userId}`);
+      console.log(`  - To: ${receiverUserId}`);
+      
       console.log('[ChatPage] Transformed image details:');
       transformedImages.forEach(img => {
-        console.log(`  - ${img.filename}`);
-        console.log(`    Original S3: ${img.originalS3Url}`);
-        console.log(`    WithBoxes S3: ${img.withBoxesS3Url}`);
+        console.log(`  - Original filename: ${img.originalKey || 'unknown'}`);
+        console.log(`    New filename: ${img.filename}`);
+        console.log(`    New userId: ${img.userId}`);
+        console.log(`    Original S3 key: ${img.originalS3Key}`);
+        console.log(`    WithBoxes S3 key: ${img.withBoxesS3Key}`);
+        console.log(`    Original S3 URL: ${img.originalS3Url || 'N/A'}`);
+        console.log(`    WithBoxes S3 URL: ${img.withBoxesS3Url || 'N/A'}`);
       });
-      console.log('[ChatPage] ====== END SESSION COPY ======');
+
+      // Verify stored and posted data
+      console.log('[ChatPage] ====== STORAGE & POST VERIFICATION ======');
+      
+      console.log('[ChatPage] SESSION OBJECT - Stored & Posted:');
+      console.log(`  - Session ID: ${newSession.id}`);
+      console.log(`  - Session Name: ${newSession.name}`);
+      console.log(`  - Session Owner (receiver userId): ${newSession.userId}`);
+      console.log(`  - Session Created: ${newSession.created}`);
+      console.log(`  - Total Bounding Boxes: ${newSession.totalBoundingBoxes}`);
+      console.log(`  - Image Keys Count: ${newSession.imageKeys?.length || 0}`);
+      console.log(`  - Image Keys:`);
+      newSession.imageKeys?.forEach((key: string, idx: number) => {
+        console.log(`    [${idx + 1}] ${key}`);
+      });
+
+      console.log('[ChatPage] SESSION IMAGE OBJECTS - Stored & Posted:');
+      transformedImages.forEach((img: any, imgIdx: number) => {
+        console.log(`  [Image ${imgIdx + 1}] ${img.filename}`);
+        console.log(`    - User ID: ${img.userId} (Receiver)`);
+        console.log(`    - Session ID: ${img.sessionId}`);
+        console.log(`    - Timestamp: ${img.timestamp}`);
+        console.log(`    - Original S3 Key (posted): ${img.originalS3Key || 'Not set'}`);
+        console.log(`    - WithBoxes S3 Key (posted): ${img.withBoxesS3Key || 'Not set'}`);
+        console.log(`    - Prediction: ${img.prediction ? JSON.stringify(img.prediction) : 'None'}`);
+        console.log(`    - Total Bounding Boxes: ${img.boxes?.length || 0}`);
+      });
+
+      console.log('[ChatPage] S3 IMAGES - Upload Verification:');
+      transformedImages.forEach((img: any, imgIdx: number) => {
+        console.log(`  [Image ${imgIdx + 1}] ${img.filename}`);
+        console.log(`    - Original Image:`);
+        console.log(`      S3 Key: ${img.originalS3Key || 'Not uploaded'}`);
+        console.log(`      S3 URL: ${img.originalS3Url || 'Not available'}`);
+        console.log(`      Data URL present: ${img.original ? 'Yes' : 'No'}`);
+        console.log(`    - WithBoxes Image:`);
+        console.log(`      S3 Key: ${img.withBoxesS3Key || 'Not uploaded'}`);
+        console.log(`      S3 URL: ${img.withBoxesS3Url || 'Not available'}`);
+        console.log(`      Data URL present: ${img.withBoxes ? 'Yes' : 'No'}`);
+      });
+
+      console.log('[ChatPage] STORAGE SUMMARY:');
+      console.log(`  - Session object posted to receiver's Firestore: ${receiverUserId}`);
+      console.log(`  - Total images posted: ${transformedImages.length}`);
+      console.log(`  - S3 original images uploaded: ${transformedImages.filter(img => img.originalS3Url).length}`);
+      console.log(`  - S3 withBoxes images uploaded: ${transformedImages.filter(img => img.withBoxesS3Url).length}`);
+      console.log(`  - Firestore session collection updated: Yes (saveSessionWithImagesToFirestore)`);
+      console.log(`  - Local storage updated: Yes (ImageStorageService.addImage for each)`);
+
+      console.log('[ChatPage] ====== END SESSION SHARE ======');
 
       setTimeout(() => {
         this.isAttachmentCopyInProgress = false;
-        this.attachmentDebugState = 'inactive'; // Return to inactive state
+        this.attachmentDebugState = 'completed'; // Transition to completed state
         this.attachmentCopyProgress = 0;
-        this.closeAttachmentDebugDialog();
-        alert('Session successfully copied to your account!');
-        
-        // Auto-send success message and close attachment sheet
-        this.messageText = 'File shared successfully';
-        setTimeout(() => {
-          this.sendMessage();
-          this.closeAttachmentSheet();
-        }, 500);
       }, 1000);
     } catch (e) {
-      console.error('[ChatPage] Error during session copy:', e);
+      console.error('[ChatPage] Error during session share:', e);
       this.isAttachmentCopyInProgress = false;
       this.attachmentCopyProgress = 0;
-      alert('Error copying session. See console for details.');
+      alert('Error sharing session. See console for details.');
+    }
+  }
+
+  // Confirm sharing completion: close dialogs and request location permission
+  async confirmSharingComplete(): Promise<void> {
+    try {
+      // Close the debug dialog and attachment sheet
+      this.isAttachmentDebugDialogOpen = false;
+      this.selectedAttachmentForDebug = null;
+      this.attachmentDebugState = 'inactive';
+      this.closeAttachmentSheet();
+
+      // Auto-send success message
+      this.messageText = 'File shared successfully';
+      setTimeout(() => {
+        this.sendMessage();
+      }, 500);
+
+      // Request location permission for location-based features
+      console.log('[ChatPage] Requesting location permission for enhanced features...');
+      await this.requestLocationPermissionForFeatures();
+    } catch (e) {
+      console.error('[ChatPage] Error during sharing completion:', e);
+    }
+  }
+
+  // Request location permission and explain why it's needed
+  private async requestLocationPermissionForFeatures(): Promise<void> {
+    try {
+      // Show education dialog before requesting
+      const confirmed = await new Promise<boolean>(resolve => {
+        const alert = document.createElement('div');
+        alert.innerHTML = `
+          <div class="location-permission-dialog" style="
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: white;
+            padding: 24px;
+            border-radius: 12px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            z-index: 9999;
+            max-width: 300px;
+            text-align: center;
+          ">
+            <h3 style="margin: 0 0 16px 0; font-size: 18px; color: #333;">Enable Location</h3>
+            <p style="margin: 0 0 16px 0; font-size: 14px; color: #666; line-height: 1.5;">
+              Allow location access for optimum use of the application. This enables location-based features to show your current location and provide location services in Chat and other pages.
+            </p>
+            <div style="display: flex; gap: 10px;">
+              <button onclick="window.locationDialogResult = false; this.parentElement.parentElement.remove();" style="
+                flex: 1;
+                padding: 10px;
+                border: 1px solid #ddd;
+                background: #f5f5f5;
+                border-radius: 6px;
+                cursor: pointer;
+              ">Cancel</button>
+              <button onclick="window.locationDialogResult = true; this.parentElement.parentElement.remove();" style="
+                flex: 1;
+                padding: 10px;
+                border: none;
+                background: #FF9800;
+                color: white;
+                border-radius: 6px;
+                cursor: pointer;
+              ">Enable</button>
+            </div>
+          </div>
+        `;
+        document.body.appendChild(alert);
+        
+        const checkInterval = setInterval(() => {
+          if ((window as any).locationDialogResult !== undefined) {
+            clearInterval(checkInterval);
+            resolve((window as any).locationDialogResult);
+            (window as any).locationDialogResult = undefined;
+          }
+        }, 100);
+
+        setTimeout(() => {
+          clearInterval(checkInterval);
+          resolve(false);
+        }, 30000);
+      });
+
+      if (confirmed) {
+        // Request geolocation permission
+        navigator.geolocation.getCurrentPosition(
+          (position) => {
+            console.log('[ChatPage] Location obtained:', position.coords);
+          },
+          (error) => {
+            console.warn('[ChatPage] Location error:', error);
+          },
+          { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
+        );
+      }
+    } catch (e) {
+      console.error('[ChatPage] Error requesting location:', e);
     }
   }
 
@@ -820,7 +1057,7 @@ export class ChatPagePage implements OnInit, OnDestroy {
   // --- Attachment Debug Dialog State ---
   isAttachmentDebugDialogOpen: boolean = false;
   selectedAttachmentForDebug: any = null;
-  attachmentDebugState: 'inactive' | 'active' = 'inactive'; // Track dialog state
+  attachmentDebugState: 'inactive' | 'active' | 'completed' = 'inactive'; // Track dialog state
   
   // --- Attachment Copy Progress State ---
   isAttachmentCopyInProgress: boolean = false;
@@ -1306,6 +1543,9 @@ ngOnInit(): void {
   
   // Start periodic checker for internet and location service recovery
   this.startServiceRecoveryChecker();
+
+  // Setup hardware back button handler
+  this.setupHardwareBackButton();
 }
 
 getCurrentMapBoundsBBox(): { west: number; south: number; east: number; north: number } | null {
@@ -1339,9 +1579,12 @@ private isNativeDevice(): boolean {
     console.log('[ChatPage.download] Platform:', this.isNativeDevice() ? 'NATIVE (Android/iOS)' : 'WEB/BROWSER');
     
     if (!this.map) {
-      console.error('[ChatPage.download] Map not ready');
-      alert('Map is not ready yet. Open the Location tab and try again.');
-      return;
+      console.warn('[ChatPage.download] Map not initialized, attempting to initialize...');
+      await this.initMap();
+      if (!this.map) {
+        console.error('[ChatPage.download] Failed to initialize map');
+        return;
+      }
     }
 
     const minZoom = Math.floor(this.offlineMinZoom);
@@ -3109,7 +3352,8 @@ onMsgBubbleTap(message: Message): void {
       }
 
       if (!this.map) {
-        message.textContent = 'Map is not ready yet. Try again.';
+        console.error('[ChatPage.openMarkerCreationOverlay] Map initialization failed');
+        message.textContent = 'Initializing map. Please try again in a moment.';
         return;
       }
 
@@ -3391,6 +3635,45 @@ onMsgBubbleTap(message: Message): void {
     }
   }
 
+  /**
+   * Extract the recipient/other user ID from a chat object.
+   * Tries multiple property names and logs the process for debugging.
+   */
+  private extractReceiverUserIdFromChat(chat: any): string | null {
+    if (!chat || typeof chat !== 'object') {
+      console.warn('[ChatPage.extractReceiverUserIdFromChat] Invalid chat object:', chat);
+      return null;
+    }
+
+    console.log('[ChatPage.extractReceiverUserIdFromChat] Attempting to extract receiver ID from chat:', chat);
+
+    // Try different property names in order
+    const propertyNames = ['userId', 'otherUserId', 'uid', 'userID', 'receiverId', 'recipientId'];
+    for (const prop of propertyNames) {
+      if (chat[prop] && typeof chat[prop] === 'string' && chat[prop].trim()) {
+        console.log(`[ChatPage.extractReceiverUserIdFromChat] Found receiver ID in '.${prop}': ${chat[prop]}`);
+        return chat[prop];
+      }
+    }
+
+    // If not found in top-level properties, try nested objects
+    if (chat.chatUser && chat.chatUser.id) {
+      console.log('[ChatPage.extractReceiverUserIdFromChat] Found receiver ID in .chatUser.id:', chat.chatUser.id);
+      return chat.chatUser.id;
+    }
+
+    if (chat.otherUser && chat.otherUser.id) {
+      console.log('[ChatPage.extractReceiverUserIdFromChat] Found receiver ID in .otherUser.id:', chat.otherUser.id);
+      return chat.otherUser.id;
+    }
+
+    // Last resort: log all properties to help debugging
+    console.warn('[ChatPage.extractReceiverUserIdFromChat] Could not extract receiver ID. Chat object properties:');
+    console.warn('  Full chat object:', JSON.stringify(chat, null, 2));
+    console.warn('  Top-level keys:', Object.keys(chat));
+    
+    return null;
+  }
 
   closeSidebar() {
     this.isSidebarOpen = false;
@@ -3408,6 +3691,23 @@ onMsgBubbleTap(message: Message): void {
     const currentUid = await this.resolveCurrentUid();
     // For chat-list, chatId is always present
     const chatId = chat?.chatId;
+    
+    // Extract recipient user ID using the helper function
+    const receiverUserId = this.extractReceiverUserIdFromChat(chat);
+    
+    // Log user ID information when chat is opened
+    console.log('[ChatPage.openChat] Chat item selected:', {
+      currentUserId: currentUid,
+      chatId: chatId,
+      receiverUserId: receiverUserId,
+      chatObject: chat
+    });
+    
+    // Store receiver ID on activeChat for later use in confirmAttachmentDebugAction
+    if (this.activeChat && receiverUserId) {
+      this.activeChat._recipientUserId = receiverUserId;
+    }
+    
     if (!currentUid || !chatId) {
       this.currentChatId = null;
       return;
@@ -3416,6 +3716,10 @@ onMsgBubbleTap(message: Message): void {
       const hydrated = await this.hydrateChatsForDisplay([chat], currentUid);
       if (hydrated.length > 0) {
         this.activeChat = hydrated[0];
+        // Preserve recipient ID after hydration
+        if (this.activeChat && receiverUserId) {
+          this.activeChat._recipientUserId = receiverUserId;
+        }
       }
       await this.subscribeToChatMessages(chatId, currentUid);
       this.subscribeToTypingState(chatId, currentUid);
@@ -3685,7 +3989,12 @@ onMsgBubbleTap(message: Message): void {
     // Custom icon for markers placed from map tap overlay
     const placeMarkerFromInput = () => {
       if (!this.map) {
-        message.textContent = 'Map is not ready yet. Try again.';
+        console.warn('[ChatPage.openMarkerSelectionOverlay] Map not ready, attempting to initialize...');
+        this.initMap().then(() => {
+          if (!this.map) {
+            message.textContent = 'Map initialization in progress. Please try again in a moment.';
+          }
+        });
         return;
       }
 
@@ -4489,6 +4798,90 @@ private readonly userLocationIcon = L.icon({
     this.hideMapBootstrapStatus();
   }
 
+  /**
+   * Setup hardware back button handler with priority handling for different UI states.
+   * The handler follows a hierarchical approach to handle the deepest/most specific UI state first.
+   */
+  private setupHardwareBackButton(): void {
+    this.backButtonSub = this.platform.backButton.subscribeWithPriority(9999, () => {
+      this.handleHardwareBackButton();
+    });
+  }
+
+  /**
+   * Handle hardware back button press with hierarchical UI state management.
+   * Priority order (from highest to lowest):
+   * 1. Close attachment debug dialog if open
+   * 2. Go back on attachment detail view if shown
+   * 3. Toggle/close attachment sheet if active
+   * 4. Close chat conversation if open
+   * 5. Handle map view states (radius overlay, map sheet)
+   * 6. Close search if active
+   * 7. Close sidebar if open
+   * 8. Navigate to home if in chat list
+   */
+  private handleHardwareBackButton(): void {
+    // Priority 1: Close attachment debug dialog
+    if (this.isAttachmentDebugDialogOpen) {
+      this.closeAttachmentDebugDialog();
+      return;
+    }
+
+    // Priority 2: Go back from attachment detail view
+    if (this.attachmentSheetViewMode === 'detail' && this.selectedAttachment) {
+      this.backToAttachmentGrid();
+      return;
+    }
+
+    // Priority 3: Toggle attachment sheet if active
+    if (this.isAttachmentSheetActive) {
+      this.toggleAttachmentSheet();
+      return;
+    }
+
+    // Priority 4: Close chat conversation
+    if (this.isChatOpen) {
+      this.closeChat();
+      return;
+    }
+
+    // Priority 5: Handle map view states
+    if (this.activeTab === 'location') {
+      // Priority 5a: Close radius selection overlay
+      if (this.isRadiusSelectionOverlayOpen) {
+        this.closeRadiusSelectionOverlay();
+        return;
+      }
+
+      // Priority 5b: Toggle map bottom sheet
+      if (this.isMapBottomSheetActive) {
+        this.toggleMapBottomSheet();
+        return;
+      }
+
+      // Priority 5c: Exit map view and return to people tab
+      this.setNav('people');
+      return;
+    }
+
+    // Priority 6: Close search
+    if (this.isSearching) {
+      this.closeSearch();
+      return;
+    }
+
+    // Priority 7: Close sidebar
+    if (this.isSidebarOpen) {
+      this.closeSidebar();
+      return;
+    }
+
+    // Priority 8: Navigate to home page from chat list
+    if (this.activeTab === 'person' || this.activeTab === 'people' || this.activeTab === 'profile') {
+      this.goToHomePage();
+    }
+  }
+
   public editProfile() {
     console.log('[ChatPage] Edit Profile triggered');
   }
@@ -4530,6 +4923,9 @@ private readonly userLocationIcon = L.icon({
     this.stopMapRefreshTimer();
     try { this.messagesSub?.unsubscribe(); } catch {}
     this.messagesSub = undefined;
+    // Clean up hardware back button subscription
+    try { this.backButtonSub?.unsubscribe(); } catch {}
+    this.backButtonSub = undefined;
     // optional: set offline on destroy if desired
   }
 

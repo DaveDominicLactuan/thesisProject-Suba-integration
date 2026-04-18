@@ -902,6 +902,8 @@ ion-menu ion-item:hover {
 	opacity: 1;
 	line-height: 1.2;
 }
+
+
 .menu-divider { border: none; border-top: 1px solid #ddd; margin: 16px 0; }
 .menu-item { display: flex; align-items: center; padding: 10px; cursor: pointer; transition: background-color 0.3s; }
 .menu-item:hover { background-color: #f0f0f0; }
@@ -2123,7 +2125,7 @@ $attachment-sheet-transition: transform 0.28s cubic-bezier(0.4, 0, 0.2, 1);
 	display: grid;
 	grid-template-columns: repeat(2, 1fr);
 	gap: 12px;
-	padding: 8px 0;
+	padding: 8px 5px 55px 5px;
 }
 
 .attachment-item {
