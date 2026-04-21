@@ -471,21 +471,88 @@ export class ChatPagePage implements OnInit, OnDestroy {
       return;
     }
 
-    // Get receiver's user ID from active chat using helper function
-    let receiverUserId = this.extractReceiverUserIdFromChat(this.activeChat);
+    // Get receiver's user ID from active chat using multiple fallback strategies
+    let receiverUserId: string | null = null;
+
+    // Strategy 1: Use helper function to extract from activeChat
+    receiverUserId = this.extractReceiverUserIdFromChat(this.activeChat);
+    if (receiverUserId) {
+      console.log('[ChatPage.confirmAttachmentDebugAction] Found receiver ID via extractReceiverUserIdFromChat:', receiverUserId);
+    }
     
-    // Fallback: check if we stored it during openChat
+    // Strategy 2: Check if we stored it during openChat
     if (!receiverUserId && (this.activeChat as any)?._recipientUserId) {
       receiverUserId = (this.activeChat as any)._recipientUserId;
-      console.log('[ChatPage.confirmAttachmentDebugAction] Using stored recipient ID:', receiverUserId);
+      console.log('[ChatPage.confirmAttachmentDebugAction] Found receiver ID via stored _recipientUserId:', receiverUserId);
+    }
+
+    // Strategy 3: Try direct property access on activeChat
+    if (!receiverUserId && this.activeChat) {
+      const directProps = ['userId', 'uid', 'userID', 'recipientId', 'recipientUID', 'otherUserId', 'participantId'];
+      for (const prop of directProps) {
+        if ((this.activeChat as any)[prop]) {
+          receiverUserId = (this.activeChat as any)[prop];
+          console.log(`[ChatPage.confirmAttachmentDebugAction] Found receiver ID via direct property .${prop}:`, receiverUserId);
+          break;
+        }
+      }
+    }
+
+    // Strategy 4: Look up chat from the chats array if we have a chatId
+    if (!receiverUserId && this.currentChatId) {
+      const foundChat = this.chats.find((c: any) => c.chatId === this.currentChatId);
+      if (foundChat) {
+        receiverUserId = this.extractReceiverUserIdFromChat(foundChat);
+        if (receiverUserId) {
+          console.log('[ChatPage.confirmAttachmentDebugAction] Found receiver ID from chats array:', receiverUserId);
+        }
+      }
+    }
+
+    // Strategy 5: If activeChat has participants array, extract the "other" user ID
+    if (!receiverUserId && this.activeChat?.participants && Array.isArray(this.activeChat.participants)) {
+      const currentUserId = this.auth3.getCurrentUser()?.uid || this.userID;
+      console.log('[ChatPage.confirmAttachmentDebugAction] Participants array:', this.activeChat.participants);
+      console.log('[ChatPage.confirmAttachmentDebugAction] Current user ID:', currentUserId);
+      
+      // Handle both string IDs and objects with uid/userId properties
+      const otherParticipant = this.activeChat.participants.find((p: any) => {
+        // If participant is a string (user ID), compare directly
+        if (typeof p === 'string') {
+          return p !== currentUserId;
+        }
+        // If participant is an object, check uid or userId properties
+        return (p.uid !== currentUserId && p.userId !== currentUserId);
+      });
+      
+      if (otherParticipant) {
+        // Extract the ID appropriately based on type
+        if (typeof otherParticipant === 'string') {
+          receiverUserId = otherParticipant;
+        } else {
+          receiverUserId = otherParticipant.uid || otherParticipant.userId;
+        }
+        console.log('[ChatPage.confirmAttachmentDebugAction] Found receiver ID from participants array:', receiverUserId);
+      }
+    }
+
+    // Strategy 6: Try otherParticipantId if it's different from current user
+    if (!receiverUserId && this.activeChat?.otherParticipantId) {
+      const currentUserId = this.auth3.getCurrentUser()?.uid || this.userID;
+      if (this.activeChat.otherParticipantId !== currentUserId) {
+        receiverUserId = this.activeChat.otherParticipantId;
+        console.log('[ChatPage.confirmAttachmentDebugAction] Found receiver ID via otherParticipantId:', receiverUserId);
+      }
     }
     
     if (!receiverUserId) {
-      console.error('[ChatPage.confirmAttachmentDebugAction] Cannot determine receiver user ID. Active chat details:');
+      console.error('[ChatPage.confirmAttachmentDebugAction] Cannot determine receiver user ID after all strategies. Chat details:');
       console.error('  Active chat:', this.activeChat);
       console.error('  Is chat open?', this.isChatOpen);
+      console.error('  Current chat ID:', this.currentChatId);
       console.error('  Chat keys:', this.activeChat ? Object.keys(this.activeChat) : 'No activeChat');
-      alert('Error: Cannot determine recipient. Please ensure a chat is properly opened. Check console for details.');
+      console.error('  Chats array length:', this.chats?.length || 0);
+      alert('Error: Cannot determine recipient. Please ensure a chat is properly opened and try again. Check console for debugging details.');
       return;
     }
 
@@ -575,15 +642,18 @@ export class ChatPagePage implements OnInit, OnDestroy {
 
         // Transform filename to use receiver's userId
         const newFilename = this.transformImageFilenameUserId(imageKey, receiverUserId);
-        const newWithBoxesFilename = (originalImage.filename || imageKey).includes('withBoxes') 
-          ? this.transformImageFilenameUserId(
-              (this.imageStorage as any).buildWithBoxesFilename(imageKey),
-              receiverUserId
-            )
-          : this.transformImageFilenameUserId(
-              (this.imageStorage as any).buildWithBoxesFilename(imageKey),
-              receiverUserId
-            );
+        const newWithBoxesFilename = this.transformImageFilenameUserId(
+          (this.imageStorage as any).buildWithBoxesFilename(imageKey),
+          receiverUserId
+        );
+
+        // Transform S3 keys to use receiver's userId
+        const newOriginalS3Key = originalImage.originalS3Key
+          ? this.transformImageFilenameUserId(originalImage.originalS3Key, receiverUserId)
+          : undefined;
+        const newWithBoxesS3Key = originalImage.withBoxesS3Key
+          ? this.transformImageFilenameUserId(originalImage.withBoxesS3Key, receiverUserId)
+          : undefined;
 
         console.log('[ChatPage] Transforming image:');
         console.log(`  Original key: ${imageKey}`);
@@ -591,6 +661,9 @@ export class ChatPagePage implements OnInit, OnDestroy {
         console.log(`  New key (withBoxes): ${newWithBoxesFilename}`);
         console.log(`  Old userId in key: ${attachment.userId}`);
         console.log(`  New userId in key: ${receiverUserId}`);
+        console.log(`  Original S3 Key: ${originalImage.originalS3Key || 'N/A'}`);
+        console.log(`  New Original S3 Key: ${newOriginalS3Key || 'N/A'}`);
+        console.log(`  Original S3 URL: ${originalImage.originalS3Url || 'N/A'}`);
 
         const transformedImage = {
           ...originalImage,
@@ -599,14 +672,17 @@ export class ChatPagePage implements OnInit, OnDestroy {
           filename: newFilename,
           userId: receiverUserId,
           sessionId: newSession.id,
-          originalKey: imageKey, // Store original key for logging
-          // Transform S3 keys to use new userId
-          originalS3Key: originalImage.originalS3Key 
-            ? this.transformImageFilenameUserId(originalImage.originalS3Key, receiverUserId)
-            : undefined,
-          withBoxesS3Key: originalImage.withBoxesS3Key 
-            ? this.transformImageFilenameUserId(originalImage.withBoxesS3Key, receiverUserId)
-            : undefined
+          originalKey: imageKey,
+          // Preserve and transform S3 keys and URLs
+          originalS3Key: newOriginalS3Key || originalImage.originalS3Key,
+          originalS3Url: originalImage.originalS3Url,
+          withBoxesS3Key: newWithBoxesS3Key || originalImage.withBoxesS3Key,
+          withBoxesS3Url: originalImage.withBoxesS3Url,
+          // Preserve storage paths and URLs
+          storagePath: originalImage.storagePath,
+          storageUrl: originalImage.storageUrl,
+          withBoxesStoragePath: originalImage.withBoxesStoragePath,
+          withBoxesStorageUrl: originalImage.withBoxesStorageUrl
         };
 
         transformedImages.push(transformedImage);
@@ -628,26 +704,40 @@ export class ChatPagePage implements OnInit, OnDestroy {
         );
 
         try {
-          // Upload original image to S3 with new key
-          if (image.original && image.originalS3Key) {
-            const uploadResult = await (this.imageStorage as any).uploadSessionImageOriginal(
-              image.original,
-              newSession.id,
-              image.filename
-            );
-            console.log('[ChatPage] Uploaded original to S3:', uploadResult?.s3Key);
-            image.originalS3Url = uploadResult?.url;
+          // Upload original image to S3 with new key (only if original data URL exists)
+          if (image.original) {
+            try {
+              const uploadResult = await (this.imageStorage as any).uploadSessionImageOriginal(
+                image.original,
+                newSession.id,
+                image.filename
+              );
+              if (uploadResult) {
+                console.log('[ChatPage] Uploaded original to S3:', uploadResult?.s3Key);
+                image.originalS3Key = uploadResult?.s3Key;
+                image.originalS3Url = uploadResult?.url;
+              }
+            } catch (e) {
+              console.warn('[ChatPage] Failed to upload original image:', e);
+            }
           }
 
-          // Upload withBoxes image to S3 with new key
-          if (image.withBoxes && image.withBoxesS3Key) {
-            const uploadResult = await (this.imageStorage as any).uploadSessionImageWithBoxes(
-              image.withBoxes,
-              newSession.id,
-              image.filename
-            );
-            console.log('[ChatPage] Uploaded withBoxes to S3:', uploadResult?.s3Key);
-            image.withBoxesS3Url = uploadResult?.url;
+          // Upload withBoxes image to S3 with new key (only if withBoxes data URL exists)
+          if (image.withBoxes) {
+            try {
+              const uploadResult = await (this.imageStorage as any).uploadSessionImageWithBoxes(
+                image.withBoxes,
+                newSession.id,
+                image.filename
+              );
+              if (uploadResult) {
+                console.log('[ChatPage] Uploaded withBoxes to S3:', uploadResult?.s3Key);
+                image.withBoxesS3Key = uploadResult?.s3Key;
+                image.withBoxesS3Url = uploadResult?.url;
+              }
+            } catch (e) {
+              console.warn('[ChatPage] Failed to upload withBoxes image:', e);
+            }
           }
 
           s3UploadResults.push(image);
@@ -672,7 +762,20 @@ export class ChatPagePage implements OnInit, OnDestroy {
       this.updateCopyProgress(87, 'Saving session...');
 
       // Step 6: Save session to receiver's user record
-      await (this.imageStorage as any).saveSessionToUser(receiverUserId, newSession);
+      try {
+        console.log('[ChatPage] Attempting to save session to receiver:', {
+          receiverId: receiverUserId,
+          sessionId: newSession.id,
+          sessionData: newSession
+        });
+        await (this.imageStorage as any).saveSessionToUser(receiverUserId, newSession);
+        console.log('[ChatPage] Session saved successfully to receiver');
+      } catch (e) {
+        console.error('[ChatPage] Failed to save session to receiver. Error:', e);
+        console.error('[ChatPage] Session object was:', newSession);
+        console.error('[ChatPage] Receiver ID was:', receiverUserId);
+        throw e; // Re-throw to trigger catch block below
+      }
 
       this.updateCopyProgress(94, 'Storing to Firestore...');
 
@@ -770,9 +873,25 @@ export class ChatPagePage implements OnInit, OnDestroy {
       }, 1000);
     } catch (e) {
       console.error('[ChatPage] Error during session share:', e);
+      console.error('[ChatPage] Session share failed with details:');
+      console.error('  - Error name:', (e as any)?.name);
+      console.error('  - Error code:', (e as any)?.code);
+      console.error('  - Error message:', (e as any)?.message);
+      console.error('  - Full error:', e);
       this.isAttachmentCopyInProgress = false;
       this.attachmentCopyProgress = 0;
-      alert('Error sharing session. See console for details.');
+      
+      // Provide user-friendly error messages based on error type
+      let userMessage = 'Error sharing session. Check console for details.';
+      if ((e as any)?.code === 'permission-denied') {
+        userMessage = 'Permission denied: Unable to save session to recipient. Check Firestore security rules.';
+      } else if ((e as any)?.message?.includes('Cannot determine receiver')) {
+        userMessage = 'Receiver ID determination failed. Ensure you have a valid chat open.';
+      } else if ((e as any)?.message?.includes('Cannot determine current')) {
+        userMessage = 'Current user identification failed. Please re-login and try again.';
+      }
+      
+      alert(userMessage);
     }
   }
 

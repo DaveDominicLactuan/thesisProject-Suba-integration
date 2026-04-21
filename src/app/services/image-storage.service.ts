@@ -18,6 +18,7 @@ export interface StoredImage {
   timestamp: string;
   filename: string;
   prediction?: { type: string; shape: string; severity: string };
+  rawPrediction?: { type?: string; shape?: string; severity?: string };
   // New optional helpers for status/testing
   hasPrediction?: boolean;
   statusMessage?: string;
@@ -197,20 +198,39 @@ export class ImageStorageService {
         ContentType: 'image/jpeg'
       };
 
-      console.log('[ImageStorageService] Attempting to upload original image to S3:', s3Filename);
+      console.log('[ImageStorageService] 📤 Attempting to upload original image to S3:', {
+        s3Filename,
+        dataUrlLength: dataUrl?.length || 0,
+        uint8ArrayLength: uint8Array.length,
+        bucket: this.bucketName,
+        region: this.region
+      });
       const command = new PutObjectCommand(params);
-      await this.s3Client.send(command);
+      const result = await this.s3Client.send(command);
 
       const finalUrl = `https://${this.bucketName}.s3.${this.region}.amazonaws.com/${s3Filename}`;
 
-      console.log('✅ Original image uploaded to S3 with key:', s3Filename);
-      console.log('🔗 Original image URL:', finalUrl);
+      console.log('✅ Original image uploaded to S3 with key:', {
+        s3Key: s3Filename,
+        url: finalUrl,
+        s3Response: result.$metadata
+      });
 
       return { url: finalUrl, s3Key: s3Filename };
     } catch (error: any) {
-      console.error('❌ Failed to upload original image to S3:', error?.message || error);
-      console.warn('[ImageStorageService] S3 upload failed (CORS or network issue). Image will be stored locally.');
-      console.warn('[ImageStorageService] To fix S3 uploads, ensure CORS is configured on the S3 bucket for origin: http://localhost:8100');
+      console.error('❌ Failed to upload original image to S3:', {
+        errorMessage: error?.message || String(error),
+        errorCode: error?.Code || 'UNKNOWN',
+        errorName: error?.name || 'UnknownError',
+        fullError: error
+      });
+      console.warn('[ImageStorageService] S3 upload failed. Possible causes:');
+      console.warn('  1. CORS not configured on S3 bucket');
+      console.warn('  2. AWS credentials expired or invalid');
+      console.warn('  3. Identity pool ID incorrect');
+      console.warn('  4. S3 bucket name incorrect or not accessible');
+      console.warn('  5. Network connectivity issue');
+      console.warn('[ImageStorageService] To fix: Check S3 bucket CORS policy and AWS credentials');
       // Return null to indicate S3 upload failure - app should handle local storage fallback
       return null;
     }
@@ -238,20 +258,39 @@ export class ImageStorageService {
         ContentType: 'image/jpeg'
       };
 
-      console.log('[ImageStorageService] Attempting to upload withBoxes image to S3:', s3Filename);
+      console.log('[ImageStorageService] 📤 Attempting to upload withBoxes image to S3:', {
+        s3Filename,
+        dataUrlLength: dataUrl?.length || 0,
+        uint8ArrayLength: uint8Array.length,
+        bucket: this.bucketName,
+        region: this.region
+      });
       const command = new PutObjectCommand(params);
-      await this.s3Client.send(command);
+      const result = await this.s3Client.send(command);
 
       const finalUrl = `https://${this.bucketName}.s3.${this.region}.amazonaws.com/${s3Filename}`;
 
-      console.log('✅ WithBoxes image uploaded to S3 with key:', s3Filename);
-      console.log('🔗 WithBoxes image URL:', finalUrl);
+      console.log('✅ WithBoxes image uploaded to S3 with key:', {
+        s3Key: s3Filename,
+        url: finalUrl,
+        s3Response: result.$metadata
+      });
 
       return { url: finalUrl, s3Key: s3Filename };
     } catch (error: any) {
-      console.error('❌ Failed to upload withBoxes image to S3:', error?.message || error);
-      console.warn('[ImageStorageService] S3 upload failed (CORS or network issue). Image will be stored locally.');
-      console.warn('[ImageStorageService] To fix S3 uploads, ensure CORS is configured on the S3 bucket for origin: http://localhost:8100');
+      console.error('❌ Failed to upload withBoxes image to S3:', {
+        errorMessage: error?.message || String(error),
+        errorCode: error?.Code || 'UNKNOWN',
+        errorName: error?.name || 'UnknownError',
+        fullError: error
+      });
+      console.warn('[ImageStorageService] S3 upload failed. Possible causes:');
+      console.warn('  1. CORS not configured on S3 bucket');
+      console.warn('  2. AWS credentials expired or invalid');
+      console.warn('  3. Identity pool ID incorrect');
+      console.warn('  4. S3 bucket name incorrect or not accessible');
+      console.warn('  5. Network connectivity issue');
+      console.warn('[ImageStorageService] To fix: Check S3 bucket CORS policy and AWS credentials');
       // Return null to indicate S3 upload failure - app should handle local storage fallback
       return null;
     }
@@ -842,6 +881,21 @@ export class ImageStorageService {
         imageCount: imagesForSession.length,
         userId: currentUid
       });
+      
+      // CRITICAL: Log image details before Firestore save to ensure prediction/boxes are present
+      console.log('[ImageStorageService] 📊 Images being saved to Firestore:', imagesForSession.map((img, idx) => ({
+        index: idx,
+        filename: img.filename,
+        hasPrediction: img.hasPrediction,
+        prediction: img.prediction,
+        boxesCount: img.boxes?.length || 0,
+        boxes: img.boxes,
+        statusMessage: img.statusMessage,
+        detectionMessage: img.detectionMessage,
+        originalS3Key: img.storagePath || '(empty)',
+        withBoxesS3Key: img.withBoxesStoragePath || '(empty)'
+      })));
+      
       const sessionsCollection = collection(this.firestore, this.FIRESTORE_SESSIONS_COLLECTION);
       const imagesCollection = collection(this.firestore, this.FIRESTORE_IMAGES_COLLECTION);
 
@@ -871,7 +925,8 @@ export class ImageStorageService {
         // const safeOriginal = await this.clampDataUrlToBytes(image.original, this.FIRESTORE_DOC_MAX_BYTES);
         // const safeWithBoxes = await this.clampDataUrlToBytes(image.withBoxes, this.FIRESTORE_DOC_MAX_BYTES);
         const imageRef = doc(imagesCollection, image.filename);
-        batch.set(imageRef, {
+        
+        const firestoreData = {
           timestamp: image.timestamp,
           filename: image.filename,
           userId: currentUid,
@@ -896,7 +951,17 @@ export class ImageStorageService {
           // Backward compatibility
           withBoxesStoragePath: image.withBoxesStoragePath || null,
           withBoxesStorageUrl: image.withBoxesStorageUrl || null
+        };
+        
+        console.log(`[ImageStorageService] 📝 Writing to Firestore for ${image.filename}:`, {
+          prediction: firestoreData.prediction,
+          hasPrediction: firestoreData.hasPrediction,
+          boxes: firestoreData.boxes,
+          originalS3Key: firestoreData.originalS3Key,
+          withBoxesS3Key: firestoreData.withBoxesS3Key
         });
+        
+        batch.set(imageRef, firestoreData);
       }
 
       await batch.commit();
@@ -937,20 +1002,37 @@ export class ImageStorageService {
   /** Save an ImageSession under a user document in Firestore */
   async saveSessionToUser(uid: string, session: ImageSession): Promise<void> {
     try {
+      // Validate required fields
+      if (!uid || !session || !session.id) {
+        throw new Error(`Invalid parameters: uid=${uid}, session.id=${session?.id}`);
+      }
+
       const sessionsCollection = collection(this.firestore, 'users', uid, 'sessions');
       const docRef = doc(sessionsCollection, session.id);
       const firestoreData: any = {
         id: session.id,
-        name: session.name,
+        name: session.name || 'Untitled Session',
         imageKeys: session.imageKeys || [],
-        created: session.created,
+        created: session.created || new Date().toISOString(),
         totalBoundingBoxes: session.totalBoundingBoxes || 0,
         userId: session.userId || uid,
       };
+
+      console.log('[ImageStorageService] Saving session to Firestore:', {
+        uid,
+        sessionId: session.id,
+        data: firestoreData
+      });
+
       await setDoc(docRef, firestoreData);
       console.log(`✅ Session saved to user Firestore: ${uid}/${session.id}`);
-    } catch (error) {
-      console.error('[ImageStorageService] Error saving session to user Firestore:', error);
+    } catch (error: any) {
+      console.error('[ImageStorageService] Error saving session to user Firestore:');
+      console.error('  - Error code:', error?.code);
+      console.error('  - Error message:', error?.message);
+      console.error('  - Full error:', error);
+      console.error('  - UID:', uid);
+      console.error('  - Session:', session);
       throw error;
     }
   }
@@ -1551,20 +1633,28 @@ export class ImageStorageService {
    * @returns Transformed filename with new userId
    */
   transformImageFilenameUserId(originalKey: string, newUserId: string): string {
-    // Format: userID:abc123sessionId:xyz789img1crack1041120261109original.jpg
-    // Extract parts and rebuild with new userId
+    if (!originalKey || !newUserId) {
+      return originalKey;
+    }
+
+    // Pattern 1: Has userID: prefix - replace the userId value
     const userIdMatch = originalKey.match(/userID:([^:]+)/);
-    const sessionIdMatch = originalKey.match(/sessionId:([^i]+)/);
-    
-    if (!sessionIdMatch) {
-      // If format is not recognized, just add userId prefix
+    if (userIdMatch) {
+      const oldUserId = userIdMatch[1];
+      console.log('[ImageStorageService] Filename transform: ' + oldUserId + ' -> ' + newUserId);
+      return originalKey.replace(/userID:[^:]+/, `userID:${newUserId}`);
+    }
+
+    // Pattern 2: Has sessionId: prefix but no userID - add userID prefix
+    const sessionIdMatch = originalKey.match(/sessionId:/);
+    if (sessionIdMatch) {
+      console.log('[ImageStorageService] Adding userID prefix to:', originalKey);
       return `userID:${newUserId}${originalKey}`;
     }
 
-    const sessionId = sessionIdMatch[1];
-    const afterSessionId = originalKey.substring(originalKey.indexOf(sessionId) + sessionId.length);
-    
-    return `userID:${newUserId}sessionId:${sessionId}${afterSessionId}`;
+    // Pattern 3: No recognized pattern - just add userID prefix
+    console.warn('[ImageStorageService] Filename pattern not recognized, adding userID prefix:', originalKey);
+    return `userID:${newUserId}${originalKey}`;
   }
 
   /**
@@ -1650,6 +1740,18 @@ export class ImageStorageService {
 
         // Transform filename to use new userId
         const newFilename = this.transformImageFilenameUserId(imageKey, newUserId);
+        const newWithBoxesFilename = this.transformImageFilenameUserId(
+          this.buildWithBoxesFilename(imageKey),
+          newUserId
+        );
+
+        // Transform S3 keys to use new userId
+        const newOriginalS3Key = originalImage.originalS3Key 
+          ? this.transformImageFilenameUserId(originalImage.originalS3Key, newUserId)
+          : undefined;
+        const newWithBoxesS3Key = originalImage.withBoxesS3Key
+          ? this.transformImageFilenameUserId(originalImage.withBoxesS3Key, newUserId)
+          : undefined;
 
         const transformedImage: StoredImage = {
           ...originalImage,
@@ -1657,7 +1759,17 @@ export class ImageStorageService {
           withBoxes: withBoxesDataUrl,
           filename: newFilename,
           userId: newUserId,
-          sessionId: newSession.id
+          sessionId: newSession.id,
+          // Preserve and transform S3 keys and URLs
+          originalS3Key: newOriginalS3Key || originalImage.originalS3Key,
+          originalS3Url: originalImage.originalS3Url,
+          withBoxesS3Key: newWithBoxesS3Key || originalImage.withBoxesS3Key,
+          withBoxesS3Url: originalImage.withBoxesS3Url,
+          // Preserve storage paths and URLs
+          storagePath: originalImage.storagePath,
+          storageUrl: originalImage.storageUrl,
+          withBoxesStoragePath: originalImage.withBoxesStoragePath,
+          withBoxesStorageUrl: originalImage.withBoxesStorageUrl
         };
 
         transformedImages.push(transformedImage);

@@ -1,0 +1,181 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isSelf(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isAdmin == true;
+    }
+
+    function isChatParticipantByData(participants) {
+      return isSignedIn() && request.auth.uid in participants;
+    }
+
+    function isChatParticipantById(chatId) {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/chats/$(chatId))
+        && request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participants;
+    }
+
+    function hasSameTwoParticipants(newParticipants, existingParticipants) {
+      return newParticipants is list
+        && existingParticipants is list
+        && newParticipants.size() == 2
+        && existingParticipants.size() == 2
+        && newParticipants[0] in existingParticipants
+        && newParticipants[1] in existingParticipants
+        && existingParticipants[0] in newParticipants
+        && existingParticipants[1] in newParticipants;
+    }
+
+    // ========== USERS COLLECTION ==========
+    // Needed by chat search/header to read participant profiles.
+    match /users/{userId} {
+      allow read: if isSignedIn();
+      allow create, update: if isSelf(userId) || isAdmin();
+      allow delete: if isAdmin();
+
+      match /images/{document=**} {
+        allow read, write: if isSelf(userId) || isAdmin();
+      }
+
+      match /sessions/{document=**} {
+        // Allow reading own sessions or admin can read any
+        allow read: if isSelf(userId) || isAdmin();
+        
+        // Allow any authenticated user to create/update/delete sessions in any user's collection
+        // This enables one user to share a session by writing to another user's /users/{userId}/sessions path
+        allow create, update, delete: if isSignedIn();
+      }
+    }
+
+    // ========== CHATS COLLECTION ==========
+    // Chat docs and subcollections are participant-only.
+    match /chats/{chatId} {
+      allow create: if isSignedIn()
+        && request.resource.data.chatId == chatId
+        && request.resource.data.participants is list
+        && request.resource.data.participants.size() == 2
+        && request.auth.uid in request.resource.data.participants;
+
+      allow read: if isChatParticipantByData(resource.data.participants) || isAdmin();
+
+      // Participants can update metadata but cannot change participants.
+      allow update: if (isChatParticipantByData(resource.data.participants)
+        && hasSameTwoParticipants(request.resource.data.participants, resource.data.participants))
+        || isAdmin();
+
+      allow delete: if isAdmin();
+
+      match /messages/{messageId} {
+        allow read: if isChatParticipantById(chatId) || isAdmin();
+
+        allow create: if isChatParticipantById(chatId)
+          && request.resource.data.senderId == request.auth.uid
+          && request.resource.data.text is string;
+
+        // Used for read-receipt updates.
+        allow update: if (isChatParticipantById(chatId)
+          && request.resource.data.senderId == resource.data.senderId
+          && request.resource.data.text == resource.data.text
+          && request.resource.data.timestamp == resource.data.timestamp
+          && request.resource.data.deliveredAt == resource.data.deliveredAt
+          && request.resource.data.isRead == true)
+          || isAdmin();
+
+        allow delete: if isAdmin();
+      }
+
+      match /typing/{userId} {
+        allow read: if isChatParticipantById(chatId) || isAdmin();
+
+        // Users can only write their own typing document.
+        allow create, update: if isChatParticipantById(chatId)
+          && request.auth.uid == userId
+          && request.resource.data.userId == request.auth.uid;
+
+        allow delete: if request.auth.uid == userId || isAdmin();
+      }
+    }
+
+    // ========== SESSIONS IMAGES COLLECTION ==========
+    match /sessionsImages/{sessionId} {
+      allow read: if isSignedIn()
+        && (isAdmin() || resource.data.userId == request.auth.uid);
+      allow write: if isSignedIn()
+        && request.resource.data.userId == request.auth.uid;
+      allow delete: if isSignedIn()
+        && (isAdmin() || resource.data.userId == request.auth.uid);
+    }
+
+    // ========== IMAGES COLLECTION ==========
+    match /images/{imageId} {
+      allow read: if isSignedIn()
+        && (
+          isAdmin()
+          || resource.data.userId == request.auth.uid
+          || (
+            resource.data.sessionId != null
+            && get(/databases/$(database)/documents/sessionsImages/$(resource.data.sessionId)).data.userId == request.auth.uid
+          )
+        );
+      allow write: if isSignedIn()
+        && request.resource.data.userId == request.auth.uid;
+      allow delete: if isSignedIn()
+        && (isAdmin() || resource.data.userId == request.auth.uid);
+    }
+
+    // ========== PENDING ACCOUNTS COLLECTION ==========
+    match /pendingAccounts/{userId} {
+      allow read: if true;
+      allow create: if isSignedIn()
+        && request.resource.data.userID == request.auth.uid;
+      allow update, delete: if isSignedIn() && request.auth.token.admin == true;
+    }
+
+    // ========== USER OFFICE LOCATION MARKERS COLLECTION ==========
+    match /userOfficeLocationMarker/{markerId} {
+      // Allow signed-in users to read/list all markers for map-wide display.
+      allow get, list: if isSignedIn();
+
+      allow create: if isSignedIn()
+        && (isAdmin() || request.resource.data.userID == request.auth.uid)
+        && request.resource.data.markerId == markerId
+        && request.resource.data.locationName is string
+        && request.resource.data.address is string
+        && request.resource.data.contactInfo is string
+        && request.resource.data.availableTime is string
+        && request.resource.data.email is string
+        && request.resource.data.unavailableTime is string
+        && (
+          request.resource.data.latitude == null
+          || request.resource.data.latitude is number
+        )
+        && (
+          request.resource.data.longitude == null
+          || request.resource.data.longitude is number
+        );
+
+      allow update: if isSignedIn()
+        && (isAdmin() || resource.data.userID == request.auth.uid)
+        && request.resource.data.userID == resource.data.userID
+        && request.resource.data.markerId == resource.data.markerId;
+
+      allow delete: if isSignedIn()
+        && (isAdmin() || resource.data.userID == request.auth.uid);
+    }
+
+    // ========== DENY ALL OTHER ACCESS ==========
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

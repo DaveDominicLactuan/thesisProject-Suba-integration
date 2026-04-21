@@ -14,7 +14,10 @@ interface DisplayImage {
   detectionResult?: string;
   // raw prediction and status copied from StoredImage for easy access
   rawPrediction?: { type?: string; shape?: string; severity?: string };
+  prediction?: { type?: string; shape?: string; severity?: string };
   statusMessage?: string;
+  boxes?: any[];
+  hasPrediction?: boolean;
 }
 
 @Component({
@@ -1148,14 +1151,22 @@ addEntry() {
           entry = {
             original: found.original,
             withBoxes: found.withBoxes,
-            boxes: [],
+            boxes: found.boxes ?? [],
             faceDetected: false,
             faceData: [],
             timestamp: new Date().toISOString(),
             detectionMessage: found.detectionMessage ?? '',
             filename: found.fileName,
             rawPrediction: found.rawPrediction,
-            statusMessage: 'Saved as session'
+            statusMessage: 'Saved as session',
+            // CRITICAL: Include prediction from current dropdown state
+            prediction: {
+              type: this.dropdown1 || found.rawPrediction?.type || '',
+              shape: this.dropdown2 || found.rawPrediction?.shape || '',
+              severity: this.dropdown3 || found.rawPrediction?.severity || ''
+            },
+            // CRITICAL: Set hasPrediction flag if any prediction value exists
+            hasPrediction: !!(this.dropdown1 || this.dropdown2 || this.dropdown3 || found.rawPrediction?.type)
           };
         }
       }
@@ -1166,6 +1177,15 @@ addEntry() {
         return;
       }
 
+      // CRITICAL: Ensure prediction is properly set from current state
+      if (!entry.prediction || typeof entry.prediction !== 'object') {
+        entry.prediction = {};
+      }
+      entry.prediction.type = this.dropdown1 || entry.prediction.type || entry.rawPrediction?.type || '';
+      entry.prediction.shape = this.dropdown2 || entry.prediction.shape || entry.rawPrediction?.shape || '';
+      entry.prediction.severity = this.dropdown3 || entry.prediction.severity || entry.rawPrediction?.severity || '';
+      entry.hasPrediction = !!(entry.prediction.type || entry.prediction.shape || entry.prediction.severity);
+
       // mark entry as saved session and persist to service
       entry.statusMessage = entry.statusMessage ?? 'Saved as session';
       if ((this.imageStorageService as any).setEntryForImage) {
@@ -1175,6 +1195,15 @@ addEntry() {
       } else if ((this.imageStorageService as any).createAndAdd) {
         await (this.imageStorageService as any).createAndAdd(entry);
       }
+
+      console.log('[FeedbackPage] saveCurrentStoredImageAndGoHome - entry prepared for save:', {
+        filename: entry.filename,
+        prediction: entry.prediction,
+        hasPrediction: entry.hasPrediction,
+        boxes: entry.boxes,
+        boxesCount: entry.boxes?.length || 0,
+        rawPrediction: entry.rawPrediction
+      });
 
       // Prompt user for session name and allow Save or Cancel via custom overlay
       try {
@@ -1284,12 +1313,41 @@ addEntry() {
             box.removeChild(box.firstChild);
           }
 
-          // Create active state UI with progress bar
+          // Create active state UI with progress bar and spinner
           const activeTitle = document.createElement('div');
           activeTitle.innerText = 'Saving current session:';
           activeTitle.style.fontWeight = '700';
           activeTitle.style.marginBottom = '16px';
           activeTitle.style.fontSize = '16px';
+
+          // Spinner container and animation
+          const spinnerContainer = document.createElement('div');
+          spinnerContainer.style.display = 'flex';
+          spinnerContainer.style.justifyContent = 'center';
+          spinnerContainer.style.marginBottom = '16px';
+          
+          const spinner = document.createElement('div');
+          spinner.style.width = '40px';
+          spinner.style.height = '40px';
+          spinner.style.border = '4px solid #f3f3f3';
+          spinner.style.borderTop = '4px solid #ff9800';
+          spinner.style.borderRadius = '50%';
+          spinner.style.animation = 'spin 1s linear infinite';
+          
+          // Add keyframes animation
+          if (!document.getElementById('spinner-animation')) {
+            const style = document.createElement('style');
+            style.id = 'spinner-animation';
+            style.textContent = `
+              @keyframes spin {
+                0% { transform: rotate(0deg); }
+                100% { transform: rotate(360deg); }
+              }
+            `;
+            document.head.appendChild(style);
+          }
+          
+          spinnerContainer.appendChild(spinner);
 
           // Progress percentage text
           const progressLabel = document.createElement('div');
@@ -1298,6 +1356,7 @@ addEntry() {
           progressLabel.style.fontSize = '14px';
           progressLabel.style.fontWeight = '600';
           progressLabel.style.color = '#333';
+          progressLabel.style.textAlign = 'center';
 
           // Progress bar container
           const progressBarContainer = document.createElement('div');
@@ -1325,6 +1384,7 @@ addEntry() {
           };
 
           box.appendChild(activeTitle);
+          box.appendChild(spinnerContainer);
           box.appendChild(progressLabel);
           box.appendChild(progressBarContainer);
 
@@ -1367,32 +1427,76 @@ addEntry() {
 
           // Get all images in the session to upload to S3
           let sessionImages: StoredImage[] = [];
+          
+          // Get the session object to check its imageKeys
+          const session = this.sessions.find(s => s.id === savedSessionId);
+          console.log('[FeedbackPage] Session lookup:', { savedSessionId, sessionFound: !!session, imageKeys: session?.imageKeys });
+          
           if (savedSessionId && typeof svc.getAllImages === 'function') {
             try {
-              const allImages = await svc.getAllImagesAsync ? await svc.getAllImagesAsync() : svc.getAllImages();
-              // Filter for images in this session
-              sessionImages = allImages.filter((img: StoredImage) => {
-                const imgKey = img.filename || img.original;
-                // Check if image is in the session (by checking if it's in formDataMap or by session logic)
-                return imgKey && (this.formDataMap[imgKey] !== undefined || img.sessionId === savedSessionId);
-              });
-              // Ensure the current entry is included
-              if (entry && sessionImages.length === 0) {
-                sessionImages = [entry];
+              let allImages: StoredImage[] = [];
+              if (typeof svc.getAllImagesAsync === 'function') {
+                allImages = await svc.getAllImagesAsync();
+              } else if (typeof svc.getAllImages === 'function') {
+                allImages = svc.getAllImages();
+              }
+              console.log('[FeedbackPage] Retrieved all images from service:', allImages.length);
+              
+              // First try: use session.imageKeys if available
+              if (session && Array.isArray(session.imageKeys) && session.imageKeys.length > 0) {
+                sessionImages = (session.imageKeys as string[])
+                  .map((key: string): StoredImage | undefined => allImages.find(img => img.filename === key || img.original === key))
+                  .filter((img: StoredImage | undefined): img is StoredImage => img != null);
+                console.log('[FeedbackPage] Loaded images by session.imageKeys:', sessionImages.length);
+              }
+              
+              // Fallback: Filter for images in the session by formDataMap or sessionId
+              if (sessionImages.length === 0) {
+                sessionImages = allImages.filter((img: StoredImage) => {
+                  const imgKey = img.filename || img.original;
+                  return imgKey && (this.formDataMap[imgKey] !== undefined || img.sessionId === savedSessionId);
+                });
+                console.log('[FeedbackPage] Loaded images by formDataMap/sessionId filter:', sessionImages.length);
+              }
+              
+              // Ensure the current entry is included and has proper fields
+              if (entry) {
+                const entryKey = entry.filename || entry.original;
+                const alreadyIncluded = sessionImages.some(img => (img.filename || img.original) === entryKey);
+                if (!alreadyIncluded) {
+                  sessionImages.unshift(entry);
+                  console.log('[FeedbackPage] Added current entry to sessionImages');
+                }
               }
             } catch (e) {
               console.warn('[FeedbackPage] Failed to retrieve session images:', e);
-              sessionImages = [entry]; // Fallback to just the current entry
+              sessionImages = entry ? [entry] : [];
             }
           } else {
-            sessionImages = [entry];
+            sessionImages = entry ? [entry] : [];
           }
+          
+          console.log('[FeedbackPage] Final sessionImages for S3 upload:', {
+            count: sessionImages.length,
+            images: sessionImages.map(img => ({
+              filename: img.filename,
+              hasOriginal: !!img.original,
+              hasWithBoxes: !!img.withBoxes,
+              originalLength: img.original?.length || 0,
+              withBoxesLength: img.withBoxes?.length || 0
+            }))
+          });
 
           console.log(`[FeedbackPage] Processing ${sessionImages.length} image(s) for S3 upload in session ${savedSessionId}`);
 
           // Upload all images to S3 for the session
           if (savedSessionId && sessionImages.length > 0) {
             try {
+              // Ensure session.imageKeys includes all images we're about to upload
+              if (session && !Array.isArray(session.imageKeys)) {
+                session.imageKeys = [];
+              }
+              
               const progressPerImage = 70 / Math.max(sessionImages.length, 1); // Distribute 70% across images
               let currentProgress = 25;
 
@@ -1402,20 +1506,40 @@ addEntry() {
                 
                 console.log(`[FeedbackPage] Uploading image ${imgIndex + 1}/${sessionImages.length}: ${imgKey}`);
                 
+                // Validate image data before uploading
+                if (!imgEntry.original || (typeof imgEntry.original !== 'string')) {
+                  console.warn(`[FeedbackPage] ⚠️ Image ${imgIndex + 1} has invalid original data, skipping S3 upload`);
+                  currentProgress += progressPerImage;
+                  continue;
+                }
+                
+                // Add to session.imageKeys if not already there
+                if (session && imgEntry.filename && !session.imageKeys.includes(imgEntry.filename)) {
+                  session.imageKeys.push(imgEntry.filename);
+                }
+                
                 currentProgress += 5;
                 updateProgress(currentProgress, `Saving Session: ${Math.min(currentProgress, 85)}%`);
 
                 // Upload original image
                 if (typeof svc.uploadSessionImageOriginal === 'function' && imgEntry.original) {
                   try {
+                    console.log(`[FeedbackPage] Starting original image upload for ${imgKey}...`);
                     const originalS3Result = await svc.uploadSessionImageOriginal(imgEntry.original, savedSessionId, imgEntry.filename || imgKey);
-                    if (originalS3Result) {
+                    if (originalS3Result && originalS3Result.s3Key) {
                       imgEntry.storagePath = originalS3Result.s3Key;
                       imgEntry.storageUrl = originalS3Result.url;
-                      console.log(`✅ Original image ${imgIndex + 1} uploaded to S3 with key:`, originalS3Result?.s3Key);
+                      imgEntry.originalS3Key = originalS3Result.s3Key;
+                      imgEntry.originalS3Url = originalS3Result.url;
+                      console.log(`✅ Original image ${imgIndex + 1} uploaded to S3:`, {
+                        s3Key: originalS3Result.s3Key,
+                        url: originalS3Result.url
+                      });
+                    } else {
+                      console.warn(`[FeedbackPage] ⚠️ Original image upload returned no S3 result for ${imgKey}`);
                     }
                   } catch (error) {
-                    console.warn(`[FeedbackPage] Failed to upload original image ${imgIndex + 1} to S3:`, error);
+                    console.error(`[FeedbackPage] ❌ Failed to upload original image ${imgIndex + 1} to S3:`, error);
                   }
                 }
 
@@ -1425,32 +1549,99 @@ addEntry() {
                 // Upload withBoxes image if available
                 if (typeof svc.uploadSessionImageWithBoxes === 'function' && imgEntry.withBoxes) {
                   try {
+                    console.log(`[FeedbackPage] Starting withBoxes image upload for ${imgKey}...`);
                     const withBoxesS3Result = await svc.uploadSessionImageWithBoxes(imgEntry.withBoxes, savedSessionId, imgEntry.filename || imgKey);
-                    if (withBoxesS3Result) {
+                    if (withBoxesS3Result && withBoxesS3Result.s3Key) {
                       imgEntry.withBoxesStoragePath = withBoxesS3Result.s3Key;
                       imgEntry.withBoxesStorageUrl = withBoxesS3Result.url;
-                      console.log(`✅ WithBoxes image ${imgIndex + 1} uploaded to S3 with key:`, withBoxesS3Result?.s3Key);
+                      imgEntry.withBoxesS3Key = withBoxesS3Result.s3Key;
+                      imgEntry.withBoxesS3Url = withBoxesS3Result.url;
+                      console.log(`✅ WithBoxes image ${imgIndex + 1} uploaded to S3:`, {
+                        s3Key: withBoxesS3Result.s3Key,
+                        url: withBoxesS3Result.url
+                      });
+                    } else {
+                      console.warn(`[FeedbackPage] ⚠️ WithBoxes image upload returned no S3 result for ${imgKey}`);
                     }
                   } catch (error) {
-                    console.warn(`[FeedbackPage] Failed to upload withBoxes image ${imgIndex + 1} to S3:`, error);
+                    console.error(`[FeedbackPage] ❌ Failed to upload withBoxes image ${imgIndex + 1} to S3:`, error);
                   }
+                } else {
+                  console.warn(`[FeedbackPage] ⚠️ No withBoxes image available for ${imgKey}`);
                 }
 
-                // Update the image entry in service with S3 references
+                // Update the image entry in service with S3 references BEFORE Firestore save
+                // Try both setEntryForImage and direct image update
                 if (typeof svc.setEntryForImage === 'function') {
                   svc.setEntryForImage(imgKey, imgEntry);
-                  console.log(`[FeedbackPage] S3 references persisted for image ${imgIndex + 1}: ${imgKey}`);
+                  console.log(`[FeedbackPage] ✅ S3 references persisted to service for image ${imgIndex + 1}: ${imgKey}`);
+                }
+                
+                // CRITICAL: Also update the image in the service's this.images array directly for robustness
+                const serviceImgIdx = svc.images?.findIndex((i: any) => i.filename === (imgEntry.filename || imgKey) || i.original === imgKey);
+                if (serviceImgIdx !== undefined && serviceImgIdx >= 0 && svc.images) {
+                  Object.assign(svc.images[serviceImgIdx], imgEntry);
+                  console.log(`[FeedbackPage] ✅ Direct image update in service array for image ${imgIndex + 1}`);
                 }
 
                 currentProgress += progressPerImage * 0.5;
                 updateProgress(Math.min(currentProgress, 85), `Saving Session: ${Math.min(currentProgress, 85)}%`);
               }
 
+              // Persist session with updated imageKeys
+              if (session && typeof svc.getSessions === 'function') {
+                try {
+                  await svc._storage?.set(svc.STORAGE_KEY.replace('images', 'sessions'), svc.sessions);
+                  console.log('[FeedbackPage] ✅ Session imageKeys persisted:', session.imageKeys);
+                } catch (e) {
+                  console.warn('[FeedbackPage] Warning: Failed to persist session updates:', e);
+                }
+              }
+
+              // CRITICAL: Re-sync sessionImages from service to ensure S3 references are captured
+              // This ensures we have the latest data after S3 uploads
+              sessionImages = [];
+              if (session && Array.isArray(session.imageKeys) && session.imageKeys.length > 0) {
+                sessionImages = (session.imageKeys as string[])
+                  .map((key: string): StoredImage | undefined => {
+                    const img = svc.images?.find((i: any) => i.filename === key || i.original === key);
+                    return img as StoredImage | undefined;
+                  })
+                  .filter((img: StoredImage | undefined): img is StoredImage => img != null);
+                
+                // CRITICAL: Ensure all re-synced images have prediction and boxes properly set
+                sessionImages.forEach((img: StoredImage) => {
+                  if (!img.prediction || typeof img.prediction !== 'object') {
+                    img.prediction = { type: '', shape: '', severity: '' };
+                  }
+                  if (!Array.isArray(img.boxes)) {
+                    img.boxes = [];
+                  }
+                  if (img.prediction?.type || img.prediction?.shape || img.prediction?.severity) {
+                    img.hasPrediction = true;
+                  }
+                });
+                
+                console.log('[FeedbackPage] ✅ Re-synced sessionImages from service after S3 uploads:', {
+                  count: sessionImages.length,
+                  s3Status: sessionImages.map(img => ({
+                    filename: img.filename,
+                    hasOriginalS3Key: !!img.originalS3Key,
+                    hasWithBoxesS3Key: !!img.withBoxesS3Key,
+                    hasPrediction: !!img.prediction && !!(img.prediction?.type || img.prediction?.shape || img.prediction?.severity),
+                    predictionType: img.prediction?.type || '(empty)',
+                    boxesCount: img.boxes?.length || 0
+                  }))
+                });
+              }
+
               updateProgress(85, 'Saving Session: 85%');
             } catch (err) {
-              console.warn('[FeedbackPage] Error during S3 upload batch:', err);
+              console.error('[FeedbackPage] Error during S3 upload batch:', err);
               updateProgress(85, 'Saving Session: 85%');
             }
+          } else {
+            console.warn('[FeedbackPage] ⚠️ No images to upload to S3:', { savedSessionId, imageCount: sessionImages.length });
           }
 
           // Firestore save - includes S3 references from updated entry
@@ -1458,19 +1649,109 @@ addEntry() {
           if (savedSessionId && typeof svc.saveSessionWithImagesToFirestore === 'function') {
             try {
               updateProgress(90, 'Saving Session: 90%');
+              
+              // CRITICAL: Ensure prediction values are properly populated before Firestore save
+              // This fixes the issue where prediction fields are empty/null in Firestore
+              sessionImages.forEach((img: StoredImage, idx: number) => {
+                // Ensure prediction object exists and has proper structure
+                if (!img.prediction || typeof img.prediction !== 'object') {
+                  img.prediction = { type: '', shape: '', severity: '' };
+                }
+                
+                // Populate prediction from rawPrediction if available
+                if (img.rawPrediction) {
+                  img.prediction.type = img.rawPrediction.type || img.prediction?.type || '';
+                  img.prediction.shape = img.rawPrediction.shape || img.prediction?.shape || '';
+                  img.prediction.severity = img.rawPrediction.severity || img.prediction?.severity || '';
+                }
+                
+                // Ensure non-empty prediction fields have valid values
+                if (!img.prediction.type) img.prediction.type = img.rawPrediction?.type || '';
+                if (!img.prediction.shape) img.prediction.shape = img.rawPrediction?.shape || '';
+                if (!img.prediction.severity) img.prediction.severity = img.rawPrediction?.severity || '';
+                
+                // Ensure boxes array exists (preserve existing or default to empty)
+                if (!Array.isArray(img.boxes)) {
+                  img.boxes = [];
+                }
+                
+                // Ensure hasPrediction flag is set correctly
+                if (img.prediction.type || img.prediction.shape || img.prediction.severity) {
+                  img.hasPrediction = true;
+                }
+                
+                console.log(`[FeedbackPage] ✅ Image ${idx + 1} prediction normalized:`, {
+                  filename: img.filename,
+                  prediction: img.prediction,
+                  hasPrediction: img.hasPrediction,
+                  boxesCount: img.boxes?.length || 0,
+                  rawPrediction: img.rawPrediction
+                });
+              });
+              
+              // CRITICAL: Verify S3 references and prediction before Firestore save
+              const preFirestoreDebug = sessionImages.map((img, idx) => ({
+                index: idx,
+                filename: img.filename,
+                hasOriginal: !!img.original,
+                hasWithBoxes: !!img.withBoxes,
+                storagePath: img.storagePath || '(empty)',
+                originalS3Key: img.originalS3Key || '(empty)',
+                originalS3Url: img.originalS3Url || '(empty)',
+                withBoxesStoragePath: img.withBoxesStoragePath || '(empty)',
+                withBoxesS3Key: img.withBoxesS3Key || '(empty)',
+                withBoxesS3Url: img.withBoxesS3Url || '(empty)',
+                prediction: img.prediction,
+                hasPrediction: img.hasPrediction,
+                boxesCount: img.boxes?.length || 0
+              }));
+              console.log('[FeedbackPage] 📊 Pre-Firestore verification (S3 + Prediction + Boxes):', preFirestoreDebug);
+              
+              // Also verify that service storage has the updated images
+              if (svc.images && svc.images.length > 0) {
+                const serviceImageCheck = svc.images
+                  .filter((img: any) => sessionImages.some(si => si.filename === img.filename || si.original === img.original))
+                  .map((img: any, idx: number) => ({
+                    index: idx,
+                    filename: img.filename,
+                    storagePath: img.storagePath || '(empty)',
+                    originalS3Key: img.originalS3Key || '(empty)',
+                    withBoxesStoragePath: img.withBoxesStoragePath || '(empty)',
+                    withBoxesS3Key: img.withBoxesS3Key || '(empty)',
+                    prediction: img.prediction,
+                    hasPrediction: img.hasPrediction,
+                    boxesCount: img.boxes?.length || 0
+                  }));
+                console.log('[FeedbackPage] 📊 Service storage verification (S3 + Prediction + Boxes):', serviceImageCheck);
+              }
+              
+              // CRITICAL: Ensure service entries are updated with final prediction/boxes before Firestore save
+              sessionImages.forEach((img: StoredImage) => {
+                if (typeof svc.setEntryForImage === 'function') {
+                  svc.setEntryForImage(img.filename || img.original, img);
+                  console.log(`[FeedbackPage] ✅ Final service update for ${img.filename}:`, {
+                    prediction: img.prediction,
+                    hasPrediction: img.hasPrediction,
+                    boxesCount: img.boxes?.length || 0
+                  });
+                }
+              });
+              
+              console.log('[FeedbackPage] ✅ All images prepared for Firestore with prediction and boxes');
+              
               await svc.saveSessionWithImagesToFirestore(savedSessionId);
               firestoreSaved = true;
               console.log('✅ Firestore save completed with S3 references');
               
               if (typeof svc.logSaveWorkflowStatus === 'function') {
                 try {
-                  await svc.logSaveWorkflowStatus(savedSessionId);
+                  await svc.logSaveWorkflowStatus(savedSessionId, sessionImages.map(img => img.filename));
                 } catch (logError) {
                   console.warn('⚠️ Failed to log workflow status:', logError);
                 }
               }
             } catch (e) {
-              console.warn('⚠️ Failed to save to Firestore:', e);
+              console.error('❌ Failed to save to Firestore:', e);
             }
           }
 
@@ -1561,6 +1842,7 @@ addEntry() {
       box.style.padding = '18px';
       box.style.borderRadius = '8px';
       box.style.minWidth = '320px';
+      box.style.maxWidth = '500px';
       box.style.boxShadow = '0 6px 30px rgba(0,0,0,0.3)';
 
       const title = document.createElement('div');
@@ -1590,7 +1872,7 @@ addEntry() {
       });
 
       box.appendChild(title);
-      box.appendChild(body);
+      // box.appendChild(body);
       box.appendChild(closeBtn);
       overlay.appendChild(box);
       document.body.appendChild(overlay);

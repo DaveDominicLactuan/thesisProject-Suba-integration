@@ -459,6 +459,7 @@ private startUserSyncInBackground(userId: string): void {
     }
 
     try {
+      console.log('[SessionPage.syncUserDataFromFirestore] ====== STARTING SYNC ======');
       console.log('[SessionPage.syncUserDataFromFirestore] Starting sync for userId:', userId);
 
       // Fetch user sessions from Firestore
@@ -472,46 +473,293 @@ private startUserSyncInBackground(userId: string): void {
       let sessionsAdded = 0;
       let imagesAdded = 0;
 
-      for (const fsSession of firebaseSessions) {
-        const session = {
+      // ====== STEP 1: MAKE COPIES OF SESSION OBJECTS ======
+      console.log('[SessionPage.syncUserDataFromFirestore] ====== STEP 1: MAKING SESSION COPIES ======');
+
+      for (let sessionIdx = 0; sessionIdx < firebaseSessions.length; sessionIdx++) {
+        const fsSession = firebaseSessions[sessionIdx];
+        
+        console.log(`[SessionPage.syncUserDataFromFirestore] -------- Processing Session ${sessionIdx + 1}/${firebaseSessions.length} --------`);
+        console.log('[SessionPage.syncUserDataFromFirestore] ORIGINAL SESSION OBJECT:', fsSession);
+
+        // STEP 1.1: Create a deep copy of the session object
+        const sessionCopy = {
           id: fsSession.id || fsSession.sessionId || `s-${Date.now()}`,
           name: fsSession.name || 'Untitled Session',
-          imageKeys: Array.isArray(fsSession.imageKeys) ? fsSession.imageKeys : [],
+          imageKeys: Array.isArray(fsSession.imageKeys) ? [...fsSession.imageKeys] : [],
           created: fsSession.created || new Date().toISOString(),
-          userId: userId
+          userId: userId,
+          totalBoundingBoxes: fsSession.totalBoundingBoxes || 0,
+          sessionId: fsSession.sessionId || fsSession.id
         };
 
-        const added = this.imageStorage.addSessionIfNotExists(session as any);
+        console.log(`[SessionPage.syncUserDataFromFirestore] SESSION COPY ${sessionIdx + 1}:`, sessionCopy);
+        console.log(`[SessionPage.syncUserDataFromFirestore] Session copy variables:`);
+        console.log(`  - id: ${sessionCopy.id}`);
+        console.log(`  - name: ${sessionCopy.name}`);
+        console.log(`  - imageKeys count: ${sessionCopy.imageKeys.length}`);
+        console.log(`  - imageKeys: ${JSON.stringify(sessionCopy.imageKeys)}`);
+        console.log(`  - created: ${sessionCopy.created}`);
+        console.log(`  - userId: ${sessionCopy.userId}`);
+        console.log(`  - totalBoundingBoxes: ${sessionCopy.totalBoundingBoxes}`);
+
+        // ====== STEP 1.2: MAKE COPIES OF SESSION IMAGE OBJECTS ======
+        console.log(`[SessionPage.syncUserDataFromFirestore] ====== STEP 1.2: MAKING SESSION IMAGE COPIES FOR SESSION ${sessionIdx + 1} ======`);
+
+        const sessionImageCopies: any[] = [];
+        const imageKeysToProcess = sessionCopy.imageKeys || [];
+
+        for (let imgKeyIdx = 0; imgKeyIdx < imageKeysToProcess.length; imgKeyIdx++) {
+          const imageKey = imageKeysToProcess[imgKeyIdx];
+          console.log(`[SessionPage.syncUserDataFromFirestore] -------- Processing Image Key ${imgKeyIdx + 1}/${imageKeysToProcess.length}: ${imageKey} --------`);
+
+          // Find the corresponding Firestore image
+          const fsImage = firestoreImages.find((img: any) => img.filename === imageKey || img.id === imageKey);
+
+          if (!fsImage) {
+            console.warn(`[SessionPage.syncUserDataFromFirestore] Image not found for key: ${imageKey}`);
+            continue;
+          }
+
+          console.log('[SessionPage.syncUserDataFromFirestore] ORIGINAL SESSION IMAGE OBJECT:', fsImage);
+
+          // Create a deep copy of the image object
+          const imageCopy = {
+            original: fsImage.original || '',
+            withBoxes: fsImage.withBoxes || fsImage.original || '',
+            boxes: Array.isArray(fsImage.boxes) ? [...fsImage.boxes] : [],
+            faceDetected: !!fsImage.faceDetected,
+            faceData: Array.isArray(fsImage.faceData) ? [...fsImage.faceData] : [],
+            timestamp: fsImage.timestamp || new Date().toISOString(),
+            detectionMessage: fsImage.detectionMessage || '',
+            filename: fsImage.filename || fsImage.id || '',
+            statusMessage: fsImage.statusMessage || '',
+            hasPrediction: !!fsImage.hasPrediction,
+            prediction: fsImage.prediction ? { ...fsImage.prediction } : undefined,
+            userId: userId,
+            sessionId: fsImage.sessionId || sessionCopy.id,
+            // S3-related fields
+            originalS3Key: fsImage.originalS3Key || '',
+            originalS3Url: fsImage.originalS3Url || '',
+            withBoxesS3Key: fsImage.withBoxesS3Key || '',
+            withBoxesS3Url: fsImage.withBoxesS3Url || '',
+            withBoxesStoragePath: fsImage.withBoxesStoragePath || '',
+            withBoxesStorageUrl: fsImage.withBoxesStorageUrl || '',
+            storagePath: fsImage.storagePath || '',
+            storageUrl: fsImage.storageUrl || ''
+          };
+
+          console.log(`[SessionPage.syncUserDataFromFirestore] SESSION IMAGE COPY ${imgKeyIdx + 1}:`, imageCopy);
+          console.log(`[SessionPage.syncUserDataFromFirestore] Image copy variables:`);
+          console.log(`  - filename: ${imageCopy.filename}`);
+          console.log(`  - userId: ${imageCopy.userId}`);
+          console.log(`  - sessionId: ${imageCopy.sessionId}`);
+          console.log(`  - timestamp: ${imageCopy.timestamp}`);
+          console.log(`  - hasPrediction: ${imageCopy.hasPrediction}`);
+          console.log(`  - originalS3Key: ${imageCopy.originalS3Key}`);
+          console.log(`  - originalS3Url: ${imageCopy.originalS3Url}`);
+          console.log(`  - withBoxesS3Key: ${imageCopy.withBoxesS3Key}`);
+          console.log(`  - withBoxesS3Url: ${imageCopy.withBoxesS3Url}`);
+          console.log(`  - withBoxesStoragePath: ${imageCopy.withBoxesStoragePath}`);
+          console.log(`  - withBoxesStorageUrl: ${imageCopy.withBoxesStorageUrl}`);
+
+          sessionImageCopies.push(imageCopy);
+
+          // ====== STEP 1.3: FETCH S3 IMAGES AND CREATE COPIES ======
+          console.log(`[SessionPage.syncUserDataFromFirestore] ====== STEP 1.3: FETCHING & COPYING S3 IMAGES FOR IMAGE KEY ${imgKeyIdx + 1} ======`);
+
+          let s3ImageCopyOriginal = null;
+          let s3ImageCopyWithBoxes = null;
+
+          // Fetch original S3 image if key exists
+          if (imageCopy.originalS3Key) {
+            try {
+              console.log(`[SessionPage.syncUserDataFromFirestore] Fetching S3 original image with key: ${imageCopy.originalS3Key}`);
+              const originalS3Data = await (this.imageStorage as any).fetchS3ObjectAsDataUrl(imageCopy.originalS3Key);
+              
+              if (originalS3Data) {
+                s3ImageCopyOriginal = originalS3Data;
+                console.log(`[SessionPage.syncUserDataFromFirestore] S3 ORIGINAL IMAGE COPY - Key: ${imageCopy.originalS3Key}`);
+                console.log(`[SessionPage.syncUserDataFromFirestore] S3 original image copy details:`);
+                console.log(`  - Original S3 Key: ${imageCopy.originalS3Key}`);
+                console.log(`  - Copy S3 Key: ${imageCopy.originalS3Key}Copy`);
+                console.log(`  - Data URL length: ${originalS3Data.length} bytes`);
+              } else {
+                console.warn(`[SessionPage.syncUserDataFromFirestore] Failed to fetch S3 original image with key: ${imageCopy.originalS3Key}`);
+              }
+            } catch (e) {
+              console.warn(`[SessionPage.syncUserDataFromFirestore] Error fetching S3 original image:`, e);
+            }
+          } else {
+            console.log(`[SessionPage.syncUserDataFromFirestore] No originalS3Key found, skipping S3 original fetch`);
+          }
+
+          // Fetch withBoxes S3 image if key exists
+          if (imageCopy.withBoxesS3Key) {
+            try {
+              console.log(`[SessionPage.syncUserDataFromFirestore] Fetching S3 withBoxes image with key: ${imageCopy.withBoxesS3Key}`);
+              const withBoxesS3Data = await (this.imageStorage as any).fetchS3ObjectAsDataUrl(imageCopy.withBoxesS3Key);
+              
+              if (withBoxesS3Data) {
+                s3ImageCopyWithBoxes = withBoxesS3Data;
+                console.log(`[SessionPage.syncUserDataFromFirestore] S3 WITHBOXES IMAGE COPY - Key: ${imageCopy.withBoxesS3Key}`);
+                console.log(`[SessionPage.syncUserDataFromFirestore] S3 withBoxes image copy details:`);
+                console.log(`  - Original S3 Key: ${imageCopy.withBoxesS3Key}`);
+                console.log(`  - Copy S3 Key: ${imageCopy.withBoxesS3Key}Copy`);
+                console.log(`  - Data URL length: ${withBoxesS3Data.length} bytes`);
+              } else {
+                console.warn(`[SessionPage.syncUserDataFromFirestore] Failed to fetch S3 withBoxes image with key: ${imageCopy.withBoxesS3Key}`);
+              }
+            } catch (e) {
+              console.warn(`[SessionPage.syncUserDataFromFirestore] Error fetching S3 withBoxes image:`, e);
+            }
+          } else {
+            console.log(`[SessionPage.syncUserDataFromFirestore] No withBoxesS3Key found, skipping S3 withBoxes fetch`);
+          }
+
+          console.log(`[SessionPage.syncUserDataFromFirestore] -------- Completed Image Key ${imgKeyIdx + 1}/${imageKeysToProcess.length} --------`);
+        }
+
+        // ====== STEP 2: REPLACE USER ID IN SESSION AND IMAGE OBJECTS ======
+        console.log(`[SessionPage.syncUserDataFromFirestore] ====== STEP 2: REPLACING USER ID IN SESSION ${sessionIdx + 1} (if needed) ======`);
+        console.log(`[SessionPage.syncUserDataFromFirestore] Session userId before: ${sessionCopy.userId}`);
+        // NOTE: userId is already set to the parameter userId above
+        console.log(`[SessionPage.syncUserDataFromFirestore] Session userId after: ${sessionCopy.userId}`);
+
+        // Update imageKeys with new userId prefix if needed
+        const updatedImageKeys: string[] = [];
+        for (let i = 0; i < sessionCopy.imageKeys.length; i++) {
+          const oldKey = sessionCopy.imageKeys[i];
+          // If key contains userId prefix, it should already match, but log for verification
+          console.log(`[SessionPage.syncUserDataFromFirestore] Image key ${i + 1} - Old: ${oldKey} -> New: ${oldKey} (userId: ${sessionCopy.userId})`);
+          updatedImageKeys.push(oldKey);
+        }
+        sessionCopy.imageKeys = updatedImageKeys;
+
+        // Update all image copies with new userId
+        for (let i = 0; i < sessionImageCopies.length; i++) {
+          const imageCopy = sessionImageCopies[i];
+          console.log(`[SessionPage.syncUserDataFromFirestore] Image ${i + 1} - Replacing userId:`, {
+            oldUserId: imageCopy.userId,
+            newUserId: sessionCopy.userId,
+            filename: imageCopy.filename
+          });
+
+          imageCopy.userId = sessionCopy.userId;
+
+          // Update S3 key prefixes to include new userId
+          if (imageCopy.originalS3Key) {
+            const oldS3KeyOriginal = imageCopy.originalS3Key;
+            imageCopy.originalS3Key = (this.imageStorage as any).transformImageFilenameUserId(oldS3KeyOriginal, sessionCopy.userId);
+            console.log(`[SessionPage.syncUserDataFromFirestore] S3 Original Key - Old: ${oldS3KeyOriginal} -> New: ${imageCopy.originalS3Key}`);
+          }
+
+          if (imageCopy.withBoxesS3Key) {
+            const oldS3KeyWithBoxes = imageCopy.withBoxesS3Key;
+            imageCopy.withBoxesS3Key = (this.imageStorage as any).transformImageFilenameUserId(oldS3KeyWithBoxes, sessionCopy.userId);
+            console.log(`[SessionPage.syncUserDataFromFirestore] S3 WithBoxes Key - Old: ${oldS3KeyWithBoxes} -> New: ${imageCopy.withBoxesS3Key}`);
+          }
+
+          console.log(`[SessionPage.syncUserDataFromFirestore] Image ${i + 1} after userId replacement:`, {
+            filename: imageCopy.filename,
+            userId: imageCopy.userId,
+            originalS3Key: imageCopy.originalS3Key,
+            withBoxesS3Key: imageCopy.withBoxesS3Key
+          });
+        }
+
+        // ====== STEP 3: COMPREHENSIVE PRINT OF SESSION OBJECT, IMAGE OBJECTS, AND S3 DETAILS ======
+        console.log(`[SessionPage.syncUserDataFromFirestore] ====== STEP 3: COMPREHENSIVE DATA PRINT FOR SESSION ${sessionIdx + 1} ======`);
+
+        // Print full session object
+        console.log(`[SessionPage.syncUserDataFromFirestore] === FULL SESSION OBJECT (SESSION ${sessionIdx + 1}) ===`);
+        console.log(`[SessionPage.syncUserDataFromFirestore] Session ID: ${sessionCopy.id}`);
+        console.log(`[SessionPage.syncUserDataFromFirestore] Session Name: ${sessionCopy.name}`);
+        console.log(`[SessionPage.syncUserDataFromFirestore] Session Created: ${sessionCopy.created}`);
+        console.log(`[SessionPage.syncUserDataFromFirestore] Session User ID: ${sessionCopy.userId}`);
+        console.log(`[SessionPage.syncUserDataFromFirestore] Session ID (duplicate field): ${sessionCopy.sessionId}`);
+        console.log(`[SessionPage.syncUserDataFromFirestore] Total Bounding Boxes: ${sessionCopy.totalBoundingBoxes}`);
+        console.log(`[SessionPage.syncUserDataFromFirestore] Number of Image Keys: ${sessionCopy.imageKeys.length}`);
+        console.log(`[SessionPage.syncUserDataFromFirestore] Full Session Object:`, JSON.stringify(sessionCopy, null, 2));
+
+        // Print all session image objects with detailed S3 information
+        console.log(`[SessionPage.syncUserDataFromFirestore] === ALL SESSION IMAGE OBJECTS (${sessionImageCopies.length} images) ===`);
+        
+        for (let imgIdx = 0; imgIdx < sessionImageCopies.length; imgIdx++) {
+          const imageCopy = sessionImageCopies[imgIdx];
+          
+          console.log(`[SessionPage.syncUserDataFromFirestore] --- IMAGE ${imgIdx + 1}/${sessionImageCopies.length} ---`);
+          console.log(`[SessionPage.syncUserDataFromFirestore] Filename: ${imageCopy.filename}`);
+          console.log(`[SessionPage.syncUserDataFromFirestore] User ID: ${imageCopy.userId}`);
+          console.log(`[SessionPage.syncUserDataFromFirestore] Session ID: ${imageCopy.sessionId}`);
+          console.log(`[SessionPage.syncUserDataFromFirestore] Timestamp: ${imageCopy.timestamp}`);
+          console.log(`[SessionPage.syncUserDataFromFirestore] Has Prediction: ${imageCopy.hasPrediction}`);
+          console.log(`[SessionPage.syncUserDataFromFirestore] Face Detected: ${imageCopy.faceDetected}`);
+          console.log(`[SessionPage.syncUserDataFromFirestore] Status Message: ${imageCopy.statusMessage}`);
+          console.log(`[SessionPage.syncUserDataFromFirestore] Detection Message: ${imageCopy.detectionMessage}`);
+          console.log(`[SessionPage.syncUserDataFromFirestore] Number of Boxes: ${imageCopy.boxes?.length || 0}`);
+          console.log(`[SessionPage.syncUserDataFromFirestore] Number of Face Data: ${imageCopy.faceData?.length || 0}`);
+          
+          // Print S3 details
+          console.log(`[SessionPage.syncUserDataFromFirestore] === S3 DETAILS FOR IMAGE ${imgIdx + 1} ===`);
+          console.log(`[SessionPage.syncUserDataFromFirestore] Original S3 Key: ${imageCopy.originalS3Key}`);
+          console.log(`[SessionPage.syncUserDataFromFirestore] Original S3 URL: ${imageCopy.originalS3Url}`);
+          console.log(`[SessionPage.syncUserDataFromFirestore] WithBoxes S3 Key: ${imageCopy.withBoxesS3Key}`);
+          console.log(`[SessionPage.syncUserDataFromFirestore] WithBoxes S3 URL: ${imageCopy.withBoxesS3Url}`);
+          console.log(`[SessionPage.syncUserDataFromFirestore] Storage Path: ${imageCopy.storagePath}`);
+          console.log(`[SessionPage.syncUserDataFromFirestore] Storage URL: ${imageCopy.storageUrl}`);
+          console.log(`[SessionPage.syncUserDataFromFirestore] WithBoxes Storage Path: ${imageCopy.withBoxesStoragePath}`);
+          console.log(`[SessionPage.syncUserDataFromFirestore] WithBoxes Storage URL: ${imageCopy.withBoxesStorageUrl}`);
+          
+          // Print S3 filename/prefix breakdown
+          if (imageCopy.originalS3Key) {
+            console.log(`[SessionPage.syncUserDataFromFirestore] === S3 ORIGINAL KEY BREAKDOWN ===`);
+            console.log(`[SessionPage.syncUserDataFromFirestore] Full Key: ${imageCopy.originalS3Key}`);
+            const originalKeyParts = imageCopy.originalS3Key.split(/(?=userId:|sessionId:)/);
+            originalKeyParts.forEach((part: string, idx: number) => {
+              console.log(`[SessionPage.syncUserDataFromFirestore]   Part ${idx + 1}: ${part}`);
+            });
+          }
+          
+          if (imageCopy.withBoxesS3Key) {
+            console.log(`[SessionPage.syncUserDataFromFirestore] === S3 WITHBOXES KEY BREAKDOWN ===`);
+            console.log(`[SessionPage.syncUserDataFromFirestore] Full Key: ${imageCopy.withBoxesS3Key}`);
+            const withBoxesKeyParts = imageCopy.withBoxesS3Key.split(/(?=userId:|sessionId:)/);
+            withBoxesKeyParts.forEach((part: string, idx: number) => {
+              console.log(`[SessionPage.syncUserDataFromFirestore]   Part ${idx + 1}: ${part}`);
+            });
+          }
+          
+          // Print full image object as JSON
+          console.log(`[SessionPage.syncUserDataFromFirestore] Full Image Object:`, JSON.stringify(imageCopy, null, 2));
+        }
+
+        console.log(`[SessionPage.syncUserDataFromFirestore] ====== END STEP 3: COMPREHENSIVE PRINT ======`);
+
+        console.log(`[SessionPage.syncUserDataFromFirestore] ====== FINAL SESSION ${sessionIdx + 1} DATA ======`);
+        console.log(`[SessionPage.syncUserDataFromFirestore] Final session copy:`, sessionCopy);
+        console.log(`[SessionPage.syncUserDataFromFirestore] Final image copies (${sessionImageCopies.length}):`, sessionImageCopies);
+
+        // Add session to storage
+        const added = this.imageStorage.addSessionIfNotExists(sessionCopy as any);
         if (added) {
           sessionsAdded += 1;
-          console.log('[SessionPage.syncUserDataFromFirestore] Added session to local storage:', session.id);
+          console.log('[SessionPage.syncUserDataFromFirestore] Added session to local storage:', sessionCopy.id);
         }
+
+        // Add all images to storage
+        for (const imageCopy of sessionImageCopies) {
+          const imageAdded = await this.imageStorage.addImageIfNotExists(imageCopy as any, imageCopy.sessionId);
+          if (imageAdded) {
+            imagesAdded += 1;
+            console.log('[SessionPage.syncUserDataFromFirestore] Added image to local storage:', imageCopy.filename);
+          }
+        }
+
+        console.log(`[SessionPage.syncUserDataFromFirestore] -------- Completed Session ${sessionIdx + 1}/${firebaseSessions.length} --------`);
       }
 
-      for (const fsImage of firestoreImages) {
-        const storedImage = {
-          original: fsImage.original || '',
-          withBoxes: fsImage.withBoxes || fsImage.original || '',
-          boxes: Array.isArray(fsImage.boxes) ? fsImage.boxes : [],
-          faceDetected: !!fsImage.faceDetected,
-          faceData: Array.isArray(fsImage.faceData) ? fsImage.faceData : [],
-          timestamp: fsImage.timestamp || new Date().toISOString(),
-          detectionMessage: fsImage.detectionMessage || '',
-          filename: fsImage.filename || fsImage.id || '',
-          statusMessage: fsImage.statusMessage || '',
-          hasPrediction: !!fsImage.hasPrediction,
-          prediction: fsImage.prediction || undefined,
-          userId: userId,
-          sessionId: fsImage.sessionId || undefined
-        };
-
-        const added = await this.imageStorage.addImageIfNotExists(storedImage as any, storedImage.sessionId);
-        if (added) {
-          imagesAdded += 1;
-          console.log('[SessionPage.syncUserDataFromFirestore] Added image to local storage:', storedImage.filename || 'unnamed');
-        }
-      }
-
+      console.log('[SessionPage.syncUserDataFromFirestore] ====== SYNC COMPLETED SUCCESSFULLY ======');
       console.log('[SessionPage.syncUserDataFromFirestore] Sync completed successfully', {
         sessionsFetched: firebaseSessions.length,
         sessionsAdded,
@@ -519,6 +767,7 @@ private startUserSyncInBackground(userId: string): void {
         imagesAdded
       });
     } catch (error) {
+      console.error('[SessionPage.syncUserDataFromFirestore] ====== ERROR DURING SYNC ======');
       console.error('[SessionPage.syncUserDataFromFirestore] ERROR during sync:', error);
       throw error;
     }

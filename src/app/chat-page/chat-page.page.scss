@@ -668,6 +668,7 @@
   font-size: 20px; 
   padding: 8px 10px;
   min-width: 44px;
+  max-width: 50%;
   min-height: 44px;
   display: flex;
   align-items: center;
@@ -1539,6 +1540,7 @@ $sheet-transition: transform 0.32s cubic-bezier(0.4, 0, 0.2, 1);
 
 .radius-selection-overlay {
 	position: fixed;
+	right: 15px;
 	inset: 0;
 	z-index: 1250;
 	display: flex;
@@ -1923,7 +1925,7 @@ $sheet-transition: transform 0.32s cubic-bezier(0.4, 0, 0.2, 1);
 		background: white;
 		position: relative;
 		top: -15%;
-		left: 20%;
+		left: 9%;
 		border-bottom-left-radius: 20px;
 		border-bottom-right-radius: 0px;
 		border-top-left-radius: 20px;
@@ -2124,8 +2126,8 @@ $attachment-sheet-transition: transform 0.28s cubic-bezier(0.4, 0, 0.2, 1);
 .attachment-grid {
 	display: grid;
 	grid-template-columns: repeat(2, 1fr);
-	gap: 12px;
-	padding: 8px 5px 55px 5px;
+	gap: 0px;
+	padding: 8px 2px 55px 2px;
 }
 
 .attachment-item {
@@ -2133,8 +2135,9 @@ $attachment-sheet-transition: transform 0.28s cubic-bezier(0.4, 0, 0.2, 1);
 	flex-direction: column;
 	align-items: center;
 	justify-content: center;
-	gap: 8px;
-	padding: 16px;
+	gap: 6px;
+	padding: 12px 8px;
+	max-width: 85%;
 	border: 1px solid #ececec;
 	border-radius: 12px;
 	background: #fff;
