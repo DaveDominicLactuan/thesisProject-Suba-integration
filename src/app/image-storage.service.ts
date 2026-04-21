@@ -25,6 +25,9 @@ export interface StoredImage {
   statusMessage?: string;
   hasPrediction?: boolean;
   prediction?: { type: string; shape: string; severity?: string };
+  // S3 upload keys for session copying
+  originalS3Key?: string;
+  withBoxesS3Key?: string;
 }
 
 export interface ImageSession {
@@ -111,24 +114,83 @@ export class ImageStorageService {
         platform: typeof navigator !== 'undefined' ? (navigator.platform || 'unknown') : 'unknown'
       };
 
+      console.log('[ImageStorageService] ========== FIRESTORE SAVE SESSION ==========');
+      console.log('[ImageStorageService] Session to save:', {
+        id: s.id,
+        name: s.name,
+        createdBy: createdBy,
+        imageKeysCount: s.imageKeys.length,
+        imageKeysSample: s.imageKeys.slice(0, 2).map((k: string) => typeof k === 'string' ? k.substring(0, 50) + '...' : k)
+      });
+      
       // write session document
       const sessionRef = doc(this.firestore, 'sessionsImages', sessionId);
-      await setDoc(sessionRef, {
+      const sessionData = {
         name: s.name,
         imageKeys: s.imageKeys,
         createdAt: serverTimestamp(),
         localId: s.id,
         createdBy: createdBy || null,
         clientInfo
+      };
+      
+      console.log('[ImageStorageService] 📝 Saving session document to Firestore:', {
+        docPath: `sessionsImages/${sessionId}`,
+        data: {
+          name: sessionData.name,
+          createdBy: sessionData.createdBy,
+          imageKeysCount: sessionData.imageKeys.length,
+          clientInfo: sessionData.clientInfo
+        }
       });
+      
+      await setDoc(sessionRef, sessionData);
+      console.log('[ImageStorageService] ✅ Session document saved');
 
       // write images documents (one per imageKey)
+      // IMPORTANT: imageKeys may contain filenames from copied sessions, so we need to search by both original AND filename
       for (const key of s.imageKeys) {
-        const entry = this.getEntryForImage(key) || this.storedImages.find(si => si.original === key || si.filename === key);
-        if (!entry) continue;
+        console.log(`[ImageStorageService] 📝 SAVING IMAGE DOCUMENT ${key.substring(0, 50)}...`);
+        
+        // Try multiple lookup strategies
+        let entry = this.getEntryForImage(key); // Try by original (base64)
+        
+        if (!entry) {
+          // If not found by original, search by filename
+          entry = this.storedImages.find(si => si.filename === key);
+          if (entry) {
+            console.log(`[ImageStorageService] ✅ Found image by filename: ${key}`);
+          }
+        } else {
+          console.log(`[ImageStorageService] ✅ Found image by original key`);
+        }
+        
+        // Also try searching by the full string if it looks like a base64
+        if (!entry && key.startsWith('data:')) {
+          entry = this.storedImages.find(si => si.original === key);
+        }
+        
+        if (!entry) {
+          console.warn(`[ImageStorageService] ❌ Image not found for key: ${key.substring(0, 50)}...`);
+          console.warn(`[ImageStorageService] Available images:`, this.storedImages.map(si => ({
+            filename: si.filename,
+            hasOriginal: !!si.original,
+            originalLength: si.original?.length || 0
+          })));
+          continue;
+        }
+        
+        console.log(`[ImageStorageService] ✅ Found image:`, {
+          filename: entry.filename,
+          key: key.substring(0, 50) + '...',
+          hasS3Original: !!entry.originalS3Key,
+          hasS3WithBoxes: !!entry.withBoxesS3Key
+        });
+        
         const safeId = `${sessionId}_${(entry.filename || key).toString().slice(0, 50).replace(/[^a-zA-Z0-9_-]/g, '_')}`;
         const imgRef = doc(this.firestore, 'images', safeId);
-        await setDoc(imgRef, {
+        
+        const imageData = {
           sessionId,
           imageKey: key,
           original: entry.original,
@@ -137,12 +199,38 @@ export class ImageStorageService {
           timestamp: entry.timestamp,
           detectionMessage: entry.detectionMessage,
           prediction: entry.prediction ?? null,
+          originalS3Key: entry.originalS3Key,
+          withBoxesS3Key: entry.withBoxesS3Key,
           createdAt: serverTimestamp(),
           createdBy: createdBy || null
+        };
+        
+        console.log(`[ImageStorageService] 📝 Saving image document to Firestore:`, {
+          docPath: `images/${safeId}`,
+          filename: entry.filename,
+          s3KeyOriginal: entry.originalS3Key,
+          s3KeyWithBoxes: entry.withBoxesS3Key,
+          createdBy: createdBy,
+          hasOriginal: !!entry.original,
+          hasWithBoxes: !!entry.withBoxes
         });
+        
+        await setDoc(imgRef, imageData);
+        console.log(`[ImageStorageService] ✅ Image document saved to ${safeId}`);
       }
+      
+      console.log('[ImageStorageService] ========== ALL IMAGES SAVED ==========');
     } catch (err) {
-      console.error('[ImageStorageService] saveSessionWithImagesToFirestore failed', err);
+      console.error('[ImageStorageService] ❌ saveSessionWithImagesToFirestore FAILED');
+      console.error('[ImageStorageService] Error:', err);
+      console.error('[ImageStorageService] Session:', s);
+      console.error('[ImageStorageService] Session imageKeys:', s?.imageKeys);
+      console.error('[ImageStorageService] Service storedImages count:', this.storedImages.length);
+      console.error('[ImageStorageService] Available storedImages:', this.storedImages.map(si => ({
+        filename: si.filename,
+        hasOriginal: !!si.original,
+        originalLength: si.original?.length || 0
+      })));
       throw err;
     }
   }
@@ -240,6 +328,11 @@ export class ImageStorageService {
       return Promise.resolve(this.storedImages.slice());
     }
 
+    /** Generate a unique session ID (format: s-{timestamp}) */
+    generateSessionId(): string {
+      return `s-${Date.now()}`;
+    }
+
     /** Session APIs */
     createSession(name: string, imageKeys: string[] = []): ImageSession {
       const session: ImageSession = {
@@ -254,6 +347,39 @@ export class ImageStorageService {
       this.lastCreatedSessionName = session.name;
       this.persistSessions();
       try { localStorage.setItem(this.LAST_SESSION_KEY, JSON.stringify({ id: session.id, name: session.name })); } catch {}
+      return session;
+    }
+
+    /**
+     * Register an existing session object (useful for cross-page handoff or copying sessions).
+     * Adds the session to the internal sessions array if it doesn't already exist.
+     * Used by chat-page when copying a session to another user.
+     */
+    registerSession(session: ImageSession): ImageSession {
+      if (!session || !session.id) {
+        throw new Error('Invalid session object for registration');
+      }
+      
+      // Check if session already exists
+      const existingIndex = this.sessions.findIndex(s => s.id === session.id);
+      if (existingIndex !== -1) {
+        // Update existing session
+        this.sessions[existingIndex] = session;
+        console.log('[ImageStorageService] Session updated:', session.id);
+      } else {
+        // Add new session
+        this.sessions.unshift(session);
+        console.log('[ImageStorageService] Session registered:', session.id);
+      }
+      
+      // Persist and update last session tracking
+      this.persistSessions();
+      this.lastCreatedSessionId = session.id;
+      this.lastCreatedSessionName = session.name;
+      try { 
+        localStorage.setItem(this.LAST_SESSION_KEY, JSON.stringify({ id: session.id, name: session.name })); 
+      } catch {}
+      
       return session;
     }
 
@@ -350,6 +476,11 @@ export class ImageStorageService {
     // ✅ Get an entry by its image key
     getEntryForImage(imageKey: string): StoredImage | undefined {
       return this.entryMap.get(imageKey);
+    }
+
+    // ✅ Get an entry by filename (useful for session copying where imageKeys contain filenames)
+    getEntryByFilename(filename: string): StoredImage | undefined {
+      return this.storedImages.find(img => img.filename === filename);
     }
   
     // ✅ Get all image entries as object

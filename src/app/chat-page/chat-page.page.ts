@@ -604,12 +604,20 @@ export class ChatPagePage implements OnInit, OnDestroy {
 
       for (let i = 0; i < totalImages; i++) {
         const imageKey = sessionImageKeys[i];
-        const originalImage = (this.imageStorage as any).getEntryForImage(imageKey);
+        // Try lookup by original (base64) first, then by filename (for copied sessions)
+        let originalImage = (this.imageStorage as any).getEntryForImage(imageKey);
+        if (!originalImage) {
+          // imageKey might be a filename, not a base64 key
+          originalImage = (this.imageStorage as any).getEntryByFilename(imageKey);
+        }
         
         if (!originalImage) {
           console.warn('[ChatPage] Image not found locally:', imageKey);
+          console.warn('[ChatPage] All stored images:', (this.imageStorage as any).getImages().map((img: any) => ({ filename: img.filename, hasOriginal: !!img.original })));
           continue;
         }
+
+        console.log('[ChatPage] ✅ Found image:', { imageKey, filename: originalImage.filename, hasOriginal: !!originalImage.original, hasS3Key: !!originalImage.originalS3Key });
 
         this.updateCopyProgress(
           15 + ((i) / totalImages) * 30,
@@ -640,12 +648,35 @@ export class ChatPagePage implements OnInit, OnDestroy {
           }
         }
 
+        // Validate that we have image data
+        if (!originalDataUrl && !withBoxesDataUrl) {
+          console.warn('[ChatPage] ❌ No image data available (original and withBoxes are both empty)');
+          console.warn('[ChatPage] Image details:', { 
+            filename: originalImage.filename, 
+            hasOriginal: !!originalImage.original,
+            hasWithBoxes: !!originalImage.withBoxes,
+            hasS3Original: !!originalImage.originalS3Key,
+            hasS3WithBoxes: !!originalImage.withBoxesS3Key
+          });
+          continue;
+        }
+
         // Transform filename to use receiver's userId
         const newFilename = this.transformImageFilenameUserId(imageKey, receiverUserId);
-        const newWithBoxesFilename = this.transformImageFilenameUserId(
-          (this.imageStorage as any).buildWithBoxesFilename(imageKey),
-          receiverUserId
-        );
+        
+        // Transform withBoxes filename if it exists (handle both cases: with/without _withBoxes suffix)
+        let newWithBoxesFilename = newFilename; // Default to same as original if no withBoxes
+        if (originalImage.withBoxes && originalImage.withBoxes !== originalImage.original) {
+          // If withBoxes is different from original, transform it too
+          // First, try to transform the original withBoxes filename if available
+          if (originalImage.filename) {
+            // Derive withBoxes filename from original by replacing userID part
+            newWithBoxesFilename = this.transformImageFilenameUserId(originalImage.filename, receiverUserId);
+          } else {
+            // Fallback: just ensure the userId in imageKey is transformed
+            newWithBoxesFilename = this.transformImageFilenameUserId(imageKey, receiverUserId);
+          }
+        }
 
         // Transform S3 keys to use receiver's userId
         const newOriginalS3Key = originalImage.originalS3Key
@@ -670,6 +701,7 @@ export class ChatPagePage implements OnInit, OnDestroy {
           original: originalDataUrl,
           withBoxes: withBoxesDataUrl,
           filename: newFilename,
+          withBoxesFilename: newWithBoxesFilename, // Store the transformed withBoxes filename
           userId: receiverUserId,
           sessionId: newSession.id,
           originalKey: imageKey,
@@ -688,34 +720,114 @@ export class ChatPagePage implements OnInit, OnDestroy {
         transformedImages.push(transformedImage);
       }
 
-      // Update session imageKeys with new filenames
+      // Set imageKeys - use transformed filenames (preserving the same structure as original session)
+      // The original session's imageKeys contain filenames, so the new session should too
       newSession.imageKeys = transformedImages.map(img => img.filename);
+      console.log('[ChatPage] ========== SESSION CREATED ==========');
+      console.log('[ChatPage] Full Session Object:', {
+        id: newSession.id,
+        name: newSession.name,
+        userId: newSession.userId,
+        created: newSession.created,
+        imageKeysCount: newSession.imageKeys.length,
+        imageKeysSample: newSession.imageKeys.slice(0, 1).map((k: string) => k.substring(0, 50) + '...')
+      });
+      console.log('[ChatPage] Session Object (Full):', JSON.stringify(newSession, null, 2));
+      console.log('[ChatPage] Transformed Images Count:', transformedImages.length);
+      
+      // Log each transformed image
+      transformedImages.forEach((img, idx) => {
+        console.log(`[ChatPage] ========== TRANSFORMED IMAGE #${idx + 1} ==========`);
+        console.log(`[ChatPage] Image Object:`, {
+          filename: img.filename,
+          userId: img.userId,
+          sessionId: img.sessionId,
+          originalKey: img.originalKey,
+          hasOriginal: !!img.original,
+          originalLength: img.original?.length || 0,
+          hasWithBoxes: !!img.withBoxes,
+          withBoxesLength: img.withBoxes?.length || 0,
+          timestamp: img.timestamp
+        });
+        console.log(`[ChatPage] Full Image #${idx + 1}:`, JSON.stringify({
+          filename: img.filename,
+          userId: img.userId,
+          sessionId: img.sessionId,
+          originalKey: img.originalKey,
+          originalS3Key: img.originalS3Key,
+          withBoxesS3Key: img.withBoxesS3Key,
+          hasOriginal: !!img.original,
+          hasWithBoxes: !!img.withBoxes
+        }, null, 2));
+      });
 
-      this.updateCopyProgress(50, 'Uploading images to S3 with new user ID...');
+      // Step 4: Register session FIRST before storing images
+      // This ensures the session exists in the service so saveSessionWithImagesToFirestore can find it
+      this.updateCopyProgress(50, 'Registering session in service...');
+      
+      try {
+        console.log('[ChatPage] Registering new session in service:', {
+          sessionId: newSession.id,
+          sessionName: newSession.name,
+          receiverId: receiverUserId,
+          imageCount: transformedImages.length
+        });
+        
+        const svc: any = this.imageStorage;
+        if (typeof svc.registerSession === 'function') {
+          svc.registerSession(newSession);
+          console.log('[ChatPage] ✅ Session registered successfully');
+        } else {
+          console.error('[ChatPage] ❌ registerSession method not found');
+          throw new Error('registerSession method not available');
+        }
+      } catch (e) {
+        console.error('[ChatPage] Session registration FAILED:', e);
+        throw e; // Critical error - cannot proceed
+      }
 
-      // Step 4: Upload transformed images to S3 with new keys
-      const s3UploadResults: any[] = [];
+      // Step 5: Upload transformed images to S3 with new keys
+      this.updateCopyProgress(55, 'Uploading images to S3 with new user ID...');
+      
       for (let i = 0; i < transformedImages.length; i++) {
         const image = transformedImages[i];
         
         this.updateCopyProgress(
-          50 + ((i) / transformedImages.length) * 20,
+          55 + ((i) / transformedImages.length) * 15,
           `Uploading image ${i + 1}/${transformedImages.length} to S3...`
         );
 
         try {
+          console.log(`[ChatPage] Uploading image ${i + 1}/${transformedImages.length}:`, {
+            originalFilename: image.originalKey,
+            newFilename: image.filename,
+            newUserId: image.userId
+          });
+          
           // Upload original image to S3 with new key (only if original data URL exists)
           if (image.original) {
             try {
+              console.log(`[ChatPage] 📤 S3 UPLOAD ORIGINAL - Details:`, {
+                filename: image.filename,
+                dataUrlLength: image.original?.length || 0,
+                sessionId: newSession.id
+              });
+              
               const uploadResult = await (this.imageStorage as any).uploadSessionImageOriginal(
                 image.original,
                 newSession.id,
-                image.filename
+                image.filename  // Pass transformed filename
               );
               if (uploadResult) {
-                console.log('[ChatPage] Uploaded original to S3:', uploadResult?.s3Key);
+                console.log('[ChatPage] ✅ ORIGINAL UPLOADED - S3 Key:', {
+                  s3Key: uploadResult?.s3Key,
+                  url: uploadResult?.url,
+                  filename: image.filename
+                });
                 image.originalS3Key = uploadResult?.s3Key;
                 image.originalS3Url = uploadResult?.url;
+              } else {
+                console.warn('[ChatPage] ⚠️ Upload returned no result for original image');
               }
             } catch (e) {
               console.warn('[ChatPage] Failed to upload original image:', e);
@@ -723,24 +835,38 @@ export class ChatPagePage implements OnInit, OnDestroy {
           }
 
           // Upload withBoxes image to S3 with new key (only if withBoxes data URL exists)
-          if (image.withBoxes) {
+          if (image.withBoxes && image.withBoxes !== image.original) {
             try {
+              // Use the pre-calculated transformed withBoxes filename
+              const withBoxesFileName = image.withBoxesFilename || 
+                `${image.filename.replace(/(\.jpg|\.png)$/i, '')}_withBoxes${image.filename.match(/(\.jpg|\.png)$/i)?.[0] || '.jpg'}`;
+              
+              console.log('[ChatPage] 📤 S3 UPLOAD WITHBOXES - Details:', {
+                filename: withBoxesFileName,
+                dataUrlLength: image.withBoxes?.length || 0,
+                sessionId: newSession.id
+              });
+              
               const uploadResult = await (this.imageStorage as any).uploadSessionImageWithBoxes(
                 image.withBoxes,
                 newSession.id,
-                image.filename
+                withBoxesFileName  // Pass transformed filename
               );
               if (uploadResult) {
-                console.log('[ChatPage] Uploaded withBoxes to S3:', uploadResult?.s3Key);
+                console.log('[ChatPage] ✅ WITHBOXES UPLOADED - S3 Key:', {
+                  s3Key: uploadResult?.s3Key,
+                  url: uploadResult?.url,
+                  filename: withBoxesFileName
+                });
                 image.withBoxesS3Key = uploadResult?.s3Key;
                 image.withBoxesS3Url = uploadResult?.url;
+              } else {
+                console.warn('[ChatPage] ⚠️ Upload returned no result for withBoxes image');
               }
             } catch (e) {
               console.warn('[ChatPage] Failed to upload withBoxes image:', e);
             }
           }
-
-          s3UploadResults.push(image);
         } catch (e) {
           console.warn('[ChatPage] S3 upload warning for image:', image.filename, e);
         }
@@ -748,10 +874,34 @@ export class ChatPagePage implements OnInit, OnDestroy {
 
       this.updateCopyProgress(72, 'Storing images locally...');
 
-      // Step 5: Store transformed images using ImageStorageService
+      // Step 6: Store transformed images using ImageStorageService
+      // CRITICAL: Images must be stored with the ORIGINAL property as the key
+      // so that Firestore save can find them by their original base64 string
       for (let i = 0; i < transformedImages.length; i++) {
         const image = transformedImages[i];
-        await (this.imageStorage as any).addImage(image, newSession.id);
+        
+        console.log(`[ChatPage] 💾 STORING IMAGE ${i + 1}/${transformedImages.length} LOCALLY`);
+        console.log(`[ChatPage] Image Before addImage:`, {
+          filename: image.filename,
+          hasOriginal: !!image.original,
+          originalLength: image.original?.length || 0,
+          s3KeyOriginal: image.originalS3Key,
+          s3KeyWithBoxes: image.withBoxesS3Key
+        });
+        console.log(`[ChatPage] Full Image Object Before Store:`, JSON.stringify({
+          filename: image.filename,
+          userId: image.userId,
+          sessionId: image.sessionId,
+          originalS3Key: image.originalS3Key,
+          withBoxesS3Key: image.withBoxesS3Key,
+          hasOriginal: !!image.original,
+          hasWithBoxes: !!image.withBoxes
+        }, null, 2));
+        
+        // Call addImage with only the image parameter
+        await (this.imageStorage as any).addImage(image);
+        
+        console.log(`[ChatPage] ✅ Image ${i + 1} stored to service`);
         
         this.updateCopyProgress(
           72 + ((i + 1) / transformedImages.length) * 12,
@@ -759,31 +909,67 @@ export class ChatPagePage implements OnInit, OnDestroy {
         );
       }
 
-      this.updateCopyProgress(87, 'Saving session...');
+      this.updateCopyProgress(87, 'Persisting to Firestore...');
 
-      // Step 6: Save session to receiver's user record
+      // Step 7: Persist session with transformed images to Firestore
+      // This writes the copied session and all its images to Firestore under receiver's ownership
       try {
-        console.log('[ChatPage] Attempting to save session to receiver:', {
-          receiverId: receiverUserId,
+        console.log('[ChatPage] ========== FIRESTORE SAVE START ==========');
+        console.log('[ChatPage] 📝 FINAL SESSION BEFORE FIRESTORE SAVE:', {
           sessionId: newSession.id,
-          sessionData: newSession
+          sessionName: newSession.name,
+          receiverId: receiverUserId,
+          imageCount: transformedImages.length,
+          imageKeysCount: newSession.imageKeys.length,
+          imageKeysSample: newSession.imageKeys.slice(0, 2).map((k: string) => k.substring(0, 50) + '...')
         });
-        await (this.imageStorage as any).saveSessionToUser(receiverUserId, newSession);
-        console.log('[ChatPage] Session saved successfully to receiver');
+        console.log('[ChatPage] 📝 COMPLETE SESSION OBJECT:', JSON.stringify(newSession, null, 2));
+        
+        console.log('[ChatPage] 📝 IMAGES TO BE SAVED (Firestore):');
+        transformedImages.forEach((img, idx) => {
+          console.log(`[ChatPage] ========== IMAGE #${idx + 1} FOR FIRESTORE ==========`);
+          console.log(`[ChatPage] Image Details:`, {
+            filename: img.filename,
+            userId: img.userId,
+            sessionId: img.sessionId,
+            originalS3Key: img.originalS3Key,
+            withBoxesS3Key: img.withBoxesS3Key,
+            hasOriginal: !!img.original,
+            hasWithBoxes: !!img.withBoxes
+          });
+          console.log(`[ChatPage] Full Image #${idx + 1}:`, JSON.stringify({
+            filename: img.filename,
+            userId: img.userId,
+            sessionId: img.sessionId,
+            originalS3Key: img.originalS3Key,
+            withBoxesS3Key: img.withBoxesS3Key,
+            timestamp: img.timestamp,
+            prediction: img.prediction
+          }, null, 2));
+        });
+        
+        try {
+          console.log('[ChatPage] 📝 Service storedImages count:', (this.imageStorage as any).getImages().length);
+          console.log('[ChatPage] 📝 Service sessions count:', (this.imageStorage as any).getSessions().length);
+        } catch (err) {
+          console.warn('[ChatPage] Could not get service counts:', err);
+        }
+        
+        await (this.imageStorage as any).saveSessionWithImagesToFirestore(newSession.id, { createdBy: receiverUserId });
+        
+        console.log('[ChatPage] ✅ Session and images persisted to Firestore successfully');
+        console.log('[ChatPage] ========== FIRESTORE SAVE COMPLETE ==========');
       } catch (e) {
-        console.error('[ChatPage] Failed to save session to receiver. Error:', e);
-        console.error('[ChatPage] Session object was:', newSession);
-        console.error('[ChatPage] Receiver ID was:', receiverUserId);
-        throw e; // Re-throw to trigger catch block below
-      }
-
-      this.updateCopyProgress(94, 'Storing to Firestore...');
-
-      // Step 7: Persist session with images to Firestore
-      try {
-        await (this.imageStorage as any).saveSessionWithImagesToFirestore(newSession.id);
-      } catch (e) {
-        console.warn('[ChatPage] Firestore save warning:', e);
+        console.error('[ChatPage] ❌ Firestore persistence FAILED:', e);
+        console.error('[ChatPage] Session was:', newSession);
+        console.error('[ChatPage] Images were:', transformedImages.map(img => ({
+          filename: img.filename,
+          userId: img.userId,
+          sessionId: img.sessionId,
+          s3KeyOriginal: img.originalS3Key,
+          s3KeyWithBoxes: img.withBoxesS3Key
+        })));
+        throw e; // Re-throw to trigger catch block so user knows there was an issue
       }
 
       this.updateCopyProgress(100, 'Complete!');
@@ -912,7 +1098,7 @@ export class ChatPagePage implements OnInit, OnDestroy {
 
       // Request location permission for location-based features
       console.log('[ChatPage] Requesting location permission for enhanced features...');
-      await this.requestLocationPermissionForFeatures();
+      // await this.requestLocationPermissionForFeatures();
     } catch (e) {
       console.error('[ChatPage] Error during sharing completion:', e);
     }
@@ -999,27 +1185,43 @@ export class ChatPagePage implements OnInit, OnDestroy {
   /**
    * Transform an image filename to use a new userId
    * Format: userID:oldUserIdpart...sessionId:sessionIdpart...
-   * Replace the old userId with new userId while preserving the rest
+   * Replace ONLY the FIRST userID (up to first sessionId:) with new userId while preserving the rest
+   * Example transformation:
+   *   Input:  userID:qlqoKE1Gw3RhjnML9U3YA20vava2sessionId:s-1776736184763img3_userID:...
+   *   Output: userID:(newUserId)sessionId:s-1776736184763img3_userID:...
    */
   private transformImageFilenameUserId(filename: string, newUserId: string): string {
-    // Match pattern: userID:XXXXX (capture everything up to 'sessionId')
-    // Example: userID:qlqoKE1Gw3RhjnML9U3YA20vava2sessionId:s-1775908468155img1_crack1041120261954.jpg
-    
     try {
-      const match = filename.match(/^userID:([^s]*)sessionId:(.*)$/);
+      // Use non-greedy match to capture the FIRST userID up to the FIRST 'sessionId:'
+      // Pattern: ^userID:(.+?)sessionId:
+      // The .+? matches minimum characters (non-greedy) until the literal 'sessionId:'
+      const match = filename.match(/^userID:(.+?)sessionId:/);
+      
       if (match) {
         const oldUserId = match[1];
-        const rest = match[2];
-        const newFilename = `userID:${newUserId}sessionId:${rest}`;
-        console.log(`[ChatPage] Filename transform: ${oldUserId} -> ${newUserId}`);
+        // Extract everything AFTER the first 'sessionId:' to preserve the rest of the filename
+        const restIndex = filename.indexOf('sessionId:');
+        const rest = filename.substring(restIndex); // includes 'sessionId:' and everything after
+        const newFilename = `userID:${newUserId}${rest}`;
+        
+        console.log(`[ChatPage] Filename transform successful:`);
+        console.log(`  Original:    ${filename}`);
+        console.log(`  Transformed: ${newFilename}`);
+        console.log(`  Old UserID:  ${oldUserId}`);
+        console.log(`  New UserID:  ${newUserId}`);
+        
         return newFilename;
       } else {
-        // If pattern doesn't match, try to just prepend the new userId
-        console.warn('[ChatPage] Filename pattern not recognized, returning original:', filename);
+        // Pattern doesn't match - return original and log for debugging
+        console.warn('[ChatPage] Filename pattern not recognized for transformation');
+        console.warn(`  Pattern expected: userID:<userId>sessionId:...`);
+        console.warn(`  Actual filename:  ${filename}`);
         return filename;
       }
     } catch (e) {
       console.error('[ChatPage] Error transforming filename:', e);
+      console.error(`  Filename: ${filename}`);
+      console.error(`  New UserID: ${newUserId}`);
       return filename;
     }
   }

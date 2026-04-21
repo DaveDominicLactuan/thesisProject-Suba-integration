@@ -179,12 +179,27 @@ export class ImageStorageService {
   /** Upload original image to S3 with session-scoped filename */
   async uploadSessionImageOriginal(dataUrl: string, sessionId: string, originalFilename: string): Promise<{ url: string; s3Key: string } | null> {
     try {
-      // Generate S3 filename using session info
-      const s3Filename = this.generateSessionFilename({
-        sessionId,
-        filename: originalFilename,
-        imageType: 'original',
-        timestamp: new Date().toISOString()
+      // Use the provided filename directly (already transformed with correct userID if called from chat-page)
+      // Do NOT regenerate it, as that would use currentUserId instead of the transformed userID
+      let s3Filename = originalFilename;
+      
+      // If filename doesn't look like it has userID prefix, generate it
+      // (for backward compatibility with direct calls)
+      if (!s3Filename.includes('userID:')) {
+        s3Filename = this.generateSessionFilename({
+          sessionId,
+          filename: originalFilename,
+          imageType: 'original',
+          timestamp: new Date().toISOString()
+        });
+      }
+
+      console.log('[ImageStorageService] 📤 UPLOADING ORIGINAL TO S3:', {
+        providedFilename: originalFilename,
+        finalS3Filename: s3Filename,
+        alreadyTransformed: originalFilename.includes('userID:'),
+        sessionId: sessionId,
+        userIDprefix: s3Filename.split('sessionId:')[0]
       });
 
       // Convert data URL to Uint8Array
@@ -198,19 +213,19 @@ export class ImageStorageService {
         ContentType: 'image/jpeg'
       };
 
-      console.log('[ImageStorageService] 📤 Attempting to upload original image to S3:', {
-        s3Filename,
+      console.log('[ImageStorageService] 📤 S3 UPLOAD PARAMS:', {
+        Key: s3Filename,
+        Bucket: this.bucketName,
         dataUrlLength: dataUrl?.length || 0,
-        uint8ArrayLength: uint8Array.length,
-        bucket: this.bucketName,
-        region: this.region
+        uint8ArrayLength: uint8Array.length
       });
+      
       const command = new PutObjectCommand(params);
       const result = await this.s3Client.send(command);
 
       const finalUrl = `https://${this.bucketName}.s3.${this.region}.amazonaws.com/${s3Filename}`;
 
-      console.log('✅ Original image uploaded to S3 with key:', {
+      console.log('✅ ORIGINAL UPLOADED TO S3:', {
         s3Key: s3Filename,
         url: finalUrl,
         s3Response: result.$metadata
@@ -239,12 +254,27 @@ export class ImageStorageService {
   /** Upload withBoxes image to S3 with session-scoped filename */
   async uploadSessionImageWithBoxes(dataUrl: string, sessionId: string, originalFilename: string): Promise<{ url: string; s3Key: string } | null> {
     try {
-      // Generate S3 filename using session info
-      const s3Filename = this.generateSessionFilename({
-        sessionId,
-        filename: originalFilename,
-        imageType: 'withBoxes',
-        timestamp: new Date().toISOString()
+      // Use the provided filename directly (already transformed with correct userID if called from chat-page)
+      // Do NOT regenerate it, as that would use currentUserId instead of the transformed userID
+      let s3Filename = originalFilename;
+      
+      // If filename doesn't look like it has userID prefix, generate it
+      // (for backward compatibility with direct calls)
+      if (!s3Filename.includes('userID:')) {
+        s3Filename = this.generateSessionFilename({
+          sessionId,
+          filename: originalFilename,
+          imageType: 'withBoxes',
+          timestamp: new Date().toISOString()
+        });
+      }
+
+      console.log('[ImageStorageService] 📤 UPLOADING WITHBOXES TO S3:', {
+        providedFilename: originalFilename,
+        finalS3Filename: s3Filename,
+        alreadyTransformed: originalFilename.includes('userID:'),
+        sessionId: sessionId,
+        userIDprefix: s3Filename.split('sessionId:')[0]
       });
 
       // Convert data URL to Uint8Array
@@ -258,19 +288,19 @@ export class ImageStorageService {
         ContentType: 'image/jpeg'
       };
 
-      console.log('[ImageStorageService] 📤 Attempting to upload withBoxes image to S3:', {
-        s3Filename,
+      console.log('[ImageStorageService] 📤 S3 UPLOAD PARAMS (WITHBOXES):', {
+        Key: s3Filename,
+        Bucket: this.bucketName,
         dataUrlLength: dataUrl?.length || 0,
-        uint8ArrayLength: uint8Array.length,
-        bucket: this.bucketName,
-        region: this.region
+        uint8ArrayLength: uint8Array.length
       });
+      
       const command = new PutObjectCommand(params);
       const result = await this.s3Client.send(command);
 
       const finalUrl = `https://${this.bucketName}.s3.${this.region}.amazonaws.com/${s3Filename}`;
 
-      console.log('✅ WithBoxes image uploaded to S3 with key:', {
+      console.log('✅ WITHBOXES UPLOADED TO S3:', {
         s3Key: s3Filename,
         url: finalUrl,
         s3Response: result.$metadata
@@ -779,6 +809,36 @@ export class ImageStorageService {
     this.sessionImageCounters.set(normalized.id, normalized.imageKeys.length);
     this.persistSessions();
     return true;
+  }
+
+  /**
+   * Register an existing session object (useful for cross-page handoff or copying sessions).
+   * Adds the session to the internal sessions array if it doesn't already exist, or updates it if it does.
+   * Used by chat-page when copying a session to another user.
+   */
+  registerSession(session: ImageSession): ImageSession {
+    if (!session || !session.id) {
+      throw new Error('Invalid session object for registration');
+    }
+
+    // Check if session already exists
+    const existingIndex = this.sessions.findIndex(s => s.id === session.id);
+    if (existingIndex !== -1) {
+      // Update existing session
+      this.sessions[existingIndex] = session;
+      console.log('[ImageStorageService] Session updated:', session.id);
+    } else {
+      // Add new session
+      this.sessions.unshift(session);
+      console.log('[ImageStorageService] Session registered:', session.id);
+    }
+
+    // Update counter for this session
+    this.sessionImageCounters.set(session.id, session.imageKeys?.length || 0);
+
+    // Persist and return
+    this.persistSessions();
+    return session;
   }
 
   /** Add an image from remote source if it does not already exist locally. */
