@@ -15,6 +15,23 @@ service cloud.firestore {
         && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isAdmin == true;
     }
 
+    function isOwnedByCurrentUser(data) {
+      return isSignedIn()
+        && (
+          data.userId == request.auth.uid
+          || data.userID == request.auth.uid
+          || data.createdBy == request.auth.uid
+          || data.sharedBy == request.auth.uid
+        );
+    }
+
+    function isShareWritePayload(data) {
+      return isSignedIn()
+        && data.createdBy == request.auth.uid
+        && data.userId is string
+        && data.userId.size() > 0;
+    }
+
     function isChatParticipantByData(participants) {
       return isSignedIn() && request.auth.uid in participants;
     }
@@ -103,12 +120,13 @@ service cloud.firestore {
 
     // ========== SESSIONS IMAGES COLLECTION ==========
     match /sessionsImages/{sessionId} {
-      allow read: if isSignedIn()
-        && (isAdmin() || resource.data.userId == request.auth.uid);
+      allow read: if isAdmin() || isOwnedByCurrentUser(resource.data);
       allow write: if isSignedIn()
-        && request.resource.data.userId == request.auth.uid;
-      allow delete: if isSignedIn()
-        && (isAdmin() || resource.data.userId == request.auth.uid);
+        && (
+          isOwnedByCurrentUser(request.resource.data)
+          || isShareWritePayload(request.resource.data)
+        );
+      allow delete: if isAdmin() || isOwnedByCurrentUser(resource.data);
     }
 
     // ========== IMAGES COLLECTION ==========
@@ -116,16 +134,19 @@ service cloud.firestore {
       allow read: if isSignedIn()
         && (
           isAdmin()
-          || resource.data.userId == request.auth.uid
+          || isOwnedByCurrentUser(resource.data)
           || (
             resource.data.sessionId != null
-            && get(/databases/$(database)/documents/sessionsImages/$(resource.data.sessionId)).data.userId == request.auth.uid
+            && exists(/databases/$(database)/documents/sessionsImages/$(resource.data.sessionId))
+            && isOwnedByCurrentUser(get(/databases/$(database)/documents/sessionsImages/$(resource.data.sessionId)).data)
           )
         );
       allow write: if isSignedIn()
-        && request.resource.data.userId == request.auth.uid;
-      allow delete: if isSignedIn()
-        && (isAdmin() || resource.data.userId == request.auth.uid);
+        && (
+          isOwnedByCurrentUser(request.resource.data)
+          || isShareWritePayload(request.resource.data)
+        );
+      allow delete: if isSignedIn() && (isAdmin() || isOwnedByCurrentUser(resource.data));
     }
 
     // ========== PENDING ACCOUNTS COLLECTION ==========

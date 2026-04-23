@@ -912,7 +912,7 @@ export class ImageStorageService {
   }
 
   /** Persist a single session and its images to Firestore using filename as image doc ID */
-  async saveSessionWithImagesToFirestore(sessionId: string): Promise<void> {
+  async saveSessionWithImagesToFirestore(sessionId: string, userIdOverride?: string): Promise<void> {
     const session = this.sessions.find(s => s.id === sessionId);
     if (!session) {
       console.warn('[ImageStorageService] saveSessionWithImagesToFirestore: session not found', sessionId);
@@ -929,17 +929,24 @@ export class ImageStorageService {
       const currentUid = await this.waitForAuthUserId();
       console.log('[ImageStorageService] currentUserId for saveSessionWithImagesToFirestore', currentUid);
       if (!currentUid) {
+        throw new Error('[ImageStorageService] Cannot write shared session: authenticated sender UID is unavailable.');
+      }
+      const effectiveUserId = typeof userIdOverride === 'string' && userIdOverride.trim().length > 0
+        ? userIdOverride
+        : currentUid;
+      if (!effectiveUserId) {
         console.warn('[ImageStorageService] No authenticated user; skipping Firestore write');
         return;
       }
-      // CRITICAL: Ensure userId is ALWAYS set to currentUid (never null)
-      session.userId = currentUid;
+      const createdByUid = currentUid;
+      // CRITICAL: Ensure userId is ALWAYS set to the effective user id (never null)
+      session.userId = effectiveUserId;
 
       console.log('[ImageStorageService] Saving session to Firestore', {
         sessionId: session.id,
         sessionName: session.name,
         imageCount: imagesForSession.length,
-        userId: currentUid
+        userId: effectiveUserId
       });
       
       // CRITICAL: Log image details before Firestore save to ensure prediction/boxes are present
@@ -959,12 +966,28 @@ export class ImageStorageService {
       const sessionsCollection = collection(this.firestore, this.FIRESTORE_SESSIONS_COLLECTION);
       const imagesCollection = collection(this.firestore, this.FIRESTORE_IMAGES_COLLECTION);
 
-      // Remove existing images for this session so Firestore reflects local state
-      const existingQuery = query(imagesCollection, where('sessionId', '==', session.id), where('userId', '==', currentUid));
-      const existingSnapshot = await getDocs(existingQuery);
-      const deleteBatch = writeBatch(this.firestore);
-      existingSnapshot.forEach(docSnapshot => deleteBatch.delete(docSnapshot.ref));
-      await deleteBatch.commit();
+      // Best-effort cleanup: permission-denied here should not block session/image upsert.
+      try {
+        const existingQuery = query(imagesCollection, where('sessionId', '==', session.id), where('userId', '==', effectiveUserId));
+        const existingSnapshot = await getDocs(existingQuery);
+        if (!existingSnapshot.empty) {
+          const deleteBatch = writeBatch(this.firestore);
+          existingSnapshot.forEach(docSnapshot => deleteBatch.delete(docSnapshot.ref));
+          await deleteBatch.commit();
+          console.log('[ImageStorageService] Removed existing Firestore images before save', {
+            sessionId: session.id,
+            userId: effectiveUserId,
+            deletedCount: existingSnapshot.size
+          });
+        }
+      } catch (cleanupError: any) {
+        console.warn('[ImageStorageService] Skipping pre-save cleanup due to Firestore permissions or query restrictions', {
+          sessionId: session.id,
+          userId: effectiveUserId,
+          code: cleanupError?.code || null,
+          message: cleanupError?.message || String(cleanupError)
+        });
+      }
 
       const batch = writeBatch(this.firestore);
       const sessionRef = doc(sessionsCollection, session.id);
@@ -974,13 +997,15 @@ export class ImageStorageService {
         imageKeys: session.imageKeys || [],
         created: session.created,
         totalBoundingBoxes: session.totalBoundingBoxes || 0,
-        userId: currentUid,
-        sessionId: session.sessionId || null
+        userId: effectiveUserId,
+        sessionId: session.sessionId || null,
+        createdBy: createdByUid,
+        sharedBy: createdByUid
       });
 
       for (const image of imagesForSession) {
         // CRITICAL: Ensure userId is ALWAYS set to currentUid (never null)
-        image.userId = currentUid;
+        image.userId = effectiveUserId;
         // NOTE: Commented out base64 storage to save Firestore quota - using S3 references instead
         // const safeOriginal = await this.clampDataUrlToBytes(image.original, this.FIRESTORE_DOC_MAX_BYTES);
         // const safeWithBoxes = await this.clampDataUrlToBytes(image.withBoxes, this.FIRESTORE_DOC_MAX_BYTES);
@@ -989,7 +1014,9 @@ export class ImageStorageService {
         const firestoreData = {
           timestamp: image.timestamp,
           filename: image.filename,
-          userId: currentUid,
+          userId: effectiveUserId,
+          createdBy: createdByUid,
+          sharedBy: createdByUid,
           sessionId: session.id,
           // NOTE: Commented out - base64 data stored in S3 instead
           // original: safeOriginal,
@@ -1000,17 +1027,17 @@ export class ImageStorageService {
           prediction: image.prediction || null,
           boxes: image.boxes || [],
           // S3 references for original image (full generated filename with userID:sessionId prefix)
-          originalS3Key: image.storagePath || null,   // e.g., "userID:abc123sessionId:xyz789img1crack1041120261109original.jpg"
-          originalS3Url: image.storageUrl || null,    // HTTPS URL to original image
+          originalS3Key: image.originalS3Key || image.storagePath || null,   // e.g., "userID:abc123sessionId:xyz789img1crack1041120261109original.jpg"
+          originalS3Url: image.originalS3Url || image.storageUrl || null,    // HTTPS URL to original image
           // Backward compatibility
-          storagePath: image.storagePath || null,
-          storageUrl: image.storageUrl || null,
+          storagePath: image.originalS3Key || image.storagePath || null,
+          storageUrl: image.originalS3Url || image.storageUrl || null,
           // S3 references for withBoxes image (full generated filename with userID:sessionId prefix)
-          withBoxesS3Key: image.withBoxesStoragePath || null,   // e.g., "userID:abc123sessionId:xyz789img1crack1041120261109withBoxes.jpg"
-          withBoxesS3Url: image.withBoxesStorageUrl || null,    // HTTPS URL to withBoxes image
+          withBoxesS3Key: image.withBoxesS3Key || image.withBoxesStoragePath || null,   // e.g., "userID:abc123sessionId:xyz789img1crack1041120261109withBoxes.jpg"
+          withBoxesS3Url: image.withBoxesS3Url || image.withBoxesStorageUrl || null,    // HTTPS URL to withBoxes image
           // Backward compatibility
-          withBoxesStoragePath: image.withBoxesStoragePath || null,
-          withBoxesStorageUrl: image.withBoxesStorageUrl || null
+          withBoxesStoragePath: image.withBoxesS3Key || image.withBoxesStoragePath || null,
+          withBoxesStorageUrl: image.withBoxesS3Url || image.withBoxesStorageUrl || null
         };
         
         console.log(`[ImageStorageService] 📝 Writing to Firestore for ${image.filename}:`, {
@@ -1024,6 +1051,11 @@ export class ImageStorageService {
         batch.set(imageRef, firestoreData);
       }
 
+      console.log('[ImageStorageService] Committing Firestore batch save', {
+        sessionId: session.id,
+        userId: effectiveUserId,
+        imageWriteCount: imagesForSession.length
+      });
       await batch.commit();
       console.log(`✅ Session and images saved to Firestore: ${session.id}`);
     } catch (error) {

@@ -1,6 +1,6 @@
 import { Injectable } from '@angular/core';
 import { BehaviorSubject, Observable } from 'rxjs';
-import { Firestore, doc, setDoc } from '@angular/fire/firestore';
+import { Firestore, doc, setDoc, getDoc } from '@angular/fire/firestore';
 import { serverTimestamp } from 'firebase/firestore';
 
 
@@ -28,6 +28,10 @@ export interface StoredImage {
   // S3 upload keys for session copying
   originalS3Key?: string;
   withBoxesS3Key?: string;
+  // Source tracking for session copying (Approach 1)
+  sourceFilename?: string;
+  sourceOriginalS3Key?: string;
+  sourceWithBoxesS3Key?: string;
 }
 
 export interface ImageSession {
@@ -212,7 +216,12 @@ export class ImageStorageService {
           s3KeyWithBoxes: entry.withBoxesS3Key,
           createdBy: createdBy,
           hasOriginal: !!entry.original,
-          hasWithBoxes: !!entry.withBoxes
+          hasWithBoxes: !!entry.withBoxes,
+          s3KeyInfo: {
+            originalS3KeyPreview: entry.originalS3Key?.substring(0, 80) + '...' || '(undefined)',
+            withBoxesS3KeyPreview: entry.withBoxesS3Key?.substring(0, 80) + '...' || '(undefined)',
+            bothKeysPresent: !!entry.originalS3Key && !!entry.withBoxesS3Key ? '✅ YES' : '❌ NO'
+          }
         });
         
         await setDoc(imgRef, imageData);
@@ -220,6 +229,50 @@ export class ImageStorageService {
       }
       
       console.log('[ImageStorageService] ========== ALL IMAGES SAVED ==========');
+      
+      // POST-SAVE VERIFICATION: Read back from Firestore to confirm transformed S3 keys were persisted
+      console.log('[ImageStorageService] ===== POST-SAVE VERIFICATION (Reading from Firestore) =====');
+      try {
+        const sessionRef = doc(this.firestore, 'sessionsImages', sessionId);
+        const sessionDocSnapshot = await getDoc(sessionRef);
+        
+        if (sessionDocSnapshot.exists()) {
+          const sessionData = sessionDocSnapshot.data();
+          console.log('[ImageStorageService] ✅ Session document verified in Firestore:', {
+            docPath: `sessionsImages/${sessionId}`,
+            name: sessionData?.['name'],
+            createdBy: sessionData?.['createdBy'],
+            imageKeys: sessionData?.['imageKeys']?.length || 0,
+            imageKeysSample: sessionData?.['imageKeys']?.slice(0, 2)
+          });
+          
+          // Verify each image's transformed S3 keys in Firestore
+          if (sessionData?.['imageKeys'] && Array.isArray(sessionData['imageKeys'])) {
+            for (let i = 0; i < Math.min(sessionData['imageKeys'].length, 3); i++) {
+              const imgKey = sessionData['imageKeys'][i];
+              const safeId = `${sessionId}_${(imgKey || '').toString().slice(0, 50).replace(/[^a-zA-Z0-9_-]/g, '_')}`;
+              const imgRef = doc(this.firestore, 'images', safeId);
+              const imgSnapshot = await getDoc(imgRef);
+              
+              if (imgSnapshot.exists()) {
+                const imgData = imgSnapshot.data();
+                console.log(`[ImageStorageService] ✅ Image ${i + 1} verified in Firestore with transformed S3 keys:`, {
+                  docPath: `images/${safeId}`,
+                  filename: imgData?.['filename'],
+                  originalS3Key: imgData?.['originalS3Key'],
+                  withBoxesS3Key: imgData?.['withBoxesS3Key'],
+                  s3KeysPresent: {
+                    originalS3Key: !!imgData?.['originalS3Key'] ? '✅ YES' : '❌ NO',
+                    withBoxesS3Key: !!imgData?.['withBoxesS3Key'] ? '✅ YES' : '❌ NO'
+                  }
+                });
+              }
+            }
+          }
+        }
+      } catch (verifyErr) {
+        console.warn('[ImageStorageService] ⚠️ Post-save verification encountered an issue (this is optional):', verifyErr);
+      }
     } catch (err) {
       console.error('[ImageStorageService] ❌ saveSessionWithImagesToFirestore FAILED');
       console.error('[ImageStorageService] Error:', err);
