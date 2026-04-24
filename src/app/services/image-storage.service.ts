@@ -4,7 +4,7 @@ import { BehaviorSubject, Observable } from 'rxjs';
 import { Auth } from '@angular/fire/auth';
 import { onAuthStateChanged } from 'firebase/auth';
 import { Firestore, collection, doc, setDoc, deleteDoc, getDocs, query, where, writeBatch } from '@angular/fire/firestore';
-import { S3Client, PutObjectCommand, ListObjectsV2Command, GetObjectCommand, DeleteObjectCommand, CopyObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, PutObjectCommand, ListObjectsV2Command, HeadObjectCommand, GetObjectCommand, DeleteObjectCommand, CopyObjectCommand } from '@aws-sdk/client-s3';
 import { fromCognitoIdentityPool } from '@aws-sdk/credential-providers';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'; // NEW IMPORT
 
@@ -18,7 +18,6 @@ export interface StoredImage {
   timestamp: string;
   filename: string;
   prediction?: { type: string; shape: string; severity: string };
-  rawPrediction?: { type?: string; shape?: string; severity?: string };
   // New optional helpers for status/testing
   hasPrediction?: boolean;
   statusMessage?: string;
@@ -179,27 +178,12 @@ export class ImageStorageService {
   /** Upload original image to S3 with session-scoped filename */
   async uploadSessionImageOriginal(dataUrl: string, sessionId: string, originalFilename: string): Promise<{ url: string; s3Key: string } | null> {
     try {
-      // Use the provided filename directly (already transformed with correct userID if called from chat-page)
-      // Do NOT regenerate it, as that would use currentUserId instead of the transformed userID
-      let s3Filename = originalFilename;
-      
-      // If filename doesn't look like it has userID prefix, generate it
-      // (for backward compatibility with direct calls)
-      if (!s3Filename.includes('userID:')) {
-        s3Filename = this.generateSessionFilename({
-          sessionId,
-          filename: originalFilename,
-          imageType: 'original',
-          timestamp: new Date().toISOString()
-        });
-      }
-
-      console.log('[ImageStorageService] 📤 UPLOADING ORIGINAL TO S3:', {
-        providedFilename: originalFilename,
-        finalS3Filename: s3Filename,
-        alreadyTransformed: originalFilename.includes('userID:'),
-        sessionId: sessionId,
-        userIDprefix: s3Filename.split('sessionId:')[0]
+      // Generate S3 filename using session info
+      const s3Filename = this.generateSessionFilename({
+        sessionId,
+        filename: originalFilename,
+        imageType: 'original',
+        timestamp: new Date().toISOString()
       });
 
       // Convert data URL to Uint8Array
@@ -213,39 +197,20 @@ export class ImageStorageService {
         ContentType: 'image/jpeg'
       };
 
-      console.log('[ImageStorageService] 📤 S3 UPLOAD PARAMS:', {
-        Key: s3Filename,
-        Bucket: this.bucketName,
-        dataUrlLength: dataUrl?.length || 0,
-        uint8ArrayLength: uint8Array.length
-      });
-      
+      console.log('[ImageStorageService] Attempting to upload original image to S3:', s3Filename);
       const command = new PutObjectCommand(params);
-      const result = await this.s3Client.send(command);
+      await this.s3Client.send(command);
 
       const finalUrl = `https://${this.bucketName}.s3.${this.region}.amazonaws.com/${s3Filename}`;
 
-      console.log('✅ ORIGINAL UPLOADED TO S3:', {
-        s3Key: s3Filename,
-        url: finalUrl,
-        s3Response: result.$metadata
-      });
+      console.log('✅ Original image uploaded to S3 with key:', s3Filename);
+      console.log('🔗 Original image URL:', finalUrl);
 
       return { url: finalUrl, s3Key: s3Filename };
     } catch (error: any) {
-      console.error('❌ Failed to upload original image to S3:', {
-        errorMessage: error?.message || String(error),
-        errorCode: error?.Code || 'UNKNOWN',
-        errorName: error?.name || 'UnknownError',
-        fullError: error
-      });
-      console.warn('[ImageStorageService] S3 upload failed. Possible causes:');
-      console.warn('  1. CORS not configured on S3 bucket');
-      console.warn('  2. AWS credentials expired or invalid');
-      console.warn('  3. Identity pool ID incorrect');
-      console.warn('  4. S3 bucket name incorrect or not accessible');
-      console.warn('  5. Network connectivity issue');
-      console.warn('[ImageStorageService] To fix: Check S3 bucket CORS policy and AWS credentials');
+      console.error('❌ Failed to upload original image to S3:', error?.message || error);
+      console.warn('[ImageStorageService] S3 upload failed (CORS or network issue). Image will be stored locally.');
+      console.warn('[ImageStorageService] To fix S3 uploads, ensure CORS is configured on the S3 bucket for origin: http://localhost:8100');
       // Return null to indicate S3 upload failure - app should handle local storage fallback
       return null;
     }
@@ -254,27 +219,12 @@ export class ImageStorageService {
   /** Upload withBoxes image to S3 with session-scoped filename */
   async uploadSessionImageWithBoxes(dataUrl: string, sessionId: string, originalFilename: string): Promise<{ url: string; s3Key: string } | null> {
     try {
-      // Use the provided filename directly (already transformed with correct userID if called from chat-page)
-      // Do NOT regenerate it, as that would use currentUserId instead of the transformed userID
-      let s3Filename = originalFilename;
-      
-      // If filename doesn't look like it has userID prefix, generate it
-      // (for backward compatibility with direct calls)
-      if (!s3Filename.includes('userID:')) {
-        s3Filename = this.generateSessionFilename({
-          sessionId,
-          filename: originalFilename,
-          imageType: 'withBoxes',
-          timestamp: new Date().toISOString()
-        });
-      }
-
-      console.log('[ImageStorageService] 📤 UPLOADING WITHBOXES TO S3:', {
-        providedFilename: originalFilename,
-        finalS3Filename: s3Filename,
-        alreadyTransformed: originalFilename.includes('userID:'),
-        sessionId: sessionId,
-        userIDprefix: s3Filename.split('sessionId:')[0]
+      // Generate S3 filename using session info
+      const s3Filename = this.generateSessionFilename({
+        sessionId,
+        filename: originalFilename,
+        imageType: 'withBoxes',
+        timestamp: new Date().toISOString()
       });
 
       // Convert data URL to Uint8Array
@@ -288,39 +238,20 @@ export class ImageStorageService {
         ContentType: 'image/jpeg'
       };
 
-      console.log('[ImageStorageService] 📤 S3 UPLOAD PARAMS (WITHBOXES):', {
-        Key: s3Filename,
-        Bucket: this.bucketName,
-        dataUrlLength: dataUrl?.length || 0,
-        uint8ArrayLength: uint8Array.length
-      });
-      
+      console.log('[ImageStorageService] Attempting to upload withBoxes image to S3:', s3Filename);
       const command = new PutObjectCommand(params);
-      const result = await this.s3Client.send(command);
+      await this.s3Client.send(command);
 
       const finalUrl = `https://${this.bucketName}.s3.${this.region}.amazonaws.com/${s3Filename}`;
 
-      console.log('✅ WITHBOXES UPLOADED TO S3:', {
-        s3Key: s3Filename,
-        url: finalUrl,
-        s3Response: result.$metadata
-      });
+      console.log('✅ WithBoxes image uploaded to S3 with key:', s3Filename);
+      console.log('🔗 WithBoxes image URL:', finalUrl);
 
       return { url: finalUrl, s3Key: s3Filename };
     } catch (error: any) {
-      console.error('❌ Failed to upload withBoxes image to S3:', {
-        errorMessage: error?.message || String(error),
-        errorCode: error?.Code || 'UNKNOWN',
-        errorName: error?.name || 'UnknownError',
-        fullError: error
-      });
-      console.warn('[ImageStorageService] S3 upload failed. Possible causes:');
-      console.warn('  1. CORS not configured on S3 bucket');
-      console.warn('  2. AWS credentials expired or invalid');
-      console.warn('  3. Identity pool ID incorrect');
-      console.warn('  4. S3 bucket name incorrect or not accessible');
-      console.warn('  5. Network connectivity issue');
-      console.warn('[ImageStorageService] To fix: Check S3 bucket CORS policy and AWS credentials');
+      console.error('❌ Failed to upload withBoxes image to S3:', error?.message || error);
+      console.warn('[ImageStorageService] S3 upload failed (CORS or network issue). Image will be stored locally.');
+      console.warn('[ImageStorageService] To fix S3 uploads, ensure CORS is configured on the S3 bucket for origin: http://localhost:8100');
       // Return null to indicate S3 upload failure - app should handle local storage fallback
       return null;
     }
@@ -706,17 +637,39 @@ export class ImageStorageService {
     const imageTypeSuffix = options.imageType ? `_${options.imageType}` : '';
 
     const crackPartStr = crackPart ? `_${crackPart}` : '';
+
+    console.log("uderIdPrefix:", userIdPrefix, "sessionIdPrefix:", sessionIdPrefix, "originalFilename:", originalFilename, "imageTypeSuffix:", imageTypeSuffix, "crackPartStr:", crackPartStr);
     
-    // Build final filename with userID and sessionId included
+    
+
+    if (originalFilename.startsWith('_userID')) {
+      // Preserve preformatted keys while removing the artificial leading underscore.
+      const finalFilename = `${originalFilename}${imageTypeSuffix}${dateStr}${timeStr}.jpg`.replace(/^_/, '');
+
+      console.log('[ImageStorageService] Generated filename:', {
+        userId: currentUserId,
+        sessionId: session?.id,
+        filename: finalFilename
+      });
+
+      return finalFilename;
+    } else {
+  // Skip or handle other cases
+
+           // Build final filename with userID and sessionId included
     const finalFilename = `${userIdPrefix}${sessionIdPrefix}img${imgIndex}${crackPartStr}${originalFilename}${imageTypeSuffix}${dateStr}${timeStr}.jpg`;
     
-    console.log('[ImageStorageService] Generated filename:', {
+
+  console.log('[ImageStorageService] Generated filename:', {
       userId: currentUserId,
       sessionId: session?.id,
       filename: finalFilename
     });
     
     return finalFilename;
+    }
+
+    
   }
 
   /**
@@ -811,36 +764,6 @@ export class ImageStorageService {
     return true;
   }
 
-  /**
-   * Register an existing session object (useful for cross-page handoff or copying sessions).
-   * Adds the session to the internal sessions array if it doesn't already exist, or updates it if it does.
-   * Used by chat-page when copying a session to another user.
-   */
-  registerSession(session: ImageSession): ImageSession {
-    if (!session || !session.id) {
-      throw new Error('Invalid session object for registration');
-    }
-
-    // Check if session already exists
-    const existingIndex = this.sessions.findIndex(s => s.id === session.id);
-    if (existingIndex !== -1) {
-      // Update existing session
-      this.sessions[existingIndex] = session;
-      console.log('[ImageStorageService] Session updated:', session.id);
-    } else {
-      // Add new session
-      this.sessions.unshift(session);
-      console.log('[ImageStorageService] Session registered:', session.id);
-    }
-
-    // Update counter for this session
-    this.sessionImageCounters.set(session.id, session.imageKeys?.length || 0);
-
-    // Persist and return
-    this.persistSessions();
-    return session;
-  }
-
   /** Add an image from remote source if it does not already exist locally. */
   async addImageIfNotExists(image: StoredImage, sessionId?: string): Promise<boolean> {
     if (!image) return false;
@@ -912,7 +835,7 @@ export class ImageStorageService {
   }
 
   /** Persist a single session and its images to Firestore using filename as image doc ID */
-  async saveSessionWithImagesToFirestore(sessionId: string, userIdOverride?: string): Promise<void> {
+  async saveSessionWithImagesToFirestore(sessionId: string): Promise<void> {
     const session = this.sessions.find(s => s.id === sessionId);
     if (!session) {
       console.warn('[ImageStorageService] saveSessionWithImagesToFirestore: session not found', sessionId);
@@ -929,65 +852,27 @@ export class ImageStorageService {
       const currentUid = await this.waitForAuthUserId();
       console.log('[ImageStorageService] currentUserId for saveSessionWithImagesToFirestore', currentUid);
       if (!currentUid) {
-        throw new Error('[ImageStorageService] Cannot write shared session: authenticated sender UID is unavailable.');
-      }
-      const effectiveUserId = typeof userIdOverride === 'string' && userIdOverride.trim().length > 0
-        ? userIdOverride
-        : currentUid;
-      if (!effectiveUserId) {
         console.warn('[ImageStorageService] No authenticated user; skipping Firestore write');
         return;
       }
-      const createdByUid = currentUid;
-      // CRITICAL: Ensure userId is ALWAYS set to the effective user id (never null)
-      session.userId = effectiveUserId;
+      // CRITICAL: Ensure userId is ALWAYS set to currentUid (never null)
+      session.userId = currentUid;
 
       console.log('[ImageStorageService] Saving session to Firestore', {
         sessionId: session.id,
         sessionName: session.name,
         imageCount: imagesForSession.length,
-        userId: effectiveUserId
+        userId: currentUid
       });
-      
-      // CRITICAL: Log image details before Firestore save to ensure prediction/boxes are present
-      console.log('[ImageStorageService] 📊 Images being saved to Firestore:', imagesForSession.map((img, idx) => ({
-        index: idx,
-        filename: img.filename,
-        hasPrediction: img.hasPrediction,
-        prediction: img.prediction,
-        boxesCount: img.boxes?.length || 0,
-        boxes: img.boxes,
-        statusMessage: img.statusMessage,
-        detectionMessage: img.detectionMessage,
-        originalS3Key: img.storagePath || '(empty)',
-        withBoxesS3Key: img.withBoxesStoragePath || '(empty)'
-      })));
-      
       const sessionsCollection = collection(this.firestore, this.FIRESTORE_SESSIONS_COLLECTION);
       const imagesCollection = collection(this.firestore, this.FIRESTORE_IMAGES_COLLECTION);
 
-      // Best-effort cleanup: permission-denied here should not block session/image upsert.
-      try {
-        const existingQuery = query(imagesCollection, where('sessionId', '==', session.id), where('userId', '==', effectiveUserId));
-        const existingSnapshot = await getDocs(existingQuery);
-        if (!existingSnapshot.empty) {
-          const deleteBatch = writeBatch(this.firestore);
-          existingSnapshot.forEach(docSnapshot => deleteBatch.delete(docSnapshot.ref));
-          await deleteBatch.commit();
-          console.log('[ImageStorageService] Removed existing Firestore images before save', {
-            sessionId: session.id,
-            userId: effectiveUserId,
-            deletedCount: existingSnapshot.size
-          });
-        }
-      } catch (cleanupError: any) {
-        console.warn('[ImageStorageService] Skipping pre-save cleanup due to Firestore permissions or query restrictions', {
-          sessionId: session.id,
-          userId: effectiveUserId,
-          code: cleanupError?.code || null,
-          message: cleanupError?.message || String(cleanupError)
-        });
-      }
+      // Remove existing images for this session so Firestore reflects local state
+      const existingQuery = query(imagesCollection, where('sessionId', '==', session.id), where('userId', '==', currentUid));
+      const existingSnapshot = await getDocs(existingQuery);
+      const deleteBatch = writeBatch(this.firestore);
+      existingSnapshot.forEach(docSnapshot => deleteBatch.delete(docSnapshot.ref));
+      await deleteBatch.commit();
 
       const batch = writeBatch(this.firestore);
       const sessionRef = doc(sessionsCollection, session.id);
@@ -997,26 +882,21 @@ export class ImageStorageService {
         imageKeys: session.imageKeys || [],
         created: session.created,
         totalBoundingBoxes: session.totalBoundingBoxes || 0,
-        userId: effectiveUserId,
-        sessionId: session.sessionId || null,
-        createdBy: createdByUid,
-        sharedBy: createdByUid
+        userId: currentUid,
+        sessionId: session.sessionId || null
       });
 
       for (const image of imagesForSession) {
         // CRITICAL: Ensure userId is ALWAYS set to currentUid (never null)
-        image.userId = effectiveUserId;
+        image.userId = currentUid;
         // NOTE: Commented out base64 storage to save Firestore quota - using S3 references instead
         // const safeOriginal = await this.clampDataUrlToBytes(image.original, this.FIRESTORE_DOC_MAX_BYTES);
         // const safeWithBoxes = await this.clampDataUrlToBytes(image.withBoxes, this.FIRESTORE_DOC_MAX_BYTES);
         const imageRef = doc(imagesCollection, image.filename);
-        
-        const firestoreData = {
+        batch.set(imageRef, {
           timestamp: image.timestamp,
           filename: image.filename,
-          userId: effectiveUserId,
-          createdBy: createdByUid,
-          sharedBy: createdByUid,
+          userId: currentUid,
           sessionId: session.id,
           // NOTE: Commented out - base64 data stored in S3 instead
           // original: safeOriginal,
@@ -1027,35 +907,20 @@ export class ImageStorageService {
           prediction: image.prediction || null,
           boxes: image.boxes || [],
           // S3 references for original image (full generated filename with userID:sessionId prefix)
-          originalS3Key: image.originalS3Key || image.storagePath || null,   // e.g., "userID:abc123sessionId:xyz789img1crack1041120261109original.jpg"
-          originalS3Url: image.originalS3Url || image.storageUrl || null,    // HTTPS URL to original image
+          originalS3Key: image.storagePath || null,   // e.g., "userID:abc123sessionId:xyz789img1crack1041120261109original.jpg"
+          originalS3Url: image.storageUrl || null,    // HTTPS URL to original image
           // Backward compatibility
-          storagePath: image.originalS3Key || image.storagePath || null,
-          storageUrl: image.originalS3Url || image.storageUrl || null,
+          storagePath: image.storagePath || null,
+          storageUrl: image.storageUrl || null,
           // S3 references for withBoxes image (full generated filename with userID:sessionId prefix)
-          withBoxesS3Key: image.withBoxesS3Key || image.withBoxesStoragePath || null,   // e.g., "userID:abc123sessionId:xyz789img1crack1041120261109withBoxes.jpg"
-          withBoxesS3Url: image.withBoxesS3Url || image.withBoxesStorageUrl || null,    // HTTPS URL to withBoxes image
+          withBoxesS3Key: image.withBoxesStoragePath || null,   // e.g., "userID:abc123sessionId:xyz789img1crack1041120261109withBoxes.jpg"
+          withBoxesS3Url: image.withBoxesStorageUrl || null,    // HTTPS URL to withBoxes image
           // Backward compatibility
-          withBoxesStoragePath: image.withBoxesS3Key || image.withBoxesStoragePath || null,
-          withBoxesStorageUrl: image.withBoxesS3Url || image.withBoxesStorageUrl || null
-        };
-        
-        console.log(`[ImageStorageService] 📝 Writing to Firestore for ${image.filename}:`, {
-          prediction: firestoreData.prediction,
-          hasPrediction: firestoreData.hasPrediction,
-          boxes: firestoreData.boxes,
-          originalS3Key: firestoreData.originalS3Key,
-          withBoxesS3Key: firestoreData.withBoxesS3Key
+          withBoxesStoragePath: image.withBoxesStoragePath || null,
+          withBoxesStorageUrl: image.withBoxesStorageUrl || null
         });
-        
-        batch.set(imageRef, firestoreData);
       }
 
-      console.log('[ImageStorageService] Committing Firestore batch save', {
-        sessionId: session.id,
-        userId: effectiveUserId,
-        imageWriteCount: imagesForSession.length
-      });
       await batch.commit();
       console.log(`✅ Session and images saved to Firestore: ${session.id}`);
     } catch (error) {
@@ -1094,37 +959,20 @@ export class ImageStorageService {
   /** Save an ImageSession under a user document in Firestore */
   async saveSessionToUser(uid: string, session: ImageSession): Promise<void> {
     try {
-      // Validate required fields
-      if (!uid || !session || !session.id) {
-        throw new Error(`Invalid parameters: uid=${uid}, session.id=${session?.id}`);
-      }
-
       const sessionsCollection = collection(this.firestore, 'users', uid, 'sessions');
       const docRef = doc(sessionsCollection, session.id);
       const firestoreData: any = {
         id: session.id,
-        name: session.name || 'Untitled Session',
+        name: session.name,
         imageKeys: session.imageKeys || [],
-        created: session.created || new Date().toISOString(),
+        created: session.created,
         totalBoundingBoxes: session.totalBoundingBoxes || 0,
         userId: session.userId || uid,
       };
-
-      console.log('[ImageStorageService] Saving session to Firestore:', {
-        uid,
-        sessionId: session.id,
-        data: firestoreData
-      });
-
       await setDoc(docRef, firestoreData);
       console.log(`✅ Session saved to user Firestore: ${uid}/${session.id}`);
-    } catch (error: any) {
-      console.error('[ImageStorageService] Error saving session to user Firestore:');
-      console.error('  - Error code:', error?.code);
-      console.error('  - Error message:', error?.message);
-      console.error('  - Full error:', error);
-      console.error('  - UID:', uid);
-      console.error('  - Session:', session);
+    } catch (error) {
+      console.error('[ImageStorageService] Error saving session to user Firestore:', error);
       throw error;
     }
   }
@@ -1725,28 +1573,20 @@ export class ImageStorageService {
    * @returns Transformed filename with new userId
    */
   transformImageFilenameUserId(originalKey: string, newUserId: string): string {
-    if (!originalKey || !newUserId) {
-      return originalKey;
-    }
-
-    // Pattern 1: Has userID: prefix - replace the userId value
+    // Format: userID:abc123sessionId:xyz789img1crack1041120261109original.jpg
+    // Extract parts and rebuild with new userId
     const userIdMatch = originalKey.match(/userID:([^:]+)/);
-    if (userIdMatch) {
-      const oldUserId = userIdMatch[1];
-      console.log('[ImageStorageService] Filename transform: ' + oldUserId + ' -> ' + newUserId);
-      return originalKey.replace(/userID:[^:]+/, `userID:${newUserId}`);
-    }
-
-    // Pattern 2: Has sessionId: prefix but no userID - add userID prefix
-    const sessionIdMatch = originalKey.match(/sessionId:/);
-    if (sessionIdMatch) {
-      console.log('[ImageStorageService] Adding userID prefix to:', originalKey);
+    const sessionIdMatch = originalKey.match(/sessionId:([^i]+)/);
+    
+    if (!sessionIdMatch) {
+      // If format is not recognized, just add userId prefix
       return `userID:${newUserId}${originalKey}`;
     }
 
-    // Pattern 3: No recognized pattern - just add userID prefix
-    console.warn('[ImageStorageService] Filename pattern not recognized, adding userID prefix:', originalKey);
-    return `userID:${newUserId}${originalKey}`;
+    const sessionId = sessionIdMatch[1];
+    const afterSessionId = originalKey.substring(originalKey.indexOf(sessionId) + sessionId.length);
+    
+    return `userID:${newUserId}sessionId:${sessionId}${afterSessionId}`;
   }
 
   /**
@@ -1832,18 +1672,6 @@ export class ImageStorageService {
 
         // Transform filename to use new userId
         const newFilename = this.transformImageFilenameUserId(imageKey, newUserId);
-        const newWithBoxesFilename = this.transformImageFilenameUserId(
-          this.buildWithBoxesFilename(imageKey),
-          newUserId
-        );
-
-        // Transform S3 keys to use new userId
-        const newOriginalS3Key = originalImage.originalS3Key 
-          ? this.transformImageFilenameUserId(originalImage.originalS3Key, newUserId)
-          : undefined;
-        const newWithBoxesS3Key = originalImage.withBoxesS3Key
-          ? this.transformImageFilenameUserId(originalImage.withBoxesS3Key, newUserId)
-          : undefined;
 
         const transformedImage: StoredImage = {
           ...originalImage,
@@ -1851,17 +1679,7 @@ export class ImageStorageService {
           withBoxes: withBoxesDataUrl,
           filename: newFilename,
           userId: newUserId,
-          sessionId: newSession.id,
-          // Preserve and transform S3 keys and URLs
-          originalS3Key: newOriginalS3Key || originalImage.originalS3Key,
-          originalS3Url: originalImage.originalS3Url,
-          withBoxesS3Key: newWithBoxesS3Key || originalImage.withBoxesS3Key,
-          withBoxesS3Url: originalImage.withBoxesS3Url,
-          // Preserve storage paths and URLs
-          storagePath: originalImage.storagePath,
-          storageUrl: originalImage.storageUrl,
-          withBoxesStoragePath: originalImage.withBoxesStoragePath,
-          withBoxesStorageUrl: originalImage.withBoxesStorageUrl
+          sessionId: newSession.id
         };
 
         transformedImages.push(transformedImage);
@@ -1908,7 +1726,7 @@ export class ImageStorageService {
     }
   }
 
-   // NEW METHOD: Tells S3 to duplicate a file directly inside the cloud
+    // NEW METHOD: Tells S3 to duplicate a file directly inside the cloud
   async copyFile(sourceKey: string, newKey: string): Promise<{ success: boolean; key: string }> {
   try {
     const command = new CopyObjectCommand({
@@ -1929,6 +1747,33 @@ export class ImageStorageService {
   } catch (error) {
     console.error('❌ AWS S3: Copy Failed', error);
     throw error;
+  }
+}
+
+async verifyImageExists(key: string): Promise<void> {
+  try {
+    // We only need HeadObject to check if the file exists
+    const command = new HeadObjectCommand({
+      Bucket: this.bucketName,
+      Key: key,
+    });
+
+    // Send the request to AWS
+    await this.s3Client.send(command);
+
+    // If the line above doesn't throw an error, the image was found!
+    console.log(`%c ✅ Successfully found image from key: ${key}`, 'color: #28a745; font-weight: bold;');
+    
+    // As per your request, we do not return a value here.
+  } catch (error: any) {
+    // If S3 returns a 404, it means the key doesn't exist
+    if (error.name === 'NotFound' || error.$metadata?.httpStatusCode === 404) {
+      console.warn(`%c ❌ Image not found: The key "${key}" does not exist in the bucket.`, 'color: #dc3545;');
+    } else {
+      console.error('❌ An error occurred while contacting S3:', error.message);
+    }
+    
+    // We do not return a value even on failure.
   }
 }
 

@@ -1497,7 +1497,7 @@ export class ChatPagePage implements OnInit, OnDestroy {
         console.log('storedCount:', copiedSessionImageObjectsWithFetchedS3.length);
         console.log('copiedSessionImageObjectsWithFetchedS3:', copiedSessionImageObjectsWithFetchedS3);
 
-        for (let i = 0; i < this.sessionImageObjectCounter; i++) {
+        for (let i = 0; i > this.sessionImageObjectCounter; i++) {
           const imgObj = copiedSessionImageObjectsWithFetchedS3[i];
           console.log(`[ChatPage.confirmAttachmentShareCopy] Old Image object ${i + 1}/${this.sessionImageObjectCounter}:`, {
             filename: imgObj.filename,
@@ -1515,16 +1515,28 @@ export class ChatPagePage implements OnInit, OnDestroy {
             withBoxesStoragePath: imgObj.withBoxesStoragePath,
             withBoxesStorageUrl: imgObj.withBoxesStorageUrl
           });
+          
+          console.log("Original image from originalS3Key", imgObj.originalS3Key);
+          this.imageStorage.verifyImageExists(imgObj.originalS3Key);
+          console.log("WithBoxes image from withBoxesS3Key", imgObj.withBoxesS3Key);
+          this.imageStorage.verifyImageExists(imgObj.withBoxesS3Key);
 
+          
+          
+          console.log("old filename", imgObj.filename);
           const newFilename = this.changeUserID(imgObj.filename, recipientUserId);
           console.log("new filename", newFilename);
           imgObj.filename = newFilename;
           console.log("new filename applied to object", imgObj.filename);
 
 
+        
         //original 
-          const sourceKey = imgObj.originalS3Key;
-          const destinationKey = imgObj.filename; 
+          const sourceKey = this.changeUserID(imgObj.originalS3Key, recipientUserId);
+          const destinationKey = imgObj.originalS3Key;
+          
+          console.log("originalS3Key", imgObj.originalS3Key);
+        console.log("destinationS3Key", imgObj.originalS3Key);
 
   // Validation
   if (sourceKey === destinationKey) {
@@ -1535,7 +1547,8 @@ export class ChatPagePage implements OnInit, OnDestroy {
   // this.isCopying = true;
   try {
     // 2. Execute the internal S3 Copy command
-    const result = await this.imageStorage.copyFile(sourceKey, destinationKey);
+    // const result = await this.imageStorage.copyFile(sourceKey, destinationKey);
+    const result = { success: false }; // Mock result for demonstration
     
     // 3. Generate and log the metadata if the copy was successful
     if (result.success) {
@@ -1565,11 +1578,17 @@ export class ChatPagePage implements OnInit, OnDestroy {
 
   //withBoxes
 
-          const sourceKey2 = imgObj.withBoxesS3Key;
-          const destinationKey2 = imgObj.filename; 
+          const sourceKey2 = this.changeUserID(imgObj.withBoxesS3Key, recipientUserId);
+          const destinationKey2 = imgObj.withBoxesS3Key;
+          
+          console.log("withBoxesS3Key", imgObj.withBoxesS3Key);
+        console.log("destinationS3Key", imgObj.withBoxesS3Key);
+
+
+          console.log("destinationKey", imgObj.filename); 
 
   // Validation
-  if (sourceKey === destinationKey) {
+  if (sourceKey2 === destinationKey2) {
     console.error("Source and Destination are the same. Change the ID first!");
     return;
   }
@@ -1577,15 +1596,16 @@ export class ChatPagePage implements OnInit, OnDestroy {
   // this.isCopying = true;
   try {
     // 2. Execute the internal S3 Copy command
-    const result = await this.imageStorage.copyFile(sourceKey, destinationKey);
+    // const result = await this.imageStorage.copyFile(sourceKey2, destinationKey);
+    const result = { success: false }; // Mock result for demonstration
     
     // 3. Generate and log the metadata if the copy was successful
     if (result.success) {
       const bucketBaseUrl = 'https://my-angular-test-bucket-12345.s3.ap-southeast-2.amazonaws.com/';
       
       const newImageMetadata = {
-        originalS3Key: sourceKey,
-        originalS3Url: `${bucketBaseUrl}${sourceKey}`,
+        originalS3Key: sourceKey2,
+        originalS3Url: `${bucketBaseUrl}${sourceKey2}`,
         storagePath: destinationKey,
         storageUrl: `${bucketBaseUrl}${destinationKey}`
       };
