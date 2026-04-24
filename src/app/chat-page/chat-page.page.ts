@@ -59,6 +59,7 @@ export class ChatPagePage implements OnInit, OnDestroy {
   private chatOptionsSelectedChat: any = null;
   receiverUserId: string | any;
   newRecepientUserId: string | any;
+  sessionImageObjectCounter: number = 0;
     // Long-press logic for chat-item
     onChatItemPressStart(event: MouseEvent | TouchEvent, chat: any) {
       if (this.chatOptionsLongPressTimer) clearTimeout(this.chatOptionsLongPressTimer);
@@ -1106,14 +1107,54 @@ export class ChatPagePage implements OnInit, OnDestroy {
       }
     }
 
-    if (typeof service.getImages === 'function') {
-      const storedImages = service.getImages() || [];
+    if (typeof service.getAllImages === 'function') {
+      const storedImages = service.getAllImages() || [];
       return storedImages.find((img: any) => {
-        return img?.filename === imageKey || img?.original === imageKey || img?.withBoxes === imageKey || img?.originalKey === imageKey;
+        return img?.filename === imageKey
+          || img?.original === imageKey
+          || img?.withBoxes === imageKey
+          || img?.originalKey === imageKey
+          || img?.originalS3Key === imageKey
+          || img?.withBoxesS3Key === imageKey;
       }) || null;
     }
 
     return null;
+  }
+
+  private transformKeyForAttachmentShare(value: string, recipientUserId: string): string {
+    if (!value || !recipientUserId) {
+      return value;
+    }
+
+    const regex = /(userID:).*?(?=sessionId:)/;
+    if (regex.test(value)) {
+      return value.replace(regex, `$1${recipientUserId}`);
+    }
+
+    const transformedByPageMethod = this.transformImageFilenameUserId(value, recipientUserId);
+    if (transformedByPageMethod && transformedByPageMethod !== value) {
+      return transformedByPageMethod;
+    }
+
+    return value;
+  }
+
+  private changeUserIdPrefixUntilSessionId(filename: string, recipientUserId: string): string {
+    if (!filename || !recipientUserId) {
+      return filename;
+    }
+
+    if (!filename.startsWith('userID:')) {
+      return filename;
+    }
+
+    const regex = /(userID:).*?(?=sessionId:)/;
+    if (regex.test(filename)) {
+      return filename.replace(regex, `$1${recipientUserId}`);
+    }
+
+    return filename;
   }
 
   private async copySessionImageForRecipient(
@@ -1123,6 +1164,12 @@ export class ChatPagePage implements OnInit, OnDestroy {
     newSessionId: string
   ): Promise<any | null> {
     const service: any = this.imageStorage;
+    const effectiveRecipientUserId = (this.newRecepientUserId || recipientUserId || '').toString().trim();
+
+    if (!effectiveRecipientUserId) {
+      console.error('[ChatPage.copySessionImageForRecipient] Missing recipient user ID for key:', imageKey);
+      return null;
+    }
 
     const originalDataUrl = originalImage?.original || (originalImage?.originalS3Key ? await service.fetchS3ObjectAsDataUrl(originalImage.originalS3Key) : null);
     const withBoxesDataUrl = originalImage?.withBoxes || (originalImage?.withBoxesS3Key ? await service.fetchS3ObjectAsDataUrl(originalImage.withBoxesS3Key) : null);
@@ -1131,41 +1178,141 @@ export class ChatPagePage implements OnInit, OnDestroy {
       return null;
     }
 
-    const transformedFilename = service.transformImageFilenameUserId
-      ? service.transformImageFilenameUserId(imageKey, recipientUserId)
-      : imageKey;
+    const sourceFilename = originalImage?.filename || imageKey;
+    const transformedFilename = this.transformKeyForAttachmentShare(sourceFilename, effectiveRecipientUserId);
+    const transformedOriginalS3Key = originalImage?.originalS3Key
+      ? this.transformKeyForAttachmentShare(originalImage.originalS3Key, effectiveRecipientUserId)
+      : transformedFilename;
     const transformedWithBoxesFilename = originalImage?.withBoxesS3Key
-      ? (service.transformImageFilenameUserId ? service.transformImageFilenameUserId(originalImage.withBoxesS3Key, recipientUserId) : originalImage.withBoxesS3Key)
+      ? this.transformKeyForAttachmentShare(originalImage.withBoxesS3Key, effectiveRecipientUserId)
       : (service.buildWithBoxesFilename ? service.buildWithBoxesFilename(transformedFilename) : transformedFilename);
+    const transformedStoragePath = originalImage?.storagePath
+      ? this.transformKeyForAttachmentShare(originalImage.storagePath, effectiveRecipientUserId)
+      : transformedOriginalS3Key;
+    const transformedWithBoxesStoragePath = originalImage?.withBoxesStoragePath
+      ? this.transformKeyForAttachmentShare(originalImage.withBoxesStoragePath, effectiveRecipientUserId)
+      : transformedWithBoxesFilename;
 
     const copiedImage: any = {
       ...originalImage,
       original: originalDataUrl || originalImage?.original || '',
       withBoxes: withBoxesDataUrl || originalImage?.withBoxes || '',
       filename: transformedFilename,
-      userId: recipientUserId,
+      userId: effectiveRecipientUserId,
       sessionId: newSessionId,
       originalKey: imageKey,
-      fileImageName: originalImage?.fileImageName || originalImage?.filename || imageKey
+      fileImageName: this.transformKeyForAttachmentShare(
+        originalImage?.fileImageName || sourceFilename || imageKey,
+        effectiveRecipientUserId
+      ),
+      originalS3Key: transformedOriginalS3Key,
+      originalS3Url: null,
+      withBoxesS3Key: transformedWithBoxesFilename,
+      withBoxesS3Url: null,
+      storagePath: transformedStoragePath,
+      storageUrl: null,
+      withBoxesStoragePath: transformedWithBoxesStoragePath,
+      withBoxesStorageUrl: null,
+      originalUploadAttempted: !!originalDataUrl,
+      originalUploadSucceeded: false,
+      withBoxesUploadAttempted: !!withBoxesDataUrl,
+      withBoxesUploadSucceeded: false
     };
 
     if (originalDataUrl) {
-      const originalUpload = await service.uploadSessionImageOriginal(originalDataUrl, newSessionId, transformedFilename);
+      const originalUpload = await service.uploadSessionImageOriginal(originalDataUrl, newSessionId, transformedOriginalS3Key || transformedFilename);
       if (originalUpload) {
         copiedImage.originalS3Key = originalUpload.s3Key;
         copiedImage.originalS3Url = originalUpload.url;
+        copiedImage.storagePath = originalUpload.s3Key;
+        copiedImage.storageUrl = originalUpload.url;
+        copiedImage.originalUploadSucceeded = true;
       }
     }
 
-    if (withBoxesDataUrl && withBoxesDataUrl !== originalDataUrl) {
+    if (withBoxesDataUrl) {
       const withBoxesUpload = await service.uploadSessionImageWithBoxes(withBoxesDataUrl, newSessionId, transformedWithBoxesFilename);
       if (withBoxesUpload) {
         copiedImage.withBoxesS3Key = withBoxesUpload.s3Key;
         copiedImage.withBoxesS3Url = withBoxesUpload.url;
+        copiedImage.withBoxesStoragePath = withBoxesUpload.s3Key;
+        copiedImage.withBoxesStorageUrl = withBoxesUpload.url;
+        copiedImage.withBoxesUploadSucceeded = true;
       }
     }
 
     return copiedImage;
+  }
+
+  private async fetchSessionImageObjectsFromFirestoreByImageKeys(
+    sessionId: string,
+    imageKeys: string[]
+  ): Promise<any[]> {
+    if (!sessionId || !Array.isArray(imageKeys) || imageKeys.length === 0) {
+      return [];
+    }
+
+    const sourceKeys = new Set(imageKeys.filter((key) => typeof key === 'string' && key.trim().length > 0));
+    if (sourceKeys.size === 0) {
+      return [];
+    }
+
+    const matchedSessionImageObjects: any[] = [];
+
+    try {
+      const imagesRef = collection(this.firestore, 'images');
+      const imageQuery = query(imagesRef, where('sessionId', '==', sessionId));
+      const querySnapshot = await getDocs(imageQuery);
+
+      querySnapshot.forEach((docSnap) => {
+        const imageDoc: any = {
+          firestoreDocId: docSnap.id,
+          ...docSnap.data()
+        };
+
+        const candidates = [
+          docSnap.id,
+          imageDoc?.filename,
+          imageDoc?.originalKey,
+          imageDoc?.originalS3Key,
+          imageDoc?.withBoxesS3Key
+        ].filter((candidate) => typeof candidate === 'string' && candidate.trim().length > 0);
+
+        const isRelatedToSessionKey = candidates.some((candidate) => sourceKeys.has(candidate));
+        if (isRelatedToSessionKey) {
+          matchedSessionImageObjects.push(imageDoc);
+        }
+      });
+
+      console.log('[ChatPage.confirmAttachmentShareCopy] Firestore session image objects fetched from images collection (matched by original session imageKeys):', {
+        sessionId,
+        requestedImageKeys: Array.from(sourceKeys),
+        matchedCount: matchedSessionImageObjects.length,
+        matchedSessionImageObjects
+      });
+    } catch (error) {
+      console.warn('[ChatPage.confirmAttachmentShareCopy] Failed to fetch related session image objects from Firestore images collection by imageKeys:', error);
+    }
+
+    return matchedSessionImageObjects;
+  }
+
+  private printSelectedSessionImageObjectsFromFirestore(
+    selectedSession: any,
+    imageKeys: string[],
+    sessionImageObjects: any[]
+  ): void {
+    console.group('[ChatPage.confirmAttachmentShareCopy] Selected session image objects from Firestore images collection');
+    console.log('Selected session:', {
+      id: selectedSession?.id || null,
+      name: selectedSession?.name || null,
+      userId: selectedSession?.userId || null,
+      imageKeysCount: Array.isArray(imageKeys) ? imageKeys.length : 0
+    });
+    console.log('Requested imageKeys:', Array.isArray(imageKeys) ? imageKeys : []);
+    console.log('Matched image object count:', Array.isArray(sessionImageObjects) ? sessionImageObjects.length : 0);
+    console.log('Matched image objects:', Array.isArray(sessionImageObjects) ? sessionImageObjects : []);
+    console.groupEnd();
   }
 
   // Copy the selected session, its images, and the related S3 objects for the current recipient.
@@ -1231,35 +1378,271 @@ export class ChatPagePage implements OnInit, OnDestroy {
       this.updateCopyProgress(5, 'Loading session data...');
 
       const sourceImageKeys = Array.isArray(selectedSession.imageKeys) ? selectedSession.imageKeys : [];
+      copiedSession.imageKeys = sourceImageKeys.map((key: string) => this.transformKeyForAttachmentShare(key, recipientUserId));
       const copiedImages: any[] = [];
+      const uploadStatusByImage: Array<{
+        sourceImageKey: string;
+        copiedFilename: string;
+        originalUploadAttempted: boolean;
+        originalUploadSucceeded: boolean;
+        withBoxesUploadAttempted: boolean;
+        withBoxesUploadSucceeded: boolean;
+      }> = [];
 
       this.updateCopyProgress(15, 'Copying session images...');
 
       const firestoreImageObjects = new Map<string, any>();
+      const sessionImageObjectsWithFetchedS3ByKey = new Map<string, any>();
+      const sourceSessionImageObjectsFromFirestore: any[] = [];
       try {
-        const imagesRef = collection(this.firestore, 'images');
-        const imageQuery = query(imagesRef, where('sessionId', '==', selectedSession.id));
-        const querySnapshot = await getDocs(imageQuery);
-        querySnapshot.forEach((docSnap) => {
-          const imageDoc: any = {
-            firestoreDocId: docSnap.id,
-            ...docSnap.data()
-          };
-          firestoreImageObjects.set(docSnap.id, imageDoc);
+        const fetchedImageObjects = await this.fetchSessionImageObjectsFromFirestoreByImageKeys(
+          selectedSession.id,
+          sourceImageKeys
+        );
+        sourceSessionImageObjectsFromFirestore.push(...fetchedImageObjects);
+
+        sourceSessionImageObjectsFromFirestore.forEach((imageDoc: any) => {
+          const docId = (imageDoc?.firestoreDocId || '').toString();
+          if (docId) {
+            firestoreImageObjects.set(docId, imageDoc);
+          }
           if (imageDoc?.filename) {
             firestoreImageObjects.set(imageDoc.filename, imageDoc);
           }
           if (imageDoc?.originalKey) {
             firestoreImageObjects.set(imageDoc.originalKey, imageDoc);
           }
+          if (imageDoc?.originalS3Key) {
+            firestoreImageObjects.set(imageDoc.originalS3Key, imageDoc);
+          }
+          if (imageDoc?.withBoxesS3Key) {
+            firestoreImageObjects.set(imageDoc.withBoxesS3Key, imageDoc);
+          }
         });
+
+        this.printSelectedSessionImageObjectsFromFirestore(
+          selectedSession,
+          sourceImageKeys,
+          sourceSessionImageObjectsFromFirestore
+        );
+
+
+
+        console.log('[ChatPage.confirmAttachmentShareCopy] Stored source session image objects from Firestore images collection:', sourceSessionImageObjectsFromFirestore);
+
+        const copiedSessionImageObjects: any[] = [];
+        const copiedSessionImageObjectsWithFetchedS3: any[] = [];
+
+        for (let i = 0; i < sourceSessionImageObjectsFromFirestore.length; i++) {
+          const sourceImageObject = sourceSessionImageObjectsFromFirestore[i];
+          const clonedImageObject: any = JSON.parse(JSON.stringify(sourceImageObject || {}));
+
+          if (typeof clonedImageObject.filename === 'string' && clonedImageObject.filename.trim()) {
+            clonedImageObject.filename = this.changeUserIdPrefixUntilSessionId(clonedImageObject.filename, recipientUserId);
+          }
+
+          clonedImageObject.userId = recipientUserId;
+          clonedImageObject.sessionId = newSessionId;
+
+          copiedSessionImageObjects.push(clonedImageObject);
+
+          const sourceOriginalS3Key = typeof sourceImageObject?.originalS3Key === 'string'
+            ? sourceImageObject.originalS3Key
+            : '';
+          const sourceWithBoxesS3Key = typeof sourceImageObject?.withBoxesS3Key === 'string'
+            ? sourceImageObject.withBoxesS3Key
+            : '';
+
+          const originalDataUrl = sourceOriginalS3Key
+            ? await service.fetchS3ObjectAsDataUrl(sourceOriginalS3Key)
+            : null;
+          const withBoxesDataUrl = sourceWithBoxesS3Key
+            ? await service.fetchS3ObjectAsDataUrl(sourceWithBoxesS3Key)
+            : null;
+
+          const storedFetchedImageObject: any = {
+            ...clonedImageObject,
+            original: originalDataUrl || clonedImageObject.original || '',
+            withBoxes: withBoxesDataUrl || clonedImageObject.withBoxes || '',
+            originalS3Key: sourceOriginalS3Key || clonedImageObject.originalS3Key || null,
+            withBoxesS3Key: sourceWithBoxesS3Key || clonedImageObject.withBoxesS3Key || null
+          };
+
+          copiedSessionImageObjectsWithFetchedS3.push(storedFetchedImageObject);
+
+          const lookupCandidates = [
+            sourceImageObject?.filename,
+            sourceImageObject?.originalKey,
+            sourceImageObject?.firestoreDocId,
+            sourceImageObject?.originalS3Key,
+            sourceImageObject?.withBoxesS3Key
+          ];
+
+          lookupCandidates.forEach((candidate) => {
+            if (typeof candidate === 'string' && candidate.trim().length > 0) {
+              sessionImageObjectsWithFetchedS3ByKey.set(candidate, storedFetchedImageObject);
+            }
+          });
+        }
+
+        
+
+        console.group('[ChatPage.confirmAttachmentShareCopy] Session image object one-to-one copy with filename/userId transformation');
+        console.log('recipientUserId:', recipientUserId);
+        console.log('copiedSessionImageObjects:', copiedSessionImageObjects);
+        console.groupEnd();
+        
+        this.sessionImageObjectCounter = copiedSessionImageObjectsWithFetchedS3.length
+        console.group('[ChatPage.confirmAttachmentShareCopy] Session image objects fetched from S3 and stored');
+        console.log('storedCount:', copiedSessionImageObjectsWithFetchedS3.length);
+        console.log('copiedSessionImageObjectsWithFetchedS3:', copiedSessionImageObjectsWithFetchedS3);
+
+        for (let i = 0; i < this.sessionImageObjectCounter; i++) {
+          const imgObj = copiedSessionImageObjectsWithFetchedS3[i];
+          console.log(`[ChatPage.confirmAttachmentShareCopy] Old Image object ${i + 1}/${this.sessionImageObjectCounter}:`, {
+            filename: imgObj.filename,
+
+            originalS3Key: imgObj.originalS3Key,
+            originalS3Url: imgObj.originalS3Url,
+            storagePath: imgObj.storagePath,
+            storageUrl: imgObj.storageUrl,            
+            hasOriginalDataUrl: !!imgObj.original,
+
+
+            withBoxesS3Key: imgObj.withBoxesS3Key,
+            hasWithBoxesDataUrl: !!imgObj.withBoxes,
+            withBoxesS3Url: imgObj.withBoxesS3Url,
+            withBoxesStoragePath: imgObj.withBoxesStoragePath,
+            withBoxesStorageUrl: imgObj.withBoxesStorageUrl
+          });
+
+          const newFilename = this.changeUserID(imgObj.filename, recipientUserId);
+          console.log("new filename", newFilename);
+          imgObj.filename = newFilename;
+          console.log("new filename applied to object", imgObj.filename);
+
+
+        //original 
+          const sourceKey = imgObj.originalS3Key;
+          const destinationKey = imgObj.filename; 
+
+  // Validation
+  if (sourceKey === destinationKey) {
+    console.error("Source and Destination are the same. Change the ID first!");
+    return;
+  }
+
+  // this.isCopying = true;
+  try {
+    // 2. Execute the internal S3 Copy command
+    const result = await this.imageStorage.copyFile(sourceKey, destinationKey);
+    
+    // 3. Generate and log the metadata if the copy was successful
+    if (result.success) {
+      const bucketBaseUrl = 'https://my-angular-test-bucket-12345.s3.ap-southeast-2.amazonaws.com/';
+      
+      const newImageMetadata = {
+        originalS3Key: sourceKey,
+        originalS3Url: `${bucketBaseUrl}${sourceKey}`,
+        storagePath: destinationKey,
+        storageUrl: `${bucketBaseUrl}${destinationKey}`
+      };
+
+       imgObj.originalS3Key = newImageMetadata.originalS3Key,
+       imgObj.originalS3Url = newImageMetadata.originalS3Url,
+       imgObj.storagePath = newImageMetadata.storagePath,
+       imgObj.storageUrl = newImageMetadata.storageUrl,
+
+      console.group('✅ S3 Copy Operation Complete');
+      console.log('New Image Metadata:', newImageMetadata);
+      
+    }
+  } catch (error) {
+    console.error("Failed to store copy from extracted data", error);
+  } finally {
+    // this.isCopying = false;
+  }
+
+  //withBoxes
+
+          const sourceKey2 = imgObj.withBoxesS3Key;
+          const destinationKey2 = imgObj.filename; 
+
+  // Validation
+  if (sourceKey === destinationKey) {
+    console.error("Source and Destination are the same. Change the ID first!");
+    return;
+  }
+
+  // this.isCopying = true;
+  try {
+    // 2. Execute the internal S3 Copy command
+    const result = await this.imageStorage.copyFile(sourceKey, destinationKey);
+    
+    // 3. Generate and log the metadata if the copy was successful
+    if (result.success) {
+      const bucketBaseUrl = 'https://my-angular-test-bucket-12345.s3.ap-southeast-2.amazonaws.com/';
+      
+      const newImageMetadata = {
+        originalS3Key: sourceKey,
+        originalS3Url: `${bucketBaseUrl}${sourceKey}`,
+        storagePath: destinationKey,
+        storageUrl: `${bucketBaseUrl}${destinationKey}`
+      };
+
+       imgObj.originalS3Key = newImageMetadata.originalS3Key,
+       imgObj.originalS3Url = newImageMetadata.originalS3Url,
+       imgObj.storagePath = newImageMetadata.storagePath,
+       imgObj.storageUrl = newImageMetadata.storageUrl,
+
+      console.group('✅ S3 Copy Operation Complete');
+      console.log('New Image Metadata:', newImageMetadata);
+      
+    }
+  } catch (error) {
+    console.error("Failed to store copy from extracted data", error);
+  } finally {
+    // this.isCopying = false;
+  }
+
+
+
+          console.log(`[ChatPage.confirmAttachmentShareCopy] new Image object ${i + 1}/${this.sessionImageObjectCounter}:`, {
+            filename: imgObj.filename,
+            
+            originalS3Key: imgObj.originalS3Key,
+            originalS3Url: imgObj.originalS3Url,
+            storagePath: imgObj.storagePath,
+            storageUrl: imgObj.storageUrl,            
+            hasOriginalDataUrl: !!imgObj.original,
+
+
+            withBoxesS3Key: imgObj.withBoxesS3Key,
+            hasWithBoxesDataUrl: !!imgObj.withBoxes,
+            withBoxesS3Url: imgObj.withBoxesS3Url,
+            withBoxesStoragePath: imgObj.withBoxesStoragePath,
+            withBoxesStorageUrl: imgObj.withBoxesStorageUrl
+
+          });
+      }
+        console.groupEnd();
       } catch (firestoreError) {
         console.warn('[ChatPage.confirmAttachmentShareCopy] Unable to load session images from Firestore, falling back to local cache only:', firestoreError);
       }
 
+       
+
+      
+
       for (let i = 0; i < sourceImageKeys.length; i++) {
         const imageKey = sourceImageKeys[i];
-        const originalImage = this.getStoredImageForAttachment(imageKey) || firestoreImageObjects.get(imageKey) || firestoreImageObjects.get(this.getStoredImageForAttachment(imageKey)?.filename || '') || null;
+        const fetchedImageFromSessionObjects = sessionImageObjectsWithFetchedS3ByKey.get(imageKey) || null;
+        const cachedImage = this.getStoredImageForAttachment(imageKey);
+        const originalImage = fetchedImageFromSessionObjects
+          || cachedImage
+          || firestoreImageObjects.get(imageKey)
+          || firestoreImageObjects.get(cachedImage?.filename || '')
+          || null;
 
         if (!originalImage) {
           console.warn('[ChatPage.confirmAttachmentShareCopy] Image not found for key:', imageKey);
@@ -1278,7 +1661,22 @@ export class ChatPagePage implements OnInit, OnDestroy {
         }
 
         copiedImages.push(copiedImage);
-        copiedSession.imageKeys.push(copiedImage.filename);
+        uploadStatusByImage.push({
+          sourceImageKey: imageKey,
+          copiedFilename: copiedImage.filename,
+          originalUploadAttempted: !!copiedImage.originalUploadAttempted,
+          originalUploadSucceeded: !!copiedImage.originalUploadSucceeded,
+          withBoxesUploadAttempted: !!copiedImage.withBoxesUploadAttempted,
+          withBoxesUploadSucceeded: !!copiedImage.withBoxesUploadSucceeded
+        });
+
+        const transformedOriginalKey = this.transformKeyForAttachmentShare(imageKey, recipientUserId);
+        const existingKeyIndex = copiedSession.imageKeys.findIndex((key: string) => key === transformedOriginalKey);
+        if (existingKeyIndex >= 0) {
+          copiedSession.imageKeys[existingKeyIndex] = copiedImage.filename;
+        } else {
+          copiedSession.imageKeys.push(copiedImage.filename);
+        }
 
         if (typeof service.addImage === 'function') {
           await service.addImage(copiedImage);
@@ -1303,6 +1701,21 @@ export class ChatPagePage implements OnInit, OnDestroy {
       console.log('[ChatPage.confirmAttachmentShareCopy] Original session:', selectedSession);
       console.log('[ChatPage.confirmAttachmentShareCopy] Copied session:', copiedSession);
       console.log('[ChatPage.confirmAttachmentShareCopy] Copied images:', copiedImages);
+      console.log('[ChatPage.confirmAttachmentShareCopy] Firestore image objects used for copy:', Array.from(firestoreImageObjects.values()));
+      console.log('[ChatPage.confirmAttachmentShareCopy] Per-image upload status (original/withBoxes):', uploadStatusByImage);
+
+      console.log('Receiver user ID:', recipientUserId);
+      console.log('Current user ID:', currentUserId);
+
+      const failedUploads = uploadStatusByImage.filter((item) => {
+        const originalFailed = item.originalUploadAttempted && !item.originalUploadSucceeded;
+        const withBoxesFailed = item.withBoxesUploadAttempted && !item.withBoxesUploadSucceeded;
+        return originalFailed || withBoxesFailed;
+      });
+
+      if (failedUploads.length > 0) {
+        console.warn('[ChatPage.confirmAttachmentShareCopy] Some image uploads did not complete successfully:', failedUploads);
+      }
 
       this.isAttachmentCopyInProgress = false;
       this.attachmentDebugState = 'completed';
@@ -1317,6 +1730,311 @@ export class ChatPagePage implements OnInit, OnDestroy {
       return;
     }
   }
+   
+  changeUserID(currentFileName: string, targetID: string): string {
+  // 1. Validation: Does it start with 'userID:'?
+  if (!currentFileName.startsWith('userID:')) {
+    console.warn('⚠️ UI: String does not start with userID:. Skipping.');
+    return currentFileName;
+  }
+
+  // 2. REGEX: Finds 'userID:' and everything until 'sessionId:'
+  // $1 refers to the first capturing group (userID:)
+  const regex = /(userID:).*?(?=sessionId:)/;
+
+  if (regex.test(currentFileName)) {
+    const updatedString = currentFileName.replace(regex, `$1${targetID}`);
+    
+    console.log('✅ UI: Process complete.');
+    console.log('📄 New String:', updatedString);
+    
+    return updatedString;
+  } else {
+    console.warn('⚠️ UI: Pattern "userID:...sessionId:" not found.');
+    return currentFileName;
+  }
+}
+
+  //  async confirmAttachmentShareCopy(attachment: any): Promise<void> {
+  //   console.log('[ChatPage.confirmAttachmentShareCopy] ===== SESSION COPY WORKFLOW START =====');
+
+  //   const selectedSession = attachment || this.selectedAttachmentForDebug || this.selectedAttachment;
+  //   if (!selectedSession) {
+  //     console.error('[ChatPage.confirmAttachmentShareCopy] No session selected');
+  //     alert('No session selected');
+  //     return;
+  //   }
+
+  //   if (selectedSession.type !== 'session' || !selectedSession.id) {
+  //     console.error('[ChatPage.confirmAttachmentShareCopy] Invalid session attachment:', selectedSession);
+  //     alert('Invalid session attachment');
+  //     return;
+  //   }
+
+  //   if (!this.validateSessionBelongsToCurrentUser(selectedSession)) {
+  //     console.error('[ChatPage.confirmAttachmentShareCopy] SECURITY: session does not belong to the current user');
+  //     alert('Security error: Cannot share session from another user');
+  //     return;
+  //   }
+
+  //   const currentUserId = this.auth3.getCurrentUser()?.uid || this.userID;
+  //   if (!currentUserId) {
+  //     console.error('[ChatPage.confirmAttachmentShareCopy] Cannot determine current user ID');
+  //     alert('Error: Cannot determine current user');
+  //     return;
+  //   }
+
+  //   const recipientUserId = this.resolveAttachmentShareRecipient();
+  //   if (!recipientUserId) {
+  //     console.error('[ChatPage.confirmAttachmentShareCopy] Cannot determine recipient user ID', {
+  //       activeChat: this.activeChat,
+  //       currentChatId: this.currentChatId,
+  //       receiverUserId: this.receiverUserId,
+  //       newRecepientUserId: this.newRecepientUserId
+  //     });
+  //     alert('Error: Cannot determine recipient. Please open a chat with a valid user first.');
+  //     return;
+  //   }
+
+  //   this.receiverUserId = recipientUserId;
+  //   this.newRecepientUserId = recipientUserId;
+
+  //   const service: any = this.imageStorage;
+  //   const newSessionId = `s-${Date.now()}`;
+  //   const copiedSession: any = JSON.parse(JSON.stringify(selectedSession));
+  //   copiedSession.id = newSessionId;
+  //   copiedSession.sessionId = newSessionId;
+  //   copiedSession.userId = recipientUserId;
+  //   copiedSession.created = new Date().toISOString();
+  //   copiedSession.imageKeys = [];
+
+  //   try {
+  //     this.isAttachmentCopyInProgress = true;
+  //     this.attachmentDebugState = 'active';
+  //     this.attachmentCopyProgress = 0;
+  //     this.attachmentCopyStatusText = 'Initializing session copy...';
+
+  //     this.updateCopyProgress(5, 'Loading session data...');
+
+  //     const sourceImageKeys = Array.isArray(selectedSession.imageKeys) ? selectedSession.imageKeys : [];
+  //     copiedSession.imageKeys = sourceImageKeys.map((key: string) => this.transformKeyForAttachmentShare(key, recipientUserId));
+  //     const copiedImages: any[] = [];
+  //     const uploadStatusByImage: Array<{
+  //       sourceImageKey: string;
+  //       copiedFilename: string;
+  //       originalUploadAttempted: boolean;
+  //       originalUploadSucceeded: boolean;
+  //       withBoxesUploadAttempted: boolean;
+  //       withBoxesUploadSucceeded: boolean;
+  //     }> = [];
+
+  //     this.updateCopyProgress(15, 'Copying session images...');
+
+  //     const firestoreImageObjects = new Map<string, any>();
+  //     const sessionImageObjectsWithFetchedS3ByKey = new Map<string, any>();
+  //     const sourceSessionImageObjectsFromFirestore: any[] = [];
+  //     try {
+  //       const fetchedImageObjects = await this.fetchSessionImageObjectsFromFirestoreByImageKeys(
+  //         selectedSession.id,
+  //         sourceImageKeys
+  //       );
+  //       sourceSessionImageObjectsFromFirestore.push(...fetchedImageObjects);
+
+  //       sourceSessionImageObjectsFromFirestore.forEach((imageDoc: any) => {
+  //         const docId = (imageDoc?.firestoreDocId || '').toString();
+  //         if (docId) {
+  //           firestoreImageObjects.set(docId, imageDoc);
+  //         }
+  //         if (imageDoc?.filename) {
+  //           firestoreImageObjects.set(imageDoc.filename, imageDoc);
+  //         }
+  //         if (imageDoc?.originalKey) {
+  //           firestoreImageObjects.set(imageDoc.originalKey, imageDoc);
+  //         }
+  //         if (imageDoc?.originalS3Key) {
+  //           firestoreImageObjects.set(imageDoc.originalS3Key, imageDoc);
+  //         }
+  //         if (imageDoc?.withBoxesS3Key) {
+  //           firestoreImageObjects.set(imageDoc.withBoxesS3Key, imageDoc);
+  //         }
+  //       });
+
+  //       this.printSelectedSessionImageObjectsFromFirestore(
+  //         selectedSession,
+  //         sourceImageKeys,
+  //         sourceSessionImageObjectsFromFirestore
+  //       );
+
+        
+
+  //       console.log('[ChatPage.confirmAttachmentShareCopy] Stored source session image objects from Firestore images collection:', sourceSessionImageObjectsFromFirestore);
+
+  //       const copiedSessionImageObjects: any[] = [];
+  //       const copiedSessionImageObjectsWithFetchedS3: any[] = [];
+
+  //       for (let i = 0; i < sourceSessionImageObjectsFromFirestore.length; i++) {
+  //         const sourceImageObject = sourceSessionImageObjectsFromFirestore[i];
+  //         const clonedImageObject: any = JSON.parse(JSON.stringify(sourceImageObject || {}));
+
+  //         if (typeof clonedImageObject.filename === 'string' && clonedImageObject.filename.trim()) {
+  //           clonedImageObject.filename = this.changeUserIdPrefixUntilSessionId(clonedImageObject.filename, recipientUserId);
+  //         }
+
+  //         clonedImageObject.userId = recipientUserId;
+  //         clonedImageObject.sessionId = newSessionId;
+
+  //         copiedSessionImageObjects.push(clonedImageObject);
+
+  //         const sourceOriginalS3Key = typeof sourceImageObject?.originalS3Key === 'string'
+  //           ? sourceImageObject.originalS3Key
+  //           : '';
+  //         const sourceWithBoxesS3Key = typeof sourceImageObject?.withBoxesS3Key === 'string'
+  //           ? sourceImageObject.withBoxesS3Key
+  //           : '';
+
+  //         const originalDataUrl = sourceOriginalS3Key
+  //           ? await service.fetchS3ObjectAsDataUrl(sourceOriginalS3Key)
+  //           : null;
+  //         const withBoxesDataUrl = sourceWithBoxesS3Key
+  //           ? await service.fetchS3ObjectAsDataUrl(sourceWithBoxesS3Key)
+  //           : null;
+
+  //         const storedFetchedImageObject: any = {
+  //           ...clonedImageObject,
+  //           original: originalDataUrl || clonedImageObject.original || '',
+  //           withBoxes: withBoxesDataUrl || clonedImageObject.withBoxes || '',
+  //           originalS3Key: sourceOriginalS3Key || clonedImageObject.originalS3Key || null,
+  //           withBoxesS3Key: sourceWithBoxesS3Key || clonedImageObject.withBoxesS3Key || null
+  //         };
+
+  //         copiedSessionImageObjectsWithFetchedS3.push(storedFetchedImageObject);
+
+  //         const lookupCandidates = [
+  //           sourceImageObject?.filename,
+  //           sourceImageObject?.originalKey,
+  //           sourceImageObject?.firestoreDocId,
+  //           sourceImageObject?.originalS3Key,
+  //           sourceImageObject?.withBoxesS3Key
+  //         ];
+
+  //         lookupCandidates.forEach((candidate) => {
+  //           if (typeof candidate === 'string' && candidate.trim().length > 0) {
+  //             sessionImageObjectsWithFetchedS3ByKey.set(candidate, storedFetchedImageObject);
+  //           }
+  //         });
+  //       }
+
+  //       console.group('[ChatPage.confirmAttachmentShareCopy] Session image object one-to-one copy with filename/userId transformation');
+  //       console.log('recipientUserId:', recipientUserId);
+  //       console.log('copiedSessionImageObjects:', copiedSessionImageObjects);
+  //       console.groupEnd();
+
+  //       console.group('[ChatPage.confirmAttachmentShareCopy] Session image objects fetched from S3 and stored');
+  //       console.log('storedCount:', copiedSessionImageObjectsWithFetchedS3.length);
+  //       console.log('copiedSessionImageObjectsWithFetchedS3:', copiedSessionImageObjectsWithFetchedS3);
+  //       console.groupEnd();
+  //     } catch (firestoreError) {
+  //       console.warn('[ChatPage.confirmAttachmentShareCopy] Unable to load session images from Firestore, falling back to local cache only:', firestoreError);
+  //     }
+
+  //     for (let i = 0; i < sourceImageKeys.length; i++) {
+  //       const imageKey = sourceImageKeys[i];
+  //       const fetchedImageFromSessionObjects = sessionImageObjectsWithFetchedS3ByKey.get(imageKey) || null;
+  //       const cachedImage = this.getStoredImageForAttachment(imageKey);
+  //       const originalImage = fetchedImageFromSessionObjects
+  //         || cachedImage
+  //         || firestoreImageObjects.get(imageKey)
+  //         || firestoreImageObjects.get(cachedImage?.filename || '')
+  //         || null;
+
+  //       if (!originalImage) {
+  //         console.warn('[ChatPage.confirmAttachmentShareCopy] Image not found for key:', imageKey);
+  //         continue;
+  //       }
+
+  //       this.updateCopyProgress(
+  //         15 + ((i / Math.max(sourceImageKeys.length, 1)) * 45),
+  //         `Copying image ${i + 1}/${sourceImageKeys.length}...`
+  //       );
+
+  //       const copiedImage = await this.copySessionImageForRecipient(originalImage, imageKey, recipientUserId, newSessionId);
+  //       if (!copiedImage) {
+  //         console.warn('[ChatPage.confirmAttachmentShareCopy] Skipping image because no usable image data was found:', imageKey);
+  //         continue;
+  //       }
+
+  //       copiedImages.push(copiedImage);
+  //       uploadStatusByImage.push({
+  //         sourceImageKey: imageKey,
+  //         copiedFilename: copiedImage.filename,
+  //         originalUploadAttempted: !!copiedImage.originalUploadAttempted,
+  //         originalUploadSucceeded: !!copiedImage.originalUploadSucceeded,
+  //         withBoxesUploadAttempted: !!copiedImage.withBoxesUploadAttempted,
+  //         withBoxesUploadSucceeded: !!copiedImage.withBoxesUploadSucceeded
+  //       });
+
+  //       const transformedOriginalKey = this.transformKeyForAttachmentShare(imageKey, recipientUserId);
+  //       const existingKeyIndex = copiedSession.imageKeys.findIndex((key: string) => key === transformedOriginalKey);
+  //       if (existingKeyIndex >= 0) {
+  //         copiedSession.imageKeys[existingKeyIndex] = copiedImage.filename;
+  //       } else {
+  //         copiedSession.imageKeys.push(copiedImage.filename);
+  //       }
+
+  //       if (typeof service.addImage === 'function') {
+  //         await service.addImage(copiedImage);
+  //       }
+  //     }
+
+  //     copiedSession.totalBoundingBoxes = copiedSession.totalBoundingBoxes ?? selectedSession.totalBoundingBoxes ?? 0;
+
+  //     if (typeof service.registerSession === 'function') {
+  //       service.registerSession(copiedSession);
+  //     } else if (typeof service.addSessionIfNotExists === 'function') {
+  //       service.addSessionIfNotExists(copiedSession);
+  //     }
+
+  //     this.updateCopyProgress(70, 'Uploading copied session to Firestore...');
+
+  //     await service.saveSessionWithImagesToFirestore(copiedSession.id, recipientUserId);
+
+  //     this.updateCopyProgress(100, 'Session copy completed');
+
+  //     console.log('[ChatPage.confirmAttachmentShareCopy] ===== SESSION COPY WORKFLOW COMPLETE =====');
+  //     console.log('[ChatPage.confirmAttachmentShareCopy] Original session:', selectedSession);
+  //     console.log('[ChatPage.confirmAttachmentShareCopy] Copied session:', copiedSession);
+  //     console.log('[ChatPage.confirmAttachmentShareCopy] Copied images:', copiedImages);
+  //     console.log('[ChatPage.confirmAttachmentShareCopy] Firestore image objects used for copy:', Array.from(firestoreImageObjects.values()));
+  //     console.log('[ChatPage.confirmAttachmentShareCopy] Per-image upload status (original/withBoxes):', uploadStatusByImage);
+
+  //     console.log('Receiver user ID:', recipientUserId);
+  //     console.log('Current user ID:', currentUserId);
+
+  //     const failedUploads = uploadStatusByImage.filter((item) => {
+  //       const originalFailed = item.originalUploadAttempted && !item.originalUploadSucceeded;
+  //       const withBoxesFailed = item.withBoxesUploadAttempted && !item.withBoxesUploadSucceeded;
+  //       return originalFailed || withBoxesFailed;
+  //     });
+
+  //     if (failedUploads.length > 0) {
+  //       console.warn('[ChatPage.confirmAttachmentShareCopy] Some image uploads did not complete successfully:', failedUploads);
+  //     }
+
+  //     this.isAttachmentCopyInProgress = false;
+  //     this.attachmentDebugState = 'completed';
+  //     this.selectedAttachmentForDebug = copiedSession;
+  //   } catch (error) {
+  //     console.error('[ChatPage.confirmAttachmentShareCopy] Failed to copy session:', error);
+  //     this.isAttachmentCopyInProgress = false;
+  //     this.attachmentCopyProgress = 0;
+  //     this.attachmentCopyStatusText = '';
+  //     this.attachmentDebugState = 'inactive';
+  //     alert('Error sharing session. Check console for details.');
+  //     return;
+  //   }
+  // }
+
+  
 
   async confirmAttachmentDebugActionVersion2(attachment: any): Promise<void> {
     return this.confirmAttachmentShareCopy(attachment);

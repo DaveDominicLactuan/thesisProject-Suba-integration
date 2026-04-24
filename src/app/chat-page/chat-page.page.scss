@@ -2125,7 +2125,7 @@ $attachment-sheet-transition: transform 0.28s cubic-bezier(0.4, 0, 0.2, 1);
 
 .attachment-grid {
 	display: grid;
-	grid-template-columns: repeat(2, 1fr);
+	grid-template-columns: repeat(2, 160px);
 	gap: 0px;
 	padding: 8px 2px 55px 2px;
 }

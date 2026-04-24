@@ -1124,7 +1124,7 @@ addEntry() {
     return shortened || fullTitle; // Return original if nothing was removed
   }
 
-  /**
+/**
    * Save the currently-selected StoredImage (or the service current image) as a session,
    * update the storage entry, show a confirmation popup and navigate to home.
    */
@@ -1151,22 +1151,14 @@ addEntry() {
           entry = {
             original: found.original,
             withBoxes: found.withBoxes,
-            boxes: found.boxes ?? [],
+            boxes: [],
             faceDetected: false,
             faceData: [],
             timestamp: new Date().toISOString(),
             detectionMessage: found.detectionMessage ?? '',
             filename: found.fileName,
             rawPrediction: found.rawPrediction,
-            statusMessage: 'Saved as session',
-            // CRITICAL: Include prediction from current dropdown state
-            prediction: {
-              type: this.dropdown1 || found.rawPrediction?.type || '',
-              shape: this.dropdown2 || found.rawPrediction?.shape || '',
-              severity: this.dropdown3 || found.rawPrediction?.severity || ''
-            },
-            // CRITICAL: Set hasPrediction flag if any prediction value exists
-            hasPrediction: !!(this.dropdown1 || this.dropdown2 || this.dropdown3 || found.rawPrediction?.type)
+            statusMessage: 'Saved as session'
           };
         }
       }
@@ -1177,15 +1169,6 @@ addEntry() {
         return;
       }
 
-      // CRITICAL: Ensure prediction is properly set from current state
-      if (!entry.prediction || typeof entry.prediction !== 'object') {
-        entry.prediction = {};
-      }
-      entry.prediction.type = this.dropdown1 || entry.prediction.type || entry.rawPrediction?.type || '';
-      entry.prediction.shape = this.dropdown2 || entry.prediction.shape || entry.rawPrediction?.shape || '';
-      entry.prediction.severity = this.dropdown3 || entry.prediction.severity || entry.rawPrediction?.severity || '';
-      entry.hasPrediction = !!(entry.prediction.type || entry.prediction.shape || entry.prediction.severity);
-
       // mark entry as saved session and persist to service
       entry.statusMessage = entry.statusMessage ?? 'Saved as session';
       if ((this.imageStorageService as any).setEntryForImage) {
@@ -1195,15 +1178,6 @@ addEntry() {
       } else if ((this.imageStorageService as any).createAndAdd) {
         await (this.imageStorageService as any).createAndAdd(entry);
       }
-
-      console.log('[FeedbackPage] saveCurrentStoredImageAndGoHome - entry prepared for save:', {
-        filename: entry.filename,
-        prediction: entry.prediction,
-        hasPrediction: entry.hasPrediction,
-        boxes: entry.boxes,
-        boxesCount: entry.boxes?.length || 0,
-        rawPrediction: entry.rawPrediction
-      });
 
       // Prompt user for session name and allow Save or Cancel via custom overlay
       try {
@@ -1216,6 +1190,7 @@ addEntry() {
       alert('Failed to save session. See console for details.');
     }
   }
+
 
   /** Show an overlay to name and save the session or cancel */
    // Show an inline overlay to name the session and persist via storage service.

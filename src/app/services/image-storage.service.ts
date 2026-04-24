@@ -4,7 +4,7 @@ import { BehaviorSubject, Observable } from 'rxjs';
 import { Auth } from '@angular/fire/auth';
 import { onAuthStateChanged } from 'firebase/auth';
 import { Firestore, collection, doc, setDoc, deleteDoc, getDocs, query, where, writeBatch } from '@angular/fire/firestore';
-import { S3Client, PutObjectCommand, ListObjectsV2Command, GetObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, PutObjectCommand, ListObjectsV2Command, GetObjectCommand, DeleteObjectCommand, CopyObjectCommand } from '@aws-sdk/client-s3';
 import { fromCognitoIdentityPool } from '@aws-sdk/credential-providers';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'; // NEW IMPORT
 
@@ -1907,6 +1907,30 @@ export class ImageStorageService {
       throw error;
     }
   }
+
+   // NEW METHOD: Tells S3 to duplicate a file directly inside the cloud
+  async copyFile(sourceKey: string, newKey: string): Promise<{ success: boolean; key: string }> {
+  try {
+    const command = new CopyObjectCommand({
+      Bucket: this.bucketName,
+      CopySource: encodeURI(`${this.bucketName}/${sourceKey}`),
+      Key: newKey,
+    });
+
+    const response = await this.s3Client.send(command);
+
+    // Check if the response from AWS includes the CopyObjectResult
+    if (response.$metadata.httpStatusCode === 200) {
+      console.log(`✅ AWS S3: Successfully copied ${sourceKey} to ${newKey}`);
+      return { success: true, key: newKey };
+    } else {
+      throw new Error('S3 returned a non-200 status code');
+    }
+  } catch (error) {
+    console.error('❌ AWS S3: Copy Failed', error);
+    throw error;
+  }
+}
 
   // /**
   //  * Get entry for an image by key (helper method for external use)
