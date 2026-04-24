@@ -5,7 +5,7 @@ import { AuthService } from '../services/auth.service';
 import { NavController, Platform } from '@ionic/angular';
 import { User } from 'firebase/auth';
 import { Auth3Service } from '../services/auth3.service';
-import { Firestore, collection, doc, getDoc, query, where, getDocs } from '@angular/fire/firestore';
+import { Firestore, collection, doc, getDoc, query, where, getDocs, setDoc } from '@angular/fire/firestore';
 import { ImageStorageService } from '../services/image-storage.service';
 import { Chat, ChatService, Message, TypingState } from '../services/chat.service';
 import { PresenceService } from '../services/presence.service';
@@ -1497,7 +1497,9 @@ export class ChatPagePage implements OnInit, OnDestroy {
         console.log('storedCount:', copiedSessionImageObjectsWithFetchedS3.length);
         console.log('copiedSessionImageObjectsWithFetchedS3:', copiedSessionImageObjectsWithFetchedS3);
 
-        for (let i = 0; i > this.sessionImageObjectCounter; i++) {
+        for (let i = 0; i < this.sessionImageObjectCounter; i++) {
+
+          console.log("the loop triggered")
           const imgObj = copiedSessionImageObjectsWithFetchedS3[i];
           console.log(`[ChatPage.confirmAttachmentShareCopy] Old Image object ${i + 1}/${this.sessionImageObjectCounter}:`, {
             filename: imgObj.filename,
@@ -1513,13 +1515,17 @@ export class ChatPagePage implements OnInit, OnDestroy {
             hasWithBoxesDataUrl: !!imgObj.withBoxes,
             withBoxesS3Url: imgObj.withBoxesS3Url,
             withBoxesStoragePath: imgObj.withBoxesStoragePath,
-            withBoxesStorageUrl: imgObj.withBoxesStorageUrl
+            withBoxesStorageUrl: imgObj.withBoxesStorageUrl,
+
+
+            userID: imgObj.userId
           });
           
           console.log("Original image from originalS3Key", imgObj.originalS3Key);
           this.imageStorage.verifyImageExists(imgObj.originalS3Key);
           console.log("WithBoxes image from withBoxesS3Key", imgObj.withBoxesS3Key);
           this.imageStorage.verifyImageExists(imgObj.withBoxesS3Key);
+          imgObj.userId = recipientUserId;
 
           
           
@@ -1535,8 +1541,8 @@ export class ChatPagePage implements OnInit, OnDestroy {
           const sourceKey = this.changeUserID(imgObj.originalS3Key, recipientUserId);
           const destinationKey = imgObj.originalS3Key;
           
-          console.log("originalS3Key", imgObj.originalS3Key);
-        console.log("destinationS3Key", imgObj.originalS3Key);
+          console.log("originalS3Key", sourceKey);
+        console.log("originaldestinationS3Key", destinationKey);
 
   // Validation
   if (sourceKey === destinationKey) {
@@ -1547,8 +1553,15 @@ export class ChatPagePage implements OnInit, OnDestroy {
   // this.isCopying = true;
   try {
     // 2. Execute the internal S3 Copy command
-    // const result = await this.imageStorage.copyFile(sourceKey, destinationKey);
-    const result = { success: false }; // Mock result for demonstration
+    const result = await this.imageStorage.copyFile(sourceKey, destinationKey);
+    // const result = { success: false }; // Mock result for demonstration
+    console.log('[ChatPage.confirmAttachmentShareCopy] copyFile result (original):', {
+      index: i + 1,
+      total: this.sessionImageObjectCounter,
+      sourceKey,
+      destinationKey,
+      result
+    });
     
     // 3. Generate and log the metadata if the copy was successful
     if (result.success) {
@@ -1568,24 +1581,41 @@ export class ChatPagePage implements OnInit, OnDestroy {
 
       console.group('✅ S3 Copy Operation Complete');
       console.log('New Image Metadata:', newImageMetadata);
+      console.log('[ChatPage.confirmAttachmentShareCopy] copyFile SUCCESS (original)', {
+        index: i + 1,
+        total: this.sessionImageObjectCounter,
+        sourceKey,
+        destinationKey,
+        result
+      });
       
+    } else {
+      console.warn('[ChatPage.confirmAttachmentShareCopy] copyFile FAILED (original)', {
+        index: i + 1,
+        total: this.sessionImageObjectCounter,
+        sourceKey,
+        destinationKey,
+        result
+      });
     }
   } catch (error) {
-    console.error("Failed to store copy from extracted data", error);
+    console.error('[ChatPage.confirmAttachmentShareCopy] copyFile ERROR (original)', {
+      index: i + 1,
+      total: this.sessionImageObjectCounter,
+      sourceKey,
+      destinationKey,
+      error
+    });
   } finally {
     // this.isCopying = false;
   }
 
   //withBoxes
-
           const sourceKey2 = this.changeUserID(imgObj.withBoxesS3Key, recipientUserId);
           const destinationKey2 = imgObj.withBoxesS3Key;
           
-          console.log("withBoxesS3Key", imgObj.withBoxesS3Key);
-        console.log("destinationS3Key", imgObj.withBoxesS3Key);
-
-
-          console.log("destinationKey", imgObj.filename); 
+          console.log("withBoxesS3Key", sourceKey2);
+        console.log("withBoxesdestinationS3Key", destinationKey2);
 
   // Validation
   if (sourceKey2 === destinationKey2) {
@@ -1596,8 +1626,15 @@ export class ChatPagePage implements OnInit, OnDestroy {
   // this.isCopying = true;
   try {
     // 2. Execute the internal S3 Copy command
-    // const result = await this.imageStorage.copyFile(sourceKey2, destinationKey);
-    const result = { success: false }; // Mock result for demonstration
+    const result = await this.imageStorage.copyFile(sourceKey2, destinationKey);
+    // const result = { success: false }; // Mock result for demonstration
+    console.log('[ChatPage.confirmAttachmentShareCopy] copyFile result (withBoxes):', {
+      index: i + 1,
+      total: this.sessionImageObjectCounter,
+      sourceKey: sourceKey2,
+      destinationKey,
+      result
+    });
     
     // 3. Generate and log the metadata if the copy was successful
     if (result.success) {
@@ -1610,17 +1647,40 @@ export class ChatPagePage implements OnInit, OnDestroy {
         storageUrl: `${bucketBaseUrl}${destinationKey}`
       };
 
-       imgObj.originalS3Key = newImageMetadata.originalS3Key,
-       imgObj.originalS3Url = newImageMetadata.originalS3Url,
-       imgObj.storagePath = newImageMetadata.storagePath,
-       imgObj.storageUrl = newImageMetadata.storageUrl,
+       imgObj.withBoxesS3Key = newImageMetadata.originalS3Key,
+       imgObj.withBoxesS3Url = newImageMetadata.storageUrl,
+       imgObj.withBoxesStoragePath = newImageMetadata.storagePath,
+       imgObj.withBoxesStorageUrl = newImageMetadata.storageUrl,
+
+       //  imgObj.withBoxes = newImageMetadata.originalS3Url,
 
       console.group('✅ S3 Copy Operation Complete');
       console.log('New Image Metadata:', newImageMetadata);
+      console.log('[ChatPage.confirmAttachmentShareCopy] copyFile SUCCESS (withBoxes)', {
+        index: i + 1,
+        total: this.sessionImageObjectCounter,
+        sourceKey: sourceKey2,
+        destinationKey,
+        result
+      });
       
+    } else {
+      console.warn('[ChatPage.confirmAttachmentShareCopy] copyFile FAILED (withBoxes)', {
+        index: i + 1,
+        total: this.sessionImageObjectCounter,
+        sourceKey: sourceKey2,
+        destinationKey,
+        result
+      });
     }
   } catch (error) {
-    console.error("Failed to store copy from extracted data", error);
+    console.error('[ChatPage.confirmAttachmentShareCopy] copyFile ERROR (withBoxes)', {
+      index: i + 1,
+      total: this.sessionImageObjectCounter,
+      sourceKey: sourceKey2,
+      destinationKey,
+      error
+    });
   } finally {
     // this.isCopying = false;
   }
@@ -1641,10 +1701,53 @@ export class ChatPagePage implements OnInit, OnDestroy {
             hasWithBoxesDataUrl: !!imgObj.withBoxes,
             withBoxesS3Url: imgObj.withBoxesS3Url,
             withBoxesStoragePath: imgObj.withBoxesStoragePath,
-            withBoxesStorageUrl: imgObj.withBoxesStorageUrl
+            withBoxesStorageUrl: imgObj.withBoxesStorageUrl,
+            userID: imgObj.userId
 
           });
+
+          const imagesCollectionRef = collection(this.firestore, 'images');
+          const fallbackDocId = `${newSessionId}_img_${i + 1}_${Date.now()}`;
+          const imageDocId = (imgObj?.filename || fallbackDocId).toString();
+          const imageDocRef = doc(imagesCollectionRef, imageDocId);
+          const imageDocPayload: any = {
+            ...imgObj,
+            filename: imageDocId,
+            userId: recipientUserId,
+            sessionId: newSessionId,
+            firestoreDocId: imageDocId,
+            firestoreSavedAt: new Date().toISOString()
+          };
+
+          try {
+            await setDoc(imageDocRef, imageDocPayload, { merge: true });
+            const verifySnapshot = await getDoc(imageDocRef);
+
+            if (verifySnapshot.exists()) {
+              console.log(`[ChatPage.confirmAttachmentShareCopy] Firestore store SUCCESS for imgObj ${i + 1}/${this.sessionImageObjectCounter}`, {
+                imageDocId,
+                saved: true,
+                imgObj: imageDocPayload
+              });
+            } else {
+              console.warn(`[ChatPage.confirmAttachmentShareCopy] Firestore verify FAILED for imgObj ${i + 1}/${this.sessionImageObjectCounter}`, {
+                imageDocId,
+                saved: false,
+                imgObj: imageDocPayload
+              });
+            }
+          } catch (storeError) {
+            console.error(`[ChatPage.confirmAttachmentShareCopy] Firestore store FAILED for imgObj ${i + 1}/${this.sessionImageObjectCounter}`, {
+              imageDocId,
+              error: storeError,
+              imgObj: imageDocPayload
+            });
+          }
+
+          
       }
+
+
         console.groupEnd();
       } catch (firestoreError) {
         console.warn('[ChatPage.confirmAttachmentShareCopy] Unable to load session images from Firestore, falling back to local cache only:', firestoreError);
