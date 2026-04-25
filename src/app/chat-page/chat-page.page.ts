@@ -1538,8 +1538,8 @@ export class ChatPagePage implements OnInit, OnDestroy {
 
         
         //original 
-          const sourceKey = this.changeUserID(imgObj.originalS3Key, recipientUserId);
-          const destinationKey = imgObj.originalS3Key;
+          const sourceKey = imgObj.originalS3Key ;
+          const destinationKey = this.changeUserID(imgObj.originalS3Key, recipientUserId);
           
           console.log("originalS3Key", sourceKey);
         console.log("originaldestinationS3Key", destinationKey);
@@ -1565,8 +1565,8 @@ export class ChatPagePage implements OnInit, OnDestroy {
     
     // 3. Generate and log the metadata if the copy was successful
     if (result.success) {
-      const bucketBaseUrl = 'https://my-angular-test-bucket-12345.s3.ap-southeast-2.amazonaws.com/';
-      
+      // const bucketBaseUrl = 'https://my-angular-test-bucket-12345.s3.ap-southeast-2.amazonaws.com/';
+      const bucketBaseUrl = 'my-angular-test-bucket-12345'
       const newImageMetadata = {
         originalS3Key: sourceKey,
         originalS3Url: `${bucketBaseUrl}${sourceKey}`,
@@ -1611,8 +1611,8 @@ export class ChatPagePage implements OnInit, OnDestroy {
   }
 
   //withBoxes
-          const sourceKey2 = this.changeUserID(imgObj.withBoxesS3Key, recipientUserId);
-          const destinationKey2 = imgObj.withBoxesS3Key;
+          const sourceKey2 = imgObj.withBoxesS3Key;
+          const destinationKey2 = this.changeUserID(imgObj.withBoxesS3Key, recipientUserId);
           
           console.log("withBoxesS3Key", sourceKey2);
         console.log("withBoxesdestinationS3Key", destinationKey2);
@@ -1714,6 +1714,8 @@ export class ChatPagePage implements OnInit, OnDestroy {
             ...imgObj,
             filename: imageDocId,
             userId: recipientUserId,
+            createdBy: currentUserId,
+            sharedBy: currentUserId,
             sessionId: newSessionId,
             firestoreDocId: imageDocId,
             firestoreSavedAt: new Date().toISOString()
