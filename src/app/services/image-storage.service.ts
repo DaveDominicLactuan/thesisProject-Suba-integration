@@ -366,35 +366,85 @@ export class ImageStorageService {
 
       const response = await this.s3Client.send(getCommand);
       
-      // Convert response body stream to Uint8Array
-      const chunks: Uint8Array[] = [];
-      const reader = response.Body as any;
+      const body = response.Body as any;
 
-      if (reader && typeof reader.pipe === 'function') {
-        // Node.js stream
-        return new Promise((resolve, reject) => {
-          reader.on('data', (chunk: Uint8Array) => chunks.push(chunk));
-          reader.on('end', () => {
-            const binaryString = String.fromCharCode(...new Uint8Array(Buffer.concat(chunks)));
-            const base64 = btoa(binaryString);
-            resolve(`data:image/jpeg;base64,${base64}`);
-          });
-          reader.on('error', reject);
-        });
-      } else if (reader && typeof reader.getReader === 'function') {
-        // Web stream
-        const readableStream = await new Response(reader as any).arrayBuffer();
-        const binaryString = String.fromCharCode(...new Uint8Array(readableStream));
-        const base64 = btoa(binaryString);
-        return `data:image/jpeg;base64,${base64}`;
-      } else {
-        console.warn('[ImageStorageService] Unknown stream type for S3 response');
+      if (!body) {
+        console.warn('[ImageStorageService] Empty S3 response body for key:', s3Key);
         return null;
       }
+
+      const bytes = await this.readS3ResponseBody(body);
+      if (!bytes || bytes.length === 0) {
+        console.warn('[ImageStorageService] No bytes returned for S3 object:', s3Key);
+        return null;
+      }
+
+      const base64 = this.uint8ArrayToBase64(bytes);
+      return `data:image/jpeg;base64,${base64}`;
     } catch (error) {
       console.error(`[ImageStorageService] Error fetching S3 object ${s3Key}:`, error);
       return null;
     }
+  }
+
+  private async readS3ResponseBody(body: any): Promise<Uint8Array | null> {
+    if (body instanceof Uint8Array) {
+      return body;
+    }
+
+    if (typeof body.transformToByteArray === 'function') {
+      const transformed = await body.transformToByteArray();
+      return transformed instanceof Uint8Array ? transformed : new Uint8Array(transformed);
+    }
+
+    if (typeof body.arrayBuffer === 'function') {
+      const buffer = await body.arrayBuffer();
+      return new Uint8Array(buffer);
+    }
+
+    if (typeof body.getReader === 'function') {
+      const readableStream = await new Response(body as ReadableStream).arrayBuffer();
+      return new Uint8Array(readableStream);
+    }
+
+    if (typeof body.pipe === 'function') {
+      return await new Promise<Uint8Array | null>((resolve, reject) => {
+        const chunks: Uint8Array[] = [];
+        body.on('data', (chunk: Uint8Array | ArrayBuffer | Buffer) => {
+          chunks.push(chunk instanceof Uint8Array ? chunk : new Uint8Array(chunk as ArrayBuffer));
+        });
+        body.on('end', () => {
+          if (typeof Buffer !== 'undefined') {
+            resolve(new Uint8Array(Buffer.concat(chunks.map((chunk) => Buffer.from(chunk)))));
+            return;
+          }
+
+          const totalLength = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
+          const merged = new Uint8Array(totalLength);
+          let offset = 0;
+          for (const chunk of chunks) {
+            merged.set(chunk, offset);
+            offset += chunk.length;
+          }
+          resolve(merged);
+        });
+        body.on('error', reject);
+      });
+    }
+
+    return null;
+  }
+
+  private uint8ArrayToBase64(bytes: Uint8Array): string {
+    let binary = '';
+    const chunkSize = 0x8000;
+
+    for (let index = 0; index < bytes.length; index += chunkSize) {
+      const chunk = bytes.subarray(index, index + chunkSize);
+      binary += String.fromCharCode(...chunk);
+    }
+
+    return btoa(binary);
   }
 
   /**
@@ -856,6 +906,8 @@ export class ImageStorageService {
         return;
       }
       // CRITICAL: Ensure userId is ALWAYS set to currentUid (never null)
+      
+
       session.userId = currentUid;
 
       console.log('[ImageStorageService] Saving session to Firestore', {
@@ -1481,6 +1533,338 @@ export class ImageStorageService {
       console.error('[ImageStorageService] Error saving image to Firestore:', error);
       throw error;
     }
+  }
+
+  /**
+   * Create and post a sample image document to Firestore 'images' collection.
+   * This is useful for manual verification of the collection write path.
+   */
+  async postSampleImageToFirestore(
+    sample?: Partial<StoredImage>,
+    recipientUserId?: string
+  ): Promise<string | null> {
+    try {
+      const currentUid = await this.waitForAuthUserId();
+      console.log('[ImageStorageService] currentUserId for postSampleImageToFirestore', currentUid);
+      const effectiveUserId = recipientUserId || currentUid;
+
+      if (!effectiveUserId) {
+        console.warn('[ImageStorageService] No authenticated user; skipping sample Firestore image write');
+        return null;
+      }
+
+      const timestamp = sample?.timestamp || new Date().toISOString();
+      const docIdPrefix = recipientUserId ? 'copied' : 'sample';
+      const docId = `${docIdPrefix}_${timestamp}_${Math.random().toString(36).substr(2, 9)}`;
+      const imagesCollection = collection(this.firestore, this.FIRESTORE_IMAGES_COLLECTION);
+      const docRef = doc(imagesCollection, docId);
+      console.log("Step 1, docID", docId, "and effectiveUserId", effectiveUserId, "and collection", imagesCollection, "docRef", docRef);
+
+      const sampleImage: StoredImage = {
+        original: sample?.original || '',
+        withBoxes: sample?.withBoxes,
+        boxes: sample?.boxes || [],
+        faceDetected: sample?.faceDetected || false,
+        faceData: sample?.faceData || [],
+        timestamp,
+        filename: sample?.filename || `sample-image-${timestamp}.jpg`,
+        prediction: sample?.prediction || { type: 'sample', shape: 'unknown', severity: 'test' },
+        hasPrediction: sample?.hasPrediction ?? true,
+        statusMessage: sample?.statusMessage || 'Sample image document created for Firestore testing',
+        detectionMessage: sample?.detectionMessage || 'Sample detection payload',
+        sessionId: sample?.sessionId || null || 'sample-session',
+        userId: effectiveUserId,
+        fileImageName: sample?.fileImageName || 'sample-image.jpg',
+        storagePath: sample?.storagePath || null || 'sample-session',
+        storageUrl: sample?.storageUrl || null || 'sample-session',
+        withBoxesStoragePath: sample?.withBoxesStoragePath || null || 'sample-session',
+        withBoxesStorageUrl: sample?.withBoxesStorageUrl || null || 'sample-session',
+        originalS3Key: sample?.originalS3Key || null || 'sample-session',
+        originalS3Url: sample?.originalS3Url || null || 'sample-session',
+        withBoxesS3Key: sample?.withBoxesS3Key || null || 'sample-session',
+        withBoxesS3Url: sample?.withBoxesS3Url || null || 'sample-session',
+      };
+
+      console.log("Step 2, sampleImage", sampleImage);
+
+      const firestoreData: any = {
+        timestamp: sampleImage.timestamp,
+        filename: sampleImage.filename,
+        userId: effectiveUserId,
+        createdBy: currentUid || effectiveUserId,
+        sessionId: sampleImage.sessionId || null,
+        hasPrediction: sampleImage.hasPrediction || false,
+        statusMessage: sampleImage.statusMessage || '',
+        detectionMessage: sampleImage.detectionMessage || '',
+        prediction: sampleImage.prediction || null,
+        boxes: sampleImage.boxes || [],
+        originalS3Key: sampleImage.originalS3Key || null,
+        originalS3Url: sampleImage.originalS3Url || null,
+        storagePath: sampleImage.storagePath || null,
+        storageUrl: sampleImage.storageUrl || null,
+        withBoxesS3Key: sampleImage.withBoxesS3Key || null,
+        withBoxesS3Url: sampleImage.withBoxesS3Url || null,
+        withBoxesStoragePath: sampleImage.withBoxesStoragePath || null,
+        withBoxesStorageUrl: sampleImage.withBoxesStorageUrl || null,
+      };
+
+      console.log('[ImageStorageService] Sample object to upload (images collection):', {
+        docId,
+        recipientUserId: effectiveUserId,
+        ...firestoreData
+      });
+
+      console.log('[ImageStorageService][Auth Debug] request uid vs payload', { requestUid: currentUid, payloadUserId: firestoreData.userId, payloadCreatedBy: firestoreData.createdBy });
+      await setDoc(docRef, firestoreData);
+      console.log('[ImageStorageService] Sample upload succeeded for images collection');
+      console.log(`✅ Sample image saved to Firestore: ${docId}`);
+      return docId;
+    } catch (error) {
+      console.error('[ImageStorageService] Error posting sample image to Firestore:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Version 2 of the sample image Firestore writer.
+   * Accepts an imgObj plus recipientUserId and writes to the images collection.
+   */
+  async postSampleImageToFirestoreVersion2(
+    imgObj?: Partial<StoredImage>,
+    recipientUserId?: string
+  ): Promise<string | null> {
+    try {
+      const currentUid = await this.waitForAuthUserId();
+      console.log('[ImageStorageService] currentUserId for postSampleImageToFirestoreVersion2', currentUid);
+      // const effectiveUserId = recipientUserId || currentUid;
+      const effectiveUserId = recipientUserId;
+
+      if (!effectiveUserId) {
+        console.warn('[ImageStorageService] No authenticated user; skipping sample Firestore image write (Version2)');
+        return null;
+      }
+
+      const timestamp = this.resolveFirestoreTimestamp(imgObj?.timestamp);
+      const docIdPrefix = recipientUserId ? 'copied-v2' : 'sample-v2';
+      // const docId = `${docIdPrefix}_${timestamp}_${Math.random().toString(36).substr(2, 9)}`;
+      const docId = imgObj?.filename ? imgObj.filename.replace(/\.[^/.]+$/, '') : `${docIdPrefix}_${timestamp}_${Math.random().toString(36).substr(2, 9)}`; // Use filename without extension as doc ID if available, otherwise use generated docId
+      const imagesCollection = collection(this.firestore, this.FIRESTORE_IMAGES_COLLECTION);
+      const docRef = doc(imagesCollection, docId);
+
+
+      
+     
+
+      const sampleImage: StoredImage = {
+        original: imgObj?.original || '',
+        withBoxes: imgObj?.withBoxes,
+        boxes: imgObj?.boxes || [],
+        faceDetected: imgObj?.faceDetected || false,
+        faceData: imgObj?.faceData || [],
+        timestamp,
+        filename: imgObj?.filename || `sample-image-${timestamp}.jpg`,
+        prediction: imgObj?.prediction || { type: 'sample', shape: 'unknown', severity: 'test' },
+        hasPrediction: imgObj?.hasPrediction ?? true,
+        statusMessage: imgObj?.statusMessage || 'Sample image document created for Firestore testing',
+        detectionMessage: imgObj?.detectionMessage || 'Sample detection payload',
+        sessionId: imgObj?.sessionId || null || 'sample-session',
+        userId: effectiveUserId,
+        fileImageName: imgObj?.fileImageName || 'sample-image.jpg',
+        storagePath: imgObj?.storagePath || null || 'sample-session',
+        storageUrl: imgObj?.storageUrl || null || 'sample-session',
+        withBoxesStoragePath: imgObj?.withBoxesStoragePath || null || 'sample-session',
+        withBoxesStorageUrl: imgObj?.withBoxesStorageUrl || null || 'sample-session',
+        originalS3Key: imgObj?.originalS3Key || null || 'sample-session',
+        originalS3Url: imgObj?.originalS3Url || null || 'sample-session',
+        withBoxesS3Key: imgObj?.withBoxesS3Key || null || 'sample-session',
+        withBoxesS3Url: imgObj?.withBoxesS3Url || null || 'sample-session',
+      };
+
+     
+
+      const firestoreData: any = {
+        timestamp: sampleImage.timestamp,
+        filename: sampleImage.filename,
+        userId: effectiveUserId,
+        sessionId: sampleImage.sessionId || null,
+        hasPrediction: sampleImage.hasPrediction || false,
+        statusMessage: sampleImage.statusMessage || '',
+        detectionMessage: sampleImage.detectionMessage || '',
+        prediction: sampleImage.prediction || null,
+        boxes: sampleImage.boxes || [],
+        originalS3Key: sampleImage.originalS3Key || null,
+        originalS3Url: sampleImage.originalS3Url || null,
+        storagePath: sampleImage.storagePath || null,
+        storageUrl: sampleImage.storageUrl || null,
+        withBoxesS3Key: sampleImage.withBoxesS3Key || null,
+        withBoxesS3Url: sampleImage.withBoxesS3Url || null,
+        withBoxesStoragePath: sampleImage.withBoxesStoragePath || null,
+        withBoxesStorageUrl: sampleImage.withBoxesStorageUrl || null,
+      };
+
+      console.log('Old [ImageStorageService] Sample object to upload (images collection) Version2:', {
+        docId,
+        recipientUserId: effectiveUserId,
+        ...firestoreData
+      });
+
+      console.log('New [ImageStorageService] Sample object to upload (images collection) Version2:', {
+        docId,
+        recipientUserId: effectiveUserId,
+        ...sampleImage,
+        createdBy: currentUid || effectiveUserId
+      });
+
+      console.log('[ImageStorageService][Auth Debug] request uid vs payload', { requestUid: currentUid, payloadUserId: effectiveUserId, payloadCreatedBy: currentUid || effectiveUserId });
+      await setDoc(docRef, { ...sampleImage, createdBy: currentUid || effectiveUserId });
+      console.log('[ImageStorageService] Sample upload succeeded for images collection Version2');
+      console.log(`✅ Sample image saved to Firestore (Version2): ${docId}`);
+      return docId;
+    } catch (error) {
+      console.error('[ImageStorageService] Error posting sample image to Firestore Version2:', error);
+      throw error;
+    }
+  }
+
+  // async postSampleImageToFirestoreVersion2(
+  //   imgObj?: Partial<StoredImage>,
+  //   recipientUserId?: string
+  // ): Promise<string | null> {
+  //   try {
+  //     const currentUid = await this.waitForAuthUserId();
+  //     console.log('[ImageStorageService] currentUserId for postSampleImageToFirestoreVersion2', currentUid);
+  //     const effectiveUserId = recipientUserId || currentUid;
+
+  //     if (!effectiveUserId) {
+  //       console.warn('[ImageStorageService] No authenticated user; skipping sample Firestore image write (Version2)');
+  //       return null;
+  //     }
+
+  //     const timestamp = this.resolveFirestoreTimestamp(imgObj?.timestamp);
+  //     const docIdPrefix = recipientUserId ? 'copied-v2' : 'sample-v2';
+  //     // const docId = `${docIdPrefix}_${timestamp}_${Math.random().toString(36).substr(2, 9)}`;
+  //     const docId = imgObj?.filename ? imgObj.filename.replace(/\.[^/.]+$/, '') : `${docIdPrefix}_${timestamp}_${Math.random().toString(36).substr(2, 9)}`; // Use filename without extension as doc ID if available, otherwise use generated docId
+  //     const imagesCollection = collection(this.firestore, this.FIRESTORE_IMAGES_COLLECTION);
+  //     const docRef = doc(imagesCollection, docId);
+
+
+  //     // const sampleImage: StoredImage = {
+  //     //   original: imgObj?.original || '',
+  //     //   withBoxes: imgObj?.withBoxes,
+  //     //   boxes: imgObj?.boxes || [],
+  //     //   faceDetected: imgObj?.faceDetected || false,
+  //     //   faceData: imgObj?.faceData || [],
+  //     //   timestamp,
+  //     //   filename: imgObj?.filename || `sample-image-${timestamp}.jpg`,
+  //     //   prediction: imgObj?.prediction || { type: 'sample', shape: 'unknown', severity: 'test' },
+  //     //   hasPrediction: imgObj?.hasPrediction ?? true,
+  //     //   statusMessage: imgObj?.statusMessage || 'Sample image document created for Firestore testing',
+  //     //   detectionMessage: imgObj?.detectionMessage || 'Sample detection payload',
+  //     //   sessionId: imgObj?.sessionId || null || 'sample-session',
+  //     //   userId: effectiveUserId,
+  //     //   fileImageName: imgObj?.fileImageName || 'sample-image.jpg',
+  //     //   storagePath: imgObj?.storagePath || null || 'sample-session',
+  //     //   storageUrl: imgObj?.storageUrl || null || 'sample-session',
+  //     //   withBoxesStoragePath: imgObj?.withBoxesStoragePath || null || 'sample-session',
+  //     //   withBoxesStorageUrl: imgObj?.withBoxesStorageUrl || null || 'sample-session',
+  //     //   originalS3Key: imgObj?.originalS3Key || null || 'sample-session',
+  //     //   originalS3Url: imgObj?.originalS3Url || null || 'sample-session',
+  //     //   withBoxesS3Key: imgObj?.withBoxesS3Key || null || 'sample-session',
+  //     //   withBoxesS3Url: imgObj?.withBoxesS3Url || null || 'sample-session',
+  //     // };
+
+     
+
+  //     const sampleImage: StoredImage = {
+  //       original: imgObj?.original || '',
+  //       withBoxes: imgObj?.withBoxes,
+  //       boxes: imgObj?.boxes || [],
+  //       faceDetected: imgObj?.faceDetected || false,
+  //       faceData: imgObj?.faceData || [],
+  //       timestamp,
+  //       filename: imgObj?.filename || `sample-image-${timestamp}.jpg`,
+  //       prediction: imgObj?.prediction || { type: 'sample', shape: 'unknown', severity: 'test' },
+  //       hasPrediction: imgObj?.hasPrediction ?? true,
+  //       statusMessage: imgObj?.statusMessage || 'Sample image document created for Firestore testing',
+  //       detectionMessage: imgObj?.detectionMessage || 'Sample detection payload',
+  //       sessionId: imgObj?.sessionId || null || 'sample-session',
+  //       userId: effectiveUserId,
+  //       fileImageName: imgObj?.fileImageName || 'sample-image.jpg',
+  //       storagePath: imgObj?.storagePath || null || 'sample-session',
+  //       storageUrl: imgObj?.storageUrl || null || 'sample-session',
+  //       withBoxesStoragePath: imgObj?.withBoxesStoragePath || null || 'sample-session',
+  //       withBoxesStorageUrl: imgObj?.withBoxesStorageUrl || null || 'sample-session',
+  //       originalS3Key: imgObj?.originalS3Key || null || 'sample-session',
+  //       originalS3Url: imgObj?.originalS3Url || null || 'sample-session',
+  //       withBoxesS3Key: imgObj?.withBoxesS3Key || null || 'sample-session',
+  //       withBoxesS3Url: imgObj?.withBoxesS3Url || null || 'sample-session',
+  //     };
+
+  //     //   const firestoreData: any = {
+  //     //   timestamp: sampleImage.timestamp,
+  //     //   filename: sampleImage.filename,
+  //     //   userId: effectiveUserId,
+  //     //   sessionId: sampleImage.sessionId || null,
+  //     //   hasPrediction: sampleImage.hasPrediction || false,
+  //     //   statusMessage: sampleImage.statusMessage || '',
+  //     //   detectionMessage: sampleImage.detectionMessage || '',
+  //     //   prediction: sampleImage.prediction || null,
+  //     //   boxes: sampleImage.boxes || [],
+  //     //   originalS3Key: sampleImage.originalS3Key || null,
+  //     //   originalS3Url: sampleImage.originalS3Url || null,
+  //     //   storagePath: sampleImage.storagePath || null,
+  //     //   storageUrl: sampleImage.storageUrl || null,
+  //     //   withBoxesS3Key: sampleImage.withBoxesS3Key || null,
+  //     //   withBoxesS3Url: sampleImage.withBoxesS3Url || null,
+  //     //   withBoxesStoragePath: sampleImage.withBoxesStoragePath || null,
+  //     //   withBoxesStorageUrl: sampleImage.withBoxesStorageUrl || null,
+  //     // };
+
+  //     const firestoreData: any = {
+  //       timestamp: sampleImage.timestamp,
+  //       filename: sampleImage.filename,
+  //       userId: effectiveUserId,
+  //       sessionId: sampleImage.sessionId || null,
+  //       hasPrediction: sampleImage.hasPrediction || false,
+  //       statusMessage: sampleImage.statusMessage || '',
+  //       detectionMessage: sampleImage.detectionMessage || '',
+  //       prediction: sampleImage.prediction || null,
+  //       boxes: sampleImage.boxes || [],
+  //       originalS3Key: sampleImage.originalS3Key || null,
+  //       originalS3Url: sampleImage.originalS3Url || null,
+  //       storagePath: sampleImage.storagePath || null,
+  //       storageUrl: sampleImage.storageUrl || null,
+  //       withBoxesS3Key: sampleImage.withBoxesS3Key || null,
+  //       withBoxesS3Url: sampleImage.withBoxesS3Url || null,
+  //       withBoxesStoragePath: sampleImage.withBoxesStoragePath || null,
+  //       withBoxesStorageUrl: sampleImage.withBoxesStorageUrl || null,
+  //     };
+
+  //     console.log('[ImageStorageService] Sample object to upload (images collection) Version2:', {
+  //       docId,
+  //       recipientUserId: effectiveUserId,
+  //       ...firestoreData
+  //     });
+
+  //     await setDoc(docRef, firestoreData);
+  //     console.log('[ImageStorageService] Sample upload succeeded for images collection Version2');
+  //     console.log(`✅ Sample image saved to Firestore (Version2): ${docId}`);
+  //     return docId;
+  //   } catch (error) {
+  //     console.error('[ImageStorageService] Error posting sample image to Firestore Version2:', error);
+  //     throw error;
+  //   }
+  // }
+
+  /**
+   * Normalize a Firestore timestamp value, falling back to now when no sample value is provided.
+   */
+  private resolveFirestoreTimestamp(sampleTimestamp?: string): string {
+    if (typeof sampleTimestamp === 'string' && sampleTimestamp.trim().length > 0) {
+      return sampleTimestamp;
+    }
+
+    return new Date().toISOString();
   }
 
   /**

@@ -1568,8 +1568,8 @@ export class ChatPagePage implements OnInit, OnDestroy {
       // const bucketBaseUrl = 'https://my-angular-test-bucket-12345.s3.ap-southeast-2.amazonaws.com/';
       const bucketBaseUrl = 'my-angular-test-bucket-12345'
       const newImageMetadata = {
-        originalS3Key: sourceKey,
-        originalS3Url: `${bucketBaseUrl}${sourceKey}`,
+        originalS3Key: destinationKey,
+        originalS3Url: `${bucketBaseUrl}${destinationKey}`,
         storagePath: destinationKey,
         storageUrl: `${bucketBaseUrl}${destinationKey}`
       };
@@ -1641,8 +1641,8 @@ export class ChatPagePage implements OnInit, OnDestroy {
       const bucketBaseUrl = 'https://my-angular-test-bucket-12345.s3.ap-southeast-2.amazonaws.com/';
       
       const newImageMetadata = {
-        originalS3Key: sourceKey2,
-        originalS3Url: `${bucketBaseUrl}${sourceKey2}`,
+        originalS3Key: destinationKey,
+        originalS3Url: `${bucketBaseUrl}${destinationKey}`,
         storagePath: destinationKey,
         storageUrl: `${bucketBaseUrl}${destinationKey}`
       };
@@ -1706,43 +1706,35 @@ export class ChatPagePage implements OnInit, OnDestroy {
 
           });
 
-          const imagesCollectionRef = collection(this.firestore, 'images');
-          const fallbackDocId = `${newSessionId}_img_${i + 1}_${Date.now()}`;
-          const imageDocId = (imgObj?.filename || fallbackDocId).toString();
-          const imageDocRef = doc(imagesCollectionRef, imageDocId);
-          const imageDocPayload: any = {
-            ...imgObj,
-            filename: imageDocId,
-            userId: recipientUserId,
-            createdBy: currentUserId,
-            sharedBy: currentUserId,
-            sessionId: newSessionId,
-            firestoreDocId: imageDocId,
-            firestoreSavedAt: new Date().toISOString()
-          };
+          console.log("Full imgObj object:", imgObj)
+          
 
           try {
-            await setDoc(imageDocRef, imageDocPayload, { merge: true });
-            const verifySnapshot = await getDoc(imageDocRef);
+            console.log('[ChatPage.confirmAttachmentShareCopy] Posting imgObj to Firestore via ImageStorageService helper', {
+              imageIndex: i + 1,
+              totalImages: this.sessionImageObjectCounter,
+              recipientUserId,
+              imgObj
+            });
 
-            if (verifySnapshot.exists()) {
+            const imageDocId = await (this.imageStorage as any).postSampleImageToFirestoreVersion2(imgObj, recipientUserId);
+
+            if (imageDocId) {
               console.log(`[ChatPage.confirmAttachmentShareCopy] Firestore store SUCCESS for imgObj ${i + 1}/${this.sessionImageObjectCounter}`, {
                 imageDocId,
                 saved: true,
-                imgObj: imageDocPayload
+                imgObj
               });
             } else {
-              console.warn(`[ChatPage.confirmAttachmentShareCopy] Firestore verify FAILED for imgObj ${i + 1}/${this.sessionImageObjectCounter}`, {
-                imageDocId,
+              console.warn(`[ChatPage.confirmAttachmentShareCopy] Firestore verify returned no doc ID for imgObj ${i + 1}/${this.sessionImageObjectCounter}`, {
                 saved: false,
-                imgObj: imageDocPayload
+                imgObj
               });
             }
           } catch (storeError) {
             console.error(`[ChatPage.confirmAttachmentShareCopy] Firestore store FAILED for imgObj ${i + 1}/${this.sessionImageObjectCounter}`, {
-              imageDocId,
               error: storeError,
-              imgObj: imageDocPayload
+              imgObj
             });
           }
 
@@ -2351,7 +2343,7 @@ export class ChatPagePage implements OnInit, OnDestroy {
         console.log('\n--- All Stored Images ---');
         console.log('Total Stored Images:', allImages.length);
         allImages.forEach((img: any, idx: number) => {
-          console.log(`  [${idx}] Filename: ${img.filename}, Original: ${img.original?.substring?.(0, 50)}..., S3: ${img.s3Url?.substring?.(0, 50) || 'N/A'}...`);
+          // console.log(`  [${idx}] Filename: ${img.filename}, Original: ${img.original?.substring?.(0, 50)}..., S3: ${img.s3Url?.substring?.(0, 50) || 'N/A'}...`);
         });
 
         // Print images for this specific session
@@ -2359,17 +2351,17 @@ export class ChatPagePage implements OnInit, OnDestroy {
           attachment.imageKeys?.includes(img.filename) || 
           attachment.imageKeys?.includes(img.original)
         );
-        console.log(`\n--- Images in this Session (${sessionImages.length} total) ---`);
-        sessionImages.forEach((img: any, idx: number) => {
-          console.log(`  [${idx}] Filename: ${img.filename}`);
-          console.log(`       Original: ${img.original}`);
-          console.log(`       S3 URL: ${img.s3Url}`);
-          console.log(`       Boxes: ${img.boxes?.length || 0}`);
-        });
+        // console.log(`\n--- Images in this Session (${sessionImages.length} total) ---`);
+        // sessionImages.forEach((img: any, idx: number) => {
+        //   console.log(`  [${idx}] Filename: ${img.filename}`);
+        //   console.log(`       Original: ${img.original}`);
+        //   console.log(`       S3 URL: ${img.s3Url}`);
+        //   console.log(`       Boxes: ${img.boxes?.length || 0}`);
+        // });
       } else {
-        console.log('\n--- Message Attachment Details ---');
-        console.log('Type:', attachment?.type);
-        console.log('Size:', attachment?.size);
+        // console.log('\n--- Message Attachment Details ---');
+        // console.log('Type:', attachment?.type);
+        // console.log('Size:', attachment?.size);
       }
       console.log('========== END DEBUG INFO ==========\n');
     } catch (e) {

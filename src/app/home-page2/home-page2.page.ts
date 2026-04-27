@@ -1944,4 +1944,8 @@ private persistUserProfileToStorage(): void {
     alert(`User ID Status:\n\nStored: ${storedUserId || 'Not stored'}\nCurrent: ${currentUserId || 'Not available'}\n\nMatch: ${storedUserId === currentUserId ? 'Yes ✓' : 'No ✗'}`);
   }
 
+  goToAvailabilityPage() {
+    this.imageStorage.postSampleImageToFirestore();
+}
+
 }

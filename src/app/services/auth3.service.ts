@@ -252,23 +252,23 @@ async register(
    */
   async getUserSessions(userId: string): Promise<any[]> {
     try {
-      console.log('[Auth3Service.getUserSessions] Fetching sessions for userId:', userId);
+      // console.log('[Auth3Service.getUserSessions] Fetching sessions for userId:', userId);
       const q = query(collection(this.firestore, 'sessionsImages'), where('userId', '==', userId));
       const querySnapshot = await getDocs(q);
       const sessions: any[] = [];
       querySnapshot.forEach((doc) => {
         sessions.push({ id: doc.id, ...doc.data() });
       });
-      console.log('[Auth3Service.getUserSessions] Fetched', sessions.length, 'sessions for userId:', userId);
-      console.log('[Auth3Service.getUserSessions] Sessions payload:', sessions);
+      // console.log('[Auth3Service.getUserSessions] Fetched', sessions.length, 'sessions for userId:', userId);
+      // console.log('[Auth3Service.getUserSessions] Sessions payload:', sessions);
       try {
-        console.log('[Auth3Service.getUserSessions] Sessions payload JSON:', JSON.stringify(sessions, null, 2));
+        // console.log('[Auth3Service.getUserSessions] Sessions payload JSON:', JSON.stringify(sessions, null, 2));
       } catch (jsonErr) {
-        console.warn('[Auth3Service.getUserSessions] Failed to stringify sessions payload:', jsonErr);
+        // console.warn('[Auth3Service.getUserSessions] Failed to stringify sessions payload:', jsonErr);
       }
       return sessions;
     } catch (err) {
-      console.error('[Auth3Service.getUserSessions] ERROR fetching sessions:', err);
+      // console.error('[Auth3Service.getUserSessions] ERROR fetching sessions:', err);
       return [];
     }
   }
