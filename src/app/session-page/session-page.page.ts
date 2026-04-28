@@ -2044,4 +2044,12 @@ private startUserSyncInBackground(userId: string): void {
     }
     return this.sessions.some(session => session.userId === this.userID);
   }
+
+  /** Navigate to sessions list page. */
+  gochatPage() {
+    this.removeBackButtonHandler();
+    this.router.navigate(['/chat-page']);
+    console.log('chat page');
+  }
+  
 }

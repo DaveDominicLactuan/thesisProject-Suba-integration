@@ -28,6 +28,10 @@
         <ion-icon name="home-outline"></ion-icon>
         <span>Home</span>
       </li>
+      <li class="menu-item" (click)="gochatPage()">
+        <ion-icon name="home-outline"></ion-icon>
+        <span>Chat</span>
+      </li>
     </div>
     <!-- <div class="menu-section">
       <div class="menu-header">Activity</div>
@@ -75,8 +79,8 @@
     </div> -->
       <div class="menu-section">
       <!-- <div class="menu-header">User</div> -->
-        <div class="menu-header">Users</div>
-       <li class="menu-item" (click)="goToAvailabilityPage()">
+        <!-- <div class="menu-header">Users</div> -->
+       <!-- <li class="menu-item" (click)="goToAvailabilityPage()">
         <ion-icon name="checkmark-circle"></ion-icon>
         <span>Availability</span>
       </li>
@@ -94,20 +98,20 @@
           [style.color]="isLocationAvailable ? '#4CAF50' : '#999'">
         </ion-icon>
         <span>Location: {{ isLocationAvailable ? 'Enabled' : 'Disabled' }}</span>
-      </li>
+      </li> -->
       <!-- <li class="menu-item" *ngIf="isLocationDataFetched">
         <ion-icon name="checkmark-circle" style="color: #4CAF50;"></ion-icon>
         <span>Location Data Fetched</span>
       </li> -->
-      <li class="menu-item" *ngIf="!isLocationDataFetched && isLocationAvailable">
+      <!-- <li class="menu-item" *ngIf="!isLocationDataFetched && isLocationAvailable">
         <ion-icon name="sync" style="color: #FF9800;"></ion-icon>
         <span>Fetching Location...</span>
-      </li>
+      </li> -->
     </div>
      <div class="menu-section">
       <!-- <div class="menu-header">Settings</div> -->
-        <div class="menu-header">Settings</div>
-      <li class="menu-item">
+        <div class="menu-header">Other</div>
+      <!-- <li class="menu-item">
         <ion-icon name="settings-outline"></ion-icon>
         <span>Settings</span>
       </li>
@@ -118,7 +122,7 @@
       <li class="menu-item">
         <ion-icon name="help-circle-outline"></ion-icon>
         <span>Help</span>
-      </li>
+      </li> -->
       <li class="menu-item" (click)="logout(); closeSidebar(); $event.stopPropagation()" data-action="logout">
         <ion-icon name="log-out-outline"></ion-icon>
         <span>Log Out</span>

@@ -6393,6 +6393,26 @@ private readonly userLocationIcon = L.icon({
     // optional: set offline on destroy if desired
   }
 
+  /** Navigate to sessions list page. */
+  gochatPage() {
+    this.removeBackButtonHandler();
+    this.router.navigate(['/chat-page']);
+    console.log('chat page');
+  }
+
+  /** Remove the home-page back handler so other pages can handle back navigation normally, 
+   * without exit app logic and behavior */
+  private removeBackButtonHandler() {
+    try {
+      if (this.backButtonSub && typeof this.backButtonSub.remove === 'function') {
+        this.backButtonSub.remove();
+      } else if (this.backButtonSub && typeof this.backButtonSub.unsubscribe === 'function') {
+        this.backButtonSub.unsubscribe();
+      }
+    } catch {}
+    this.backButtonSub = null;
+  }
+
 
 }
 

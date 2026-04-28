@@ -25,8 +25,12 @@
         <ion-icon name="home-outline"></ion-icon>
         <span>Home</span>
       </li>
+      <li class="menu-item" (click)="gochatPage()">
+        <ion-icon name="home-outline"></ion-icon>
+        <span>Chat</span>
+      </li>
     </div>
-    <div class="menu-section">
+    <!-- <div class="menu-section">
       <div class="menu-header">Users</div>
       <li class="menu-item">
         <ion-icon name="checkmark-circle"></ion-icon>
@@ -40,10 +44,11 @@
         <ion-icon name="notifications-outline"></ion-icon>
         <span>Notifications</span>
       </li>
-    </div>
+    </div> -->
     <div class="menu-section">
-      <div class="menu-header">Settings</div>
-      <li class="menu-item">
+      <!-- <div class="menu-header">Settings</div> -->
+      <div class="menu-header">Other</div>
+      <!-- <li class="menu-item">
         <ion-icon name="settings-outline"></ion-icon>
         <span>Settings</span>
       </li>
@@ -54,7 +59,7 @@
       <li class="menu-item">
         <ion-icon name="help-circle-outline"></ion-icon>
         <span>Help</span>
-      </li>
+      </li> -->
       <li class="menu-item" (click)="logout(); closeSidebar(); $event.stopPropagation()" data-action="logout">
         <ion-icon name="log-out-outline"></ion-icon>
         <span>Log Out</span>
@@ -583,7 +588,7 @@
               {{ selectedMapEngineer ? getMapSheetEngineerName(selectedMapEngineer) : 'Tap a marker to view' }}
             </div>
             <div class="map-sheet-peek-sub">
-              {{ mapSheetViewMode === 'list' ? (mapSheetAggregatedEngineers.length + ' nearby marker(s) found') : (selectedMapEngineer ? (getMapSheetEngineerDistanceLabel(selectedMapEngineer) || '★ 4.0 · Office Address') : 'Drag up or tap to explore') }}
+              {{ mapSheetViewMode === 'list' ? (mapSheetAggregatedEngineers.length + ' nearby marker(s) found') : (selectedMapEngineer ? (getMapSheetEngineerDistanceLabel(selectedMapEngineer) || '') : 'Drag up or tap to explore') }}
             </div>
           </div>
           <ion-icon name="chevron-up-outline" class="map-sheet-peek-chevron" [ngClass]="{'rotated': isMapBottomSheetActive}"></ion-icon>
