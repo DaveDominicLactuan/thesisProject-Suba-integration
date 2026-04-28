@@ -1702,7 +1702,8 @@ export class ChatPagePage implements OnInit, OnDestroy {
             withBoxesS3Url: imgObj.withBoxesS3Url,
             withBoxesStoragePath: imgObj.withBoxesStoragePath,
             withBoxesStorageUrl: imgObj.withBoxesStorageUrl,
-            userID: imgObj.userId
+            userID: imgObj.userId,
+            firestoreDocId: imgObj.filename
 
           });
 
@@ -1748,8 +1749,6 @@ export class ChatPagePage implements OnInit, OnDestroy {
       }
 
        
-
-      
 
       for (let i = 0; i < sourceImageKeys.length; i++) {
         const imageKey = sourceImageKeys[i];

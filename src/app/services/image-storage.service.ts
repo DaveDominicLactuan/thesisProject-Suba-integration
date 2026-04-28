@@ -885,7 +885,7 @@ export class ImageStorageService {
   }
 
   /** Persist a single session and its images to Firestore using filename as image doc ID */
-  async saveSessionWithImagesToFirestore(sessionId: string): Promise<void> {
+  async saveSessionWithImagesToFirestore(sessionId: string, receiverId: string): Promise<void> {
     const session = this.sessions.find(s => s.id === sessionId);
     if (!session) {
       console.warn('[ImageStorageService] saveSessionWithImagesToFirestore: session not found', sessionId);
@@ -906,7 +906,6 @@ export class ImageStorageService {
         return;
       }
       // CRITICAL: Ensure userId is ALWAYS set to currentUid (never null)
-      
 
       session.userId = currentUid;
 
@@ -928,15 +927,27 @@ export class ImageStorageService {
 
       const batch = writeBatch(this.firestore);
       const sessionRef = doc(sessionsCollection, session.id);
-      batch.set(sessionRef, {
+      const sessionWritePayload = {
         id: session.id,
         name: session.name,
         imageKeys: session.imageKeys || [],
         created: session.created,
         totalBoundingBoxes: session.totalBoundingBoxes || 0,
-        userId: currentUid,
+        userId: receiverId,
         sessionId: session.sessionId || null
-      });
+      };
+
+      const sessionDocumentPath = `${this.FIRESTORE_SESSIONS_COLLECTION}/${session.id}`;
+      console.group('[ImageStorageService] Session write preview');
+      console.log('Target session document path:', sessionDocumentPath);
+      console.log('Session payload:', sessionWritePayload);
+      console.log('Image documents target collection:', this.FIRESTORE_IMAGES_COLLECTION);
+      console.log('Image document IDs queued:', imagesForSession.map(image => image.filename));
+      console.groupEnd();
+
+      batch.set(sessionRef, sessionWritePayload);
+
+      console.log("Batch data ", batch);
 
       for (const image of imagesForSession) {
         // CRITICAL: Ensure userId is ALWAYS set to currentUid (never null)
@@ -974,6 +985,7 @@ export class ImageStorageService {
       }
 
       await batch.commit();
+      console.warn('[ImageStorageService] Firestore batch commit is currently disabled. Uncomment "await batch.commit();" to persist queued writes.');
       console.log(`✅ Session and images saved to Firestore: ${session.id}`);
     } catch (error) {
       console.error('[ImageStorageService] Error saving session/images to Firestore:', error);
@@ -1556,6 +1568,9 @@ export class ImageStorageService {
       const timestamp = sample?.timestamp || new Date().toISOString();
       const docIdPrefix = recipientUserId ? 'copied' : 'sample';
       const docId = `${docIdPrefix}_${timestamp}_${Math.random().toString(36).substr(2, 9)}`;
+      const now = new Date();
+      const currentDateText = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+      const currentTimeText = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}.${String(now.getMilliseconds()).padStart(3, '0')}`;
       const imagesCollection = collection(this.firestore, this.FIRESTORE_IMAGES_COLLECTION);
       const docRef = doc(imagesCollection, docId);
       console.log("Step 1, docID", docId, "and effectiveUserId", effectiveUserId, "and collection", imagesCollection, "docRef", docRef);
@@ -1574,7 +1589,7 @@ export class ImageStorageService {
         detectionMessage: sample?.detectionMessage || 'Sample detection payload',
         sessionId: sample?.sessionId || null || 'sample-session',
         userId: effectiveUserId,
-        fileImageName: sample?.fileImageName || 'sample-image.jpg',
+        fileImageName: `currentData:${currentDateText}TimeTaken:${currentTimeText}`,
         storagePath: sample?.storagePath || null || 'sample-session',
         storageUrl: sample?.storageUrl || null || 'sample-session',
         withBoxesStoragePath: sample?.withBoxesStoragePath || null || 'sample-session',

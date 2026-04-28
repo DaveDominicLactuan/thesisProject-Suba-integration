@@ -32,6 +32,15 @@ service cloud.firestore {
         && data.userId.size() > 0;
     }
 
+    function isSharedSessionWritePayload(sessionId, data) {
+      return isSignedIn()
+        && data.id == sessionId
+        && data.sessionId == sessionId
+        && data.userId is string
+        && data.userId.size() > 0
+        && data.imageKeys is list;
+    }
+
     function isChatParticipantByData(participants) {
       return isSignedIn() && request.auth.uid in participants;
     }
@@ -130,6 +139,7 @@ service cloud.firestore {
         && (
           isOwnedByCurrentUser(request.resource.data)
           || isShareWritePayload(request.resource.data)
+          || isSharedSessionWritePayload(sessionId, request.resource.data)
         );
       allow delete: if isAdmin() || isOwnedByCurrentUser(resource.data);
     }
