@@ -18,6 +18,10 @@ interface DisplayImage {
   statusMessage?: string;
   boxes?: any[];
   hasPrediction?: boolean;
+  storagePath?: string;
+  withBoxesStoragePath?: string;
+  storageUrl?: string;
+  withBoxesStorageUrl?: string;
 }
 
 @Component({
@@ -138,7 +142,7 @@ private backButtonSub: any; // hardware back handler
       // If a session id was passed using query param use it
       try { this.routeSessionId = this.route.snapshot.queryParamMap.get('sessionId'); } catch (e) { this.routeSessionId = null; }
       this.loadSessions()
-        .then(() => this.refreshDisplayedImages())
+          .then(() => this.refreshDisplayedImages())
         .then(() => {
           // Print stored images + prediction-derived display strings for debugging
           this.debugLogStoredImages();
@@ -233,53 +237,69 @@ private backButtonSub: any; // hardware back handler
     console.log('Current Session:', this.selectedSessionId ? this.sessions.find(s => s.id === this.selectedSessionId) : 'None');
     // Print image objects currently loaded for the active session (if any)
     console.log('Session images for selected session:', this.imagePaths && this.imagePaths.length > 0 ? this.imagePaths : '(no images loaded)');
-    // Attempt to fetch and print the full stored image objects for the active session.
-    // Uses async IIFE so the parent function remains synchronous for callers.
-    (async () => {
-      try {
-        const svc: any = this.imageStorageService as any;
-        const currentSession = this.selectedSessionId ? this.sessions.find(s => s.id === this.selectedSessionId) : null;
-        if (!currentSession) {
-          console.log('Full session image objects:', '(no session selected)');
-          return;
-        }
-
-        const sessionImages: any[] = [];
-
-        // If session lists image keys, try to resolve each key via service APIs.
-        if (Array.isArray((currentSession as any).imageKeys) && (currentSession as any).imageKeys.length > 0) {
-          for (const key of (currentSession as any).imageKeys) {
-            let entry: any = undefined;
-            if (typeof svc.getEntryForImage === 'function') {
-              entry = await svc.getEntryForImage(key);
-            } else if (typeof svc.getEntry === 'function') {
-              entry = await svc.getEntry(key);
-            } else if (typeof svc.getAllEntries === 'function') {
-              const all = await svc.getAllEntries();
-              entry = all ? all[key] : undefined;
-            } else if (typeof svc.getAllImages === 'function') {
-              const allImgs = await svc.getAllImages();
-              if (Array.isArray(allImgs)) {
-                entry = allImgs.find((e: any) => (e.filename || e.original) && ((e.filename || e.original) === key));
-              }
-            }
-            if (entry) sessionImages.push(entry);
-          }
-
-        } else if (Array.isArray((currentSession as any).images)) {
-          // Some session implementations embed image objects directly
-          sessionImages.push(...(currentSession as any).images);
-        }
-
-        console.log('Full session image objects:', sessionImages.length > 0 ? sessionImages : '(no session images found)');
-      } catch (e) {
-        console.warn('[FeedbackPage] failed to load full session images for logging', e);
-      }
-    })();
+    // (Previously attempted to fetch full session image objects here; removed.)
     console.log('All loaded sessions:', this.sessions.length > 0 ? this.sessions : '(no sessions loaded)');
     console.groupEnd();
 
+    void this.hydrateSessionImagesFromStoragePaths();
+
     return info;
+  }
+
+  /**
+   * Print the currently selected session images after S3 hydration completes.
+   */
+  private printSelectedSessionImages(): void {
+    console.log('[FeedbackPage] Session images for selected session after hydration:',
+      this.imagePaths && this.imagePaths.length > 0 ? this.imagePaths : '(no images loaded)');
+  }
+
+  /**
+   * Hydrate displayed session images from storagePath fields when they point to S3 objects.
+   * Only runs for entries that still need data URL content.
+   */
+  private async hydrateSessionImagesFromStoragePaths(): Promise<void> {
+    const imagesToHydrate = (this.imagePaths || []).filter((img: DisplayImage) => {
+      const needsOriginal = !!img.storagePath && !img.original?.startsWith('data:');
+      const needsWithBoxes = !!img.withBoxesStoragePath && !img.withBoxes?.startsWith('data:');
+      return needsOriginal || needsWithBoxes;
+    });
+
+    if (imagesToHydrate.length === 0) {
+      return;
+    }
+
+    console.log('[FeedbackPage] S3 storage-path hydration triggered', {
+      sessionId: this.selectedSessionId || null,
+      imageCount: imagesToHydrate.length
+    });
+
+    for (const img of imagesToHydrate) {
+      try {
+        if (img.storagePath && !img.original?.startsWith('data:')) {
+          console.log('[FeedbackPage] Hydrating original from storagePath:', img.storagePath);
+          const originalData = await this.imageStorageService.fetchS3ObjectAsDataUrl(img.storagePath);
+          if (originalData) {
+            img.original = originalData;
+          }
+        }
+
+        if (img.withBoxesStoragePath && !img.withBoxes?.startsWith('data:')) {
+          console.log('[FeedbackPage] Hydrating withBoxes from withBoxesStoragePath:', img.withBoxesStoragePath);
+          const withBoxesData = await this.imageStorageService.fetchS3ObjectAsDataUrl(img.withBoxesStoragePath);
+          if (withBoxesData) {
+            img.withBoxes = withBoxesData;
+          }
+        }
+      } catch (error) {
+        console.warn('[FeedbackPage] Failed to hydrate session image from storage path', {
+          filename: img.filename,
+          storagePath: img.storagePath,
+          withBoxesStoragePath: img.withBoxesStoragePath,
+          error
+        });
+      }
+    }
   }
 
   /**
@@ -493,6 +513,7 @@ private backButtonSub: any; // hardware back handler
         // fallback: load all images if no session selected
         const allImgs: any[] = (typeof svc.getAllImages === 'function') ? svc.getAllImages() : (typeof svc.getAll === 'function' ? Object.values(await svc.getAll()) : []);
         this.imagePaths = (allImgs || []).map((img: any) => this.buildDisplayImage(img));
+        await this.hydrateSessionImagesFromS3();
         return;
       }
       
@@ -519,9 +540,58 @@ private backButtonSub: any; // hardware back handler
         }
         if (entry) this.imagePaths.push(this.buildDisplayImage(entry));
       }
+      await this.hydrateSessionImagesFromS3();
       //Top-level error handling
     } catch (err) {
       console.warn('[FeedbackPage] refreshDisplayedImages failed', err);
+    }
+  }
+
+  /**
+   * Hydrate loaded session images from S3 when stored paths are available.
+   * Only runs for images that already have storagePath fields.
+   */
+  private async hydrateSessionImagesFromS3(): Promise<void> {
+    const svc: any = this.imageStorageService as any;
+    if (!Array.isArray(this.imagePaths) || this.imagePaths.length === 0) {
+      return;
+    }
+
+    const imagesToHydrate = this.imagePaths.filter((img: DisplayImage) => img?.storagePath || img?.withBoxesStoragePath);
+    if (imagesToHydrate.length === 0) {
+      return;
+    }
+
+    console.log(`[FeedbackPage] S3 hydration triggered for ${imagesToHydrate.length} image(s)`);
+
+    for (const img of imagesToHydrate) {
+      const imageName = img.filename || img.fileName || '(unnamed)';
+
+      if (img.storagePath) {
+        console.log(`[FeedbackPage] storagePath for ${imageName}:`, img.storagePath);
+        try {
+          const originalData = await svc.fetchS3ObjectAsDataUrl(img.storagePath);
+          if (originalData) {
+            img.original = originalData;
+          }
+        } catch (error) {
+          console.warn(`[FeedbackPage] Failed to fetch original image for ${imageName}`, error);
+        }
+      }
+
+      if (img.withBoxesStoragePath) {
+        console.log(`[FeedbackPage] withBoxesStoragePath for ${imageName}:`, img.withBoxesStoragePath);
+        try {
+          const withBoxesData = await svc.fetchS3ObjectAsDataUrl(img.withBoxesStoragePath);
+          if (withBoxesData) {
+            img.withBoxes = withBoxesData;
+          }
+        } catch (error) {
+          console.warn(`[FeedbackPage] Failed to fetch withBoxes image for ${imageName}`, error);
+        }
+      }
+
+      this.printSelectedSessionImages();
     }
   }
 
@@ -557,6 +627,8 @@ private backButtonSub: any; // hardware back handler
       withBoxes: img.withBoxes ?? img.original,
       filename: img.filename || '',
       fileName: img.filename || '',
+        storagePath: img.storagePath,
+        withBoxesStoragePath: img.withBoxesStoragePath,
       detectionMessage,
       detectionResult,
       rawPrediction: prediction ? { type: predType, shape: predShape, severity: predSeverity } : undefined,

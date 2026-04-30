@@ -286,16 +286,16 @@ async register(
       querySnapshot.forEach((doc) => {
         images.push({ id: doc.id, ...doc.data() });
       });
-      console.log('[Auth3Service.getUserImages] Fetched', images.length, 'images for userId:', userId);
-      console.log('[Auth3Service.getUserImages] Images payload:', images);
+      // console.log('[Auth3Service.getUserImages] Fetched', images.length, 'images for userId:', userId);
+      // console.log('[Auth3Service.getUserImages] Images payload:', images);
       try {
-        console.log('[Auth3Service.getUserImages] Images payload JSON:', JSON.stringify(images, null, 2));
+        // console.log('[Auth3Service.getUserImages] Images payload JSON:', JSON.stringify(images, null, 2));
       } catch (jsonErr) {
-        console.warn('[Auth3Service.getUserImages] Failed to stringify images payload:', jsonErr);
+        // console.warn('[Auth3Service.getUserImages] Failed to stringify images payload:', jsonErr);
       }
       return images;
     } catch (err) {
-      console.error('[Auth3Service.getUserImages] ERROR fetching images:', err);
+      // console.error('[Auth3Service.getUserImages] ERROR fetching images:', err);
       return [];
     }
   }

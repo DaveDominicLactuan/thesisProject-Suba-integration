@@ -41,7 +41,7 @@ export class SessionPagePage implements OnInit, OnDestroy {
   isSessionLoadingDialogOpen: boolean = false;
   selectedSessionForLoading: any = null;
   sessionLoadingProgress: number = 0;
-  sessionLoadingStatusText: string = 'Loading session images from S3...';
+  sessionLoadingStatusText: string = 'Preparing session...';
   sessionLoadingImageCount: { current: number; total: number } = { current: 0, total: 0 };
 
   // --- Session Delete Confirmation Dialog State ---
@@ -473,14 +473,11 @@ private startUserSyncInBackground(userId: string): void {
       let sessionsAdded = 0;
       let imagesAdded = 0;
 
-      // ====== STEP 1: MAKE COPIES OF SESSION OBJECTS ======
-      console.log('[SessionPage.syncUserDataFromFirestore] ====== STEP 1: MAKING SESSION COPIES ======');
+      // Build local copies without verbose per-item logging to keep sync fast.
+      console.log('[SessionPage.syncUserDataFromFirestore] Building local session/image copies...');
 
       for (let sessionIdx = 0; sessionIdx < firebaseSessions.length; sessionIdx++) {
         const fsSession = firebaseSessions[sessionIdx];
-        
-        console.log(`[SessionPage.syncUserDataFromFirestore] -------- Processing Session ${sessionIdx + 1}/${firebaseSessions.length} --------`);
-        console.log('[SessionPage.syncUserDataFromFirestore] ORIGINAL SESSION OBJECT:', fsSession);
 
         // STEP 1.1: Create a deep copy of the session object
         const sessionCopy = {
@@ -493,35 +490,20 @@ private startUserSyncInBackground(userId: string): void {
           sessionId: fsSession.sessionId || fsSession.id
         };
 
-        console.log(`[SessionPage.syncUserDataFromFirestore] SESSION COPY ${sessionIdx + 1}:`, sessionCopy);
-        console.log(`[SessionPage.syncUserDataFromFirestore] Session copy variables:`);
-        console.log(`  - id: ${sessionCopy.id}`);
-        console.log(`  - name: ${sessionCopy.name}`);
-        console.log(`  - imageKeys count: ${sessionCopy.imageKeys.length}`);
-        console.log(`  - imageKeys: ${JSON.stringify(sessionCopy.imageKeys)}`);
-        console.log(`  - created: ${sessionCopy.created}`);
-        console.log(`  - userId: ${sessionCopy.userId}`);
-        console.log(`  - totalBoundingBoxes: ${sessionCopy.totalBoundingBoxes}`);
-
         // ====== STEP 1.2: MAKE COPIES OF SESSION IMAGE OBJECTS ======
-        console.log(`[SessionPage.syncUserDataFromFirestore] ====== STEP 1.2: MAKING SESSION IMAGE COPIES FOR SESSION ${sessionIdx + 1} ======`);
 
         const sessionImageCopies: any[] = [];
         const imageKeysToProcess = sessionCopy.imageKeys || [];
 
         for (let imgKeyIdx = 0; imgKeyIdx < imageKeysToProcess.length; imgKeyIdx++) {
           const imageKey = imageKeysToProcess[imgKeyIdx];
-          console.log(`[SessionPage.syncUserDataFromFirestore] -------- Processing Image Key ${imgKeyIdx + 1}/${imageKeysToProcess.length}: ${imageKey} --------`);
 
           // Find the corresponding Firestore image
           const fsImage = firestoreImages.find((img: any) => img.filename === imageKey || img.id === imageKey);
 
           if (!fsImage) {
-            console.warn(`[SessionPage.syncUserDataFromFirestore] Image not found for key: ${imageKey}`);
             continue;
           }
-
-          console.log('[SessionPage.syncUserDataFromFirestore] ORIGINAL SESSION IMAGE OBJECT:', fsImage);
 
           // Create a deep copy of the image object
           const imageCopy = {
@@ -538,7 +520,6 @@ private startUserSyncInBackground(userId: string): void {
             prediction: fsImage.prediction ? { ...fsImage.prediction } : undefined,
             userId: userId,
             sessionId: fsImage.sessionId || sessionCopy.id,
-            // S3-related fields
             originalS3Key: fsImage.originalS3Key || '',
             originalS3Url: fsImage.originalS3Url || '',
             withBoxesS3Key: fsImage.withBoxesS3Key || '',
@@ -549,89 +530,15 @@ private startUserSyncInBackground(userId: string): void {
             storageUrl: fsImage.storageUrl || ''
           };
 
-          console.log(`[SessionPage.syncUserDataFromFirestore] SESSION IMAGE COPY ${imgKeyIdx + 1}:`, imageCopy);
-          console.log(`[SessionPage.syncUserDataFromFirestore] Image copy variables:`);
-          console.log(`  - filename: ${imageCopy.filename}`);
-          console.log(`  - userId: ${imageCopy.userId}`);
-          console.log(`  - sessionId: ${imageCopy.sessionId}`);
-          console.log(`  - timestamp: ${imageCopy.timestamp}`);
-          console.log(`  - hasPrediction: ${imageCopy.hasPrediction}`);
-          console.log(`  - originalS3Key: ${imageCopy.originalS3Key}`);
-          console.log(`  - originalS3Url: ${imageCopy.originalS3Url}`);
-          console.log(`  - withBoxesS3Key: ${imageCopy.withBoxesS3Key}`);
-          console.log(`  - withBoxesS3Url: ${imageCopy.withBoxesS3Url}`);
-          console.log(`  - withBoxesStoragePath: ${imageCopy.withBoxesStoragePath}`);
-          console.log(`  - withBoxesStorageUrl: ${imageCopy.withBoxesStorageUrl}`);
-
           sessionImageCopies.push(imageCopy);
-
-          // ====== STEP 1.3: FETCH S3 IMAGES AND CREATE COPIES ======
-          console.log(`[SessionPage.syncUserDataFromFirestore] ====== STEP 1.3: FETCHING & COPYING S3 IMAGES FOR IMAGE KEY ${imgKeyIdx + 1} ======`);
-
-          let s3ImageCopyOriginal = null;
-          let s3ImageCopyWithBoxes = null;
-
-          // Fetch original S3 image if key exists
-          if (imageCopy.originalS3Key) {
-            try {
-              console.log(`[SessionPage.syncUserDataFromFirestore] Fetching S3 original image with key: ${imageCopy.originalS3Key}`);
-              const originalS3Data = await (this.imageStorage as any).fetchS3ObjectAsDataUrl(imageCopy.originalS3Key);
-              
-              if (originalS3Data) {
-                s3ImageCopyOriginal = originalS3Data;
-                console.log(`[SessionPage.syncUserDataFromFirestore] S3 ORIGINAL IMAGE COPY - Key: ${imageCopy.originalS3Key}`);
-                console.log(`[SessionPage.syncUserDataFromFirestore] S3 original image copy details:`);
-                console.log(`  - Original S3 Key: ${imageCopy.originalS3Key}`);
-                console.log(`  - Copy S3 Key: ${imageCopy.originalS3Key}Copy`);
-                console.log(`  - Data URL length: ${originalS3Data.length} bytes`);
-              } else {
-                console.warn(`[SessionPage.syncUserDataFromFirestore] Failed to fetch S3 original image with key: ${imageCopy.originalS3Key}`);
-              }
-            } catch (e) {
-              console.warn(`[SessionPage.syncUserDataFromFirestore] Error fetching S3 original image:`, e);
-            }
-          } else {
-            console.log(`[SessionPage.syncUserDataFromFirestore] No originalS3Key found, skipping S3 original fetch`);
-          }
-
-          // Fetch withBoxes S3 image if key exists
-          if (imageCopy.withBoxesS3Key) {
-            try {
-              console.log(`[SessionPage.syncUserDataFromFirestore] Fetching S3 withBoxes image with key: ${imageCopy.withBoxesS3Key}`);
-              const withBoxesS3Data = await (this.imageStorage as any).fetchS3ObjectAsDataUrl(imageCopy.withBoxesS3Key);
-              
-              if (withBoxesS3Data) {
-                s3ImageCopyWithBoxes = withBoxesS3Data;
-                console.log(`[SessionPage.syncUserDataFromFirestore] S3 WITHBOXES IMAGE COPY - Key: ${imageCopy.withBoxesS3Key}`);
-                console.log(`[SessionPage.syncUserDataFromFirestore] S3 withBoxes image copy details:`);
-                console.log(`  - Original S3 Key: ${imageCopy.withBoxesS3Key}`);
-                console.log(`  - Copy S3 Key: ${imageCopy.withBoxesS3Key}Copy`);
-                console.log(`  - Data URL length: ${withBoxesS3Data.length} bytes`);
-              } else {
-                console.warn(`[SessionPage.syncUserDataFromFirestore] Failed to fetch S3 withBoxes image with key: ${imageCopy.withBoxesS3Key}`);
-              }
-            } catch (e) {
-              console.warn(`[SessionPage.syncUserDataFromFirestore] Error fetching S3 withBoxes image:`, e);
-            }
-          } else {
-            console.log(`[SessionPage.syncUserDataFromFirestore] No withBoxesS3Key found, skipping S3 withBoxes fetch`);
-          }
-
-          console.log(`[SessionPage.syncUserDataFromFirestore] -------- Completed Image Key ${imgKeyIdx + 1}/${imageKeysToProcess.length} --------`);
         }
 
         // ====== STEP 2: REPLACE USER ID IN SESSION AND IMAGE OBJECTS ======
-        console.log(`[SessionPage.syncUserDataFromFirestore] ====== STEP 2: REPLACING USER ID IN SESSION ${sessionIdx + 1} (if needed) ======`);
-        console.log(`[SessionPage.syncUserDataFromFirestore] Session userId before: ${sessionCopy.userId}`);
-        // NOTE: userId is already set to the parameter userId above
-        console.log(`[SessionPage.syncUserDataFromFirestore] Session userId after: ${sessionCopy.userId}`);
 
         // Update imageKeys with new userId prefix if needed
         const updatedImageKeys: string[] = [];
         for (let i = 0; i < sessionCopy.imageKeys.length; i++) {
           const oldKey = sessionCopy.imageKeys[i];
-          // If key contains userId prefix, it should already match, but log for verification
-          console.log(`[SessionPage.syncUserDataFromFirestore] Image key ${i + 1} - Old: ${oldKey} -> New: ${oldKey} (userId: ${sessionCopy.userId})`);
           updatedImageKeys.push(oldKey);
         }
         sessionCopy.imageKeys = updatedImageKeys;
@@ -639,112 +546,15 @@ private startUserSyncInBackground(userId: string): void {
         // Update all image copies with new userId
         for (let i = 0; i < sessionImageCopies.length; i++) {
           const imageCopy = sessionImageCopies[i];
-          console.log(`[SessionPage.syncUserDataFromFirestore] Image ${i + 1} - Replacing userId:`, {
-            oldUserId: imageCopy.userId,
-            newUserId: sessionCopy.userId,
-            filename: imageCopy.filename
-          });
-
           imageCopy.userId = sessionCopy.userId;
-
-          // Update S3 key prefixes to include new userId
-          if (imageCopy.originalS3Key) {
-            const oldS3KeyOriginal = imageCopy.originalS3Key;
-            imageCopy.originalS3Key = (this.imageStorage as any).transformImageFilenameUserId(oldS3KeyOriginal, sessionCopy.userId);
-            console.log(`[SessionPage.syncUserDataFromFirestore] S3 Original Key - Old: ${oldS3KeyOriginal} -> New: ${imageCopy.originalS3Key}`);
-          }
-
-          if (imageCopy.withBoxesS3Key) {
-            const oldS3KeyWithBoxes = imageCopy.withBoxesS3Key;
-            imageCopy.withBoxesS3Key = (this.imageStorage as any).transformImageFilenameUserId(oldS3KeyWithBoxes, sessionCopy.userId);
-            console.log(`[SessionPage.syncUserDataFromFirestore] S3 WithBoxes Key - Old: ${oldS3KeyWithBoxes} -> New: ${imageCopy.withBoxesS3Key}`);
-          }
-
-          console.log(`[SessionPage.syncUserDataFromFirestore] Image ${i + 1} after userId replacement:`, {
-            filename: imageCopy.filename,
-            userId: imageCopy.userId,
-            originalS3Key: imageCopy.originalS3Key,
-            withBoxesS3Key: imageCopy.withBoxesS3Key
-          });
         }
 
-        // ====== STEP 3: COMPREHENSIVE PRINT OF SESSION OBJECT, IMAGE OBJECTS, AND S3 DETAILS ======
-        console.log(`[SessionPage.syncUserDataFromFirestore] ====== STEP 3: COMPREHENSIVE DATA PRINT FOR SESSION ${sessionIdx + 1} ======`);
-
-        // Print full session object
-        console.log(`[SessionPage.syncUserDataFromFirestore] === FULL SESSION OBJECT (SESSION ${sessionIdx + 1}) ===`);
-        console.log(`[SessionPage.syncUserDataFromFirestore] Session ID: ${sessionCopy.id}`);
-        console.log(`[SessionPage.syncUserDataFromFirestore] Session Name: ${sessionCopy.name}`);
-        console.log(`[SessionPage.syncUserDataFromFirestore] Session Created: ${sessionCopy.created}`);
-        console.log(`[SessionPage.syncUserDataFromFirestore] Session User ID: ${sessionCopy.userId}`);
-        console.log(`[SessionPage.syncUserDataFromFirestore] Session ID (duplicate field): ${sessionCopy.sessionId}`);
-        console.log(`[SessionPage.syncUserDataFromFirestore] Total Bounding Boxes: ${sessionCopy.totalBoundingBoxes}`);
-        console.log(`[SessionPage.syncUserDataFromFirestore] Number of Image Keys: ${sessionCopy.imageKeys.length}`);
-        console.log(`[SessionPage.syncUserDataFromFirestore] Full Session Object:`, JSON.stringify(sessionCopy, null, 2));
-
-        // Print all session image objects with detailed S3 information
-        console.log(`[SessionPage.syncUserDataFromFirestore] === ALL SESSION IMAGE OBJECTS (${sessionImageCopies.length} images) ===`);
-        
-        for (let imgIdx = 0; imgIdx < sessionImageCopies.length; imgIdx++) {
-          const imageCopy = sessionImageCopies[imgIdx];
-          
-          console.log(`[SessionPage.syncUserDataFromFirestore] --- IMAGE ${imgIdx + 1}/${sessionImageCopies.length} ---`);
-          console.log(`[SessionPage.syncUserDataFromFirestore] Filename: ${imageCopy.filename}`);
-          console.log(`[SessionPage.syncUserDataFromFirestore] User ID: ${imageCopy.userId}`);
-          console.log(`[SessionPage.syncUserDataFromFirestore] Session ID: ${imageCopy.sessionId}`);
-          console.log(`[SessionPage.syncUserDataFromFirestore] Timestamp: ${imageCopy.timestamp}`);
-          console.log(`[SessionPage.syncUserDataFromFirestore] Has Prediction: ${imageCopy.hasPrediction}`);
-          console.log(`[SessionPage.syncUserDataFromFirestore] Face Detected: ${imageCopy.faceDetected}`);
-          console.log(`[SessionPage.syncUserDataFromFirestore] Status Message: ${imageCopy.statusMessage}`);
-          console.log(`[SessionPage.syncUserDataFromFirestore] Detection Message: ${imageCopy.detectionMessage}`);
-          console.log(`[SessionPage.syncUserDataFromFirestore] Number of Boxes: ${imageCopy.boxes?.length || 0}`);
-          console.log(`[SessionPage.syncUserDataFromFirestore] Number of Face Data: ${imageCopy.faceData?.length || 0}`);
-          
-          // Print S3 details
-          console.log(`[SessionPage.syncUserDataFromFirestore] === S3 DETAILS FOR IMAGE ${imgIdx + 1} ===`);
-          console.log(`[SessionPage.syncUserDataFromFirestore] Original S3 Key: ${imageCopy.originalS3Key}`);
-          console.log(`[SessionPage.syncUserDataFromFirestore] Original S3 URL: ${imageCopy.originalS3Url}`);
-          console.log(`[SessionPage.syncUserDataFromFirestore] WithBoxes S3 Key: ${imageCopy.withBoxesS3Key}`);
-          console.log(`[SessionPage.syncUserDataFromFirestore] WithBoxes S3 URL: ${imageCopy.withBoxesS3Url}`);
-          console.log(`[SessionPage.syncUserDataFromFirestore] Storage Path: ${imageCopy.storagePath}`);
-          console.log(`[SessionPage.syncUserDataFromFirestore] Storage URL: ${imageCopy.storageUrl}`);
-          console.log(`[SessionPage.syncUserDataFromFirestore] WithBoxes Storage Path: ${imageCopy.withBoxesStoragePath}`);
-          console.log(`[SessionPage.syncUserDataFromFirestore] WithBoxes Storage URL: ${imageCopy.withBoxesStorageUrl}`);
-          
-          // Print S3 filename/prefix breakdown
-          if (imageCopy.originalS3Key) {
-            console.log(`[SessionPage.syncUserDataFromFirestore] === S3 ORIGINAL KEY BREAKDOWN ===`);
-            console.log(`[SessionPage.syncUserDataFromFirestore] Full Key: ${imageCopy.originalS3Key}`);
-            const originalKeyParts = imageCopy.originalS3Key.split(/(?=userId:|sessionId:)/);
-            originalKeyParts.forEach((part: string, idx: number) => {
-              console.log(`[SessionPage.syncUserDataFromFirestore]   Part ${idx + 1}: ${part}`);
-            });
-          }
-          
-          if (imageCopy.withBoxesS3Key) {
-            console.log(`[SessionPage.syncUserDataFromFirestore] === S3 WITHBOXES KEY BREAKDOWN ===`);
-            console.log(`[SessionPage.syncUserDataFromFirestore] Full Key: ${imageCopy.withBoxesS3Key}`);
-            const withBoxesKeyParts = imageCopy.withBoxesS3Key.split(/(?=userId:|sessionId:)/);
-            withBoxesKeyParts.forEach((part: string, idx: number) => {
-              console.log(`[SessionPage.syncUserDataFromFirestore]   Part ${idx + 1}: ${part}`);
-            });
-          }
-          
-          // Print full image object as JSON
-          console.log(`[SessionPage.syncUserDataFromFirestore] Full Image Object:`, JSON.stringify(imageCopy, null, 2));
-        }
-
-        console.log(`[SessionPage.syncUserDataFromFirestore] ====== END STEP 3: COMPREHENSIVE PRINT ======`);
-
-        console.log(`[SessionPage.syncUserDataFromFirestore] ====== FINAL SESSION ${sessionIdx + 1} DATA ======`);
-        console.log(`[SessionPage.syncUserDataFromFirestore] Final session copy:`, sessionCopy);
-        console.log(`[SessionPage.syncUserDataFromFirestore] Final image copies (${sessionImageCopies.length}):`, sessionImageCopies);
+        console.log(`[SessionPage.syncUserDataFromFirestore] Prepared session ${sessionCopy.id} with ${sessionImageCopies.length} image(s)`);
 
         // Add session to storage
         const added = this.imageStorage.addSessionIfNotExists(sessionCopy as any);
         if (added) {
           sessionsAdded += 1;
-          console.log('[SessionPage.syncUserDataFromFirestore] Added session to local storage:', sessionCopy.id);
         }
 
         // Add all images to storage
@@ -752,11 +562,8 @@ private startUserSyncInBackground(userId: string): void {
           const imageAdded = await this.imageStorage.addImageIfNotExists(imageCopy as any, imageCopy.sessionId);
           if (imageAdded) {
             imagesAdded += 1;
-            console.log('[SessionPage.syncUserDataFromFirestore] Added image to local storage:', imageCopy.filename);
           }
         }
-
-        console.log(`[SessionPage.syncUserDataFromFirestore] -------- Completed Session ${sessionIdx + 1}/${firebaseSessions.length} --------`);
       }
 
       console.log('[SessionPage.syncUserDataFromFirestore] ====== SYNC COMPLETED SUCCESSFULLY ======');
@@ -939,7 +746,7 @@ private startUserSyncInBackground(userId: string): void {
   /**
    * Open the Feedback page pre-selecting a session. Select its first image in
    * ImageStorageService so detail UIs can initialize accordingly.
-   * Before navigating, fetch S3 images from the session to ensure they're available.
+  * Before navigating, prepare the selected session in local storage.
    */
   // Show confirmation dialog when session is clicked
   onSessionItemClick(session: any, event?: Event): void {
@@ -953,17 +760,17 @@ private startUserSyncInBackground(userId: string): void {
     this.isSessionLoadingDialogOpen = false;
     this.selectedSessionForLoading = null;
     this.sessionLoadingProgress = 0;
-    this.sessionLoadingStatusText = 'Loading session images from S3...';
+    this.sessionLoadingStatusText = 'Preparing session...';
     this.sessionLoadingImageCount = { current: 0, total: 0 };
   }
 
-  // Load session from S3 and show progress, then navigate to feedback page
+  // Prepare the selected session and navigate to feedback page
   private async loadAndNavigateToSession(session: any): Promise<void> {
     try {
       this.selectedSessionForLoading = session;
       this.isSessionLoadingDialogOpen = true;
       this.sessionLoadingProgress = 0;
-      this.sessionLoadingStatusText = 'Preparing to load session...';
+      this.sessionLoadingStatusText = 'Preparing session...';
       this.sessionLoadingImageCount = { current: 0, total: 0 };
 
       // Select the first image for feedback-page
@@ -974,51 +781,8 @@ private startUserSyncInBackground(userId: string): void {
         }
       }
 
-      // Fetch S3 images with progress tracking
-      const svc: any = this.imageStorage as any;
-      const sessionId = session?.id || null;
-      const userId = this.userID || null;
-
-      if (sessionId && userId && typeof svc.fetchSessionImagesFromS3 === 'function') {
-        try {
-          console.log('[SessionPage] Starting S3 fetch for session:', { sessionId, userId });
-          
-          // Track this sessionId for local storage management
-          this.trackSessionIdForLocalStorage(sessionId);
-
-          // Fetch images with progress callback
-          await svc.fetchSessionImagesFromS3(
-            sessionId,
-            userId,
-            (current: number, total: number) => {
-              this.sessionLoadingImageCount = { current, total };
-              const percentage = total > 0 ? Math.round((current / total) * 100) : 0;
-              this.sessionLoadingProgress = percentage;
-              this.sessionLoadingStatusText = `Loading images from S3... (${current}/${total})`;
-              console.log(`[SessionPage] S3 fetch progress: ${current}/${total} (${percentage}%)`);
-            }
-          );
-
-          this.sessionLoadingStatusText = '✅ Session images loaded!';
-          this.sessionLoadingProgress = 100;
-          console.log('[SessionPage] ✅ S3 images fetched successfully for session:', sessionId);
-
-          // Brief delay to show success message before navigating
-          await new Promise(resolve => setTimeout(resolve, 500));
-        } catch (error) {
-          this.sessionLoadingStatusText = '⚠️ Images loaded (some may be from cache)';
-          console.warn('[SessionPage] Warning during S3 fetch:', error);
-          await new Promise(resolve => setTimeout(resolve, 500));
-        }
-      } else {
-        console.warn('[SessionPage] Cannot fetch S3 images - missing sessionId, userId, or fetchSessionImagesFromS3 method', {
-          sessionId,
-          userId,
-          hasMethod: typeof svc.fetchSessionImagesFromS3 === 'function'
-        });
-        this.sessionLoadingStatusText = 'Preparing session...';
-        this.sessionLoadingProgress = 50;
-        await new Promise(resolve => setTimeout(resolve, 500));
+      if (session?.id) {
+        this.trackSessionIdForLocalStorage(session.id);
       }
 
       // Close dialog and navigate
@@ -1119,7 +883,7 @@ private startUserSyncInBackground(userId: string): void {
     this.selectedSessionForConfirm = null;
   }
 
-  // Debug method: print session object and related images from Firestore/S3
+  // Debug method: print session object and related images from Firestore/local storage
   private async debugPrintSessionData(session: any): Promise<void> {
     try {
       console.log('========== SESSION DEBUG INFO ==========');
@@ -1156,10 +920,6 @@ private startUserSyncInBackground(userId: string): void {
             hasPrediction: !!img.prediction,
             hasOriginal: !!img.original,
             hasWithBoxes: !!img.withBoxes,
-            s3Keys: {
-              originalS3Key: img.originalS3Key,
-              withBoxesS3Key: img.withBoxesS3Key
-            },
             sessionId: img.sessionId
           });
         });
@@ -1174,11 +934,7 @@ private startUserSyncInBackground(userId: string): void {
           console.log(`Session Image ${idx + 1}:`, {
             filename: img.filename,
             prediction: img.prediction,
-            statusMessage: img.statusMessage,
-            s3URLs: {
-              original: img.originalS3Url,
-              withBoxes: img.withBoxesS3Url
-            }
+            statusMessage: img.statusMessage
           });
         });
       }
@@ -1189,185 +945,7 @@ private startUserSyncInBackground(userId: string): void {
   }
 
   async goToSession(session: any) {
-    // pick the first image in session and prepare the destination(feedback-page) to load it and 
-    // display that first image when the session is selected
-    try {
-      if (session && session.imageKeys && session.imageKeys.length > 0) {
-        const key = session.imageKeys[0];
-        if (this.imageStorage && typeof this.imageStorage.selectImageByOriginal === 'function') {
-          this.imageStorage.selectImageByOriginal(key);
-        }
-      }
-    } catch (e) { console.warn('goToSession warning', e); }
-    
-    try {
-      // Ensure HomePage back handler is removed before navigating 
-      // to feedback-page to keep the logic and behavior of back button is kept inside the home-page
-      try { this.removeBackButtonHandler(); } catch (e) { /* ignore */ }
-
-      // Create and show loading spinner for S3 fetch
-      const spinnerContainer = document.createElement('div');
-      spinnerContainer.id = 'session-fetch-spinner';
-      spinnerContainer.style.position = 'fixed';
-      spinnerContainer.style.top = '50%';
-      spinnerContainer.style.left = '50%';
-      spinnerContainer.style.transform = 'translate(-50%, -50%)';
-      spinnerContainer.style.zIndex = '10000';
-      spinnerContainer.style.textAlign = 'center';
-      spinnerContainer.style.backgroundColor = 'rgba(0, 0, 0, 0.3)';
-      spinnerContainer.style.width = '100%';
-      spinnerContainer.style.height = '100%';
-      spinnerContainer.style.display = 'flex';
-      spinnerContainer.style.justifyContent = 'center';
-      spinnerContainer.style.alignItems = 'center';
-
-      const spinner = document.createElement('div');
-      spinner.style.border = '4px solid rgba(255, 81, 47, 0.3)';
-      spinner.style.borderTop = '4px solid #ff512f';
-      spinner.style.borderRadius = '50%';
-      spinner.style.width = '40px';
-      spinner.style.height = '40px';
-      spinner.style.animation = 'spin 1s linear infinite';
-      spinner.style.margin = '0 auto 10px';
-
-      // Add CSS animation for spinner if not already present
-      if (!document.getElementById('session-spinner-animation')) {
-        const style = document.createElement('style');
-        style.id = 'session-spinner-animation';
-        style.innerHTML = `
-          @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-          }
-        `;
-        document.head.appendChild(style);
-      }
-
-      const spinnerBox = document.createElement('div');
-      spinnerBox.style.backgroundColor = 'white';
-      spinnerBox.style.padding = '30px';
-      spinnerBox.style.borderRadius = '10px';
-      spinnerBox.style.boxShadow = '0 4px 15px rgba(0, 0, 0, 0.2)';
-      spinnerBox.style.minWidth = '320px';
-
-      const spinnerText = document.createElement('div');
-      spinnerText.innerText = 'Loading session images from S3...';
-      spinnerText.style.color = '#333';
-      spinnerText.style.marginTop = '10px';
-      spinnerText.style.fontSize = '14px';
-      spinnerText.style.maxWidth = '300px';
-      spinnerText.style.wordWrap = 'break-word';
-
-      // Create progress bar container
-      const progressBarContainer = document.createElement('div');
-      progressBarContainer.style.marginTop = '20px';
-      progressBarContainer.style.width = '100%';
-      progressBarContainer.style.maxWidth = '280px';
-      progressBarContainer.style.margin = '20px auto 0';
-
-      // Progress bar background (empty)
-      const progressBarBackground = document.createElement('div');
-      progressBarBackground.style.width = '100%';
-      progressBarBackground.style.height = '8px';
-      progressBarBackground.style.backgroundColor = '#e0e0e0';
-      progressBarBackground.style.borderRadius = '4px';
-      progressBarBackground.style.overflow = 'hidden';
-      progressBarBackground.style.border = '1px solid #ccc';
-
-      // Progress bar fill (animated)
-      const progressBarFill = document.createElement('div');
-      progressBarFill.style.height = '100%';
-      progressBarFill.style.width = '0%';
-      progressBarFill.style.backgroundColor = '#ff512f';
-      progressBarFill.style.borderRadius = '4px';
-      progressBarFill.style.transition = 'width 0.3s ease';
-
-      progressBarBackground.appendChild(progressBarFill);
-
-      // Progress percentage text
-      const progressText = document.createElement('div');
-      progressText.innerText = '0%';
-      progressText.style.fontSize = '12px';
-      progressText.style.color = '#666';
-      progressText.style.marginTop = '8px';
-      progressText.style.textAlign = 'center';
-
-      progressBarContainer.appendChild(progressBarBackground);
-      progressBarContainer.appendChild(progressText);
-
-      spinnerBox.appendChild(spinner);
-      spinnerBox.appendChild(spinnerText);
-      spinnerBox.appendChild(progressBarContainer);
-      spinnerContainer.appendChild(spinnerBox);
-      document.body.appendChild(spinnerContainer);
-
-      // Fetch S3 images with progress tracking
-      const svc: any = this.imageStorage as any;
-      const sessionId = session?.id || null;
-      const userId = this.userID || null;
-
-      if (sessionId && userId && typeof svc.fetchSessionImagesFromS3 === 'function') {
-        try {
-          console.log('[SessionPage] Starting S3 fetch for session:', { sessionId, userId });
-          
-          // Fetch images with progress callback to update spinner text and progress bar
-          await svc.fetchSessionImagesFromS3(
-            sessionId,
-            userId,
-            (current: number, total: number) => {
-              const percentage = total > 0 ? Math.round((current / total) * 100) : 0;
-              progressBarFill.style.width = `${percentage}%`;
-              progressText.innerText = `${percentage}% (${current}/${total} images)`;
-              spinnerText.innerText = `Loading images from S3...\n(${current}/${total} images)`;
-              console.log(`[SessionPage] S3 fetch progress: ${current}/${total} (${percentage}%)`);
-            }
-          );
-
-          spinnerText.innerText = '✅ Session images loaded!';
-          progressBarFill.style.width = '100%';
-          progressText.innerText = '100%';
-          console.log('[SessionPage] ✅ S3 images fetched successfully for session:', sessionId);
-
-          // Brief delay to show success message before navigating
-          await new Promise(resolve => setTimeout(resolve, 500));
-        } catch (error) {
-          spinnerText.innerText = '⚠️ Images may not be fully loaded, but continuing...';
-          console.warn('[SessionPage] Warning during S3 fetch:', error);
-          // Continue anyway - some images may be available locally
-          await new Promise(resolve => setTimeout(resolve, 500));
-        }
-      } else {
-        console.warn('[SessionPage] Cannot fetch S3 images - missing sessionId, userId, or fetchSessionImagesFromS3 method', {
-          sessionId,
-          userId,
-          hasMethod: typeof svc.fetchSessionImagesFromS3 === 'function'
-        });
-        spinnerText.innerText = 'Preparing session...';
-        progressBarFill.style.width = '50%';
-        progressText.innerText = '50%';
-        await new Promise(resolve => setTimeout(resolve, 500));
-      }
-
-      // Remove spinner and navigate
-      try { spinnerContainer.remove(); } catch (e) { /* ignore */ }
-
-      // Build the parameters for the current session to be selected and displayed 
-      // in feedback-page with the session.id
-      const params: any = {};
-      if (session && session.id) params.sessionId = session.id;
-      // Navigate to feedback page and include sessionId so feedback page can load the session
-      this.router.navigate(['/feedback-page'], { queryParams: params });
-    } catch (e) {
-      console.error('[SessionPage] Navigation to feedback page failed:', e);
-      // Clean up spinner if it exists
-      try {
-        const spinner = document.getElementById('session-fetch-spinner');
-        if (spinner) spinner.remove();
-      } catch (err) { /* ignore */ }
-      
-      // Fallback to navigation without S3 fetch
-      this.router.navigate(['/feedback-page']);
-    }
+    await this.loadAndNavigateToSession(session);
   }
 
   /** Delete a session and refresh list */

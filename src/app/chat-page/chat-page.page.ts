@@ -2899,6 +2899,18 @@ ngOnInit(): void {
   console.log('[ChatPage.ngOnInit] ===== PAGE INIT START (ngOnInit called) =====');
   console.log('[ChatPage.ngOnInit] Auth currentUser on ngOnInit:', this.auth3.getCurrentUser()?.uid || 'null');
 
+  // If navigation passed an `activeTab` via navigation state, apply it here.
+  try {
+    const nav: any = (this.router && (this.router as any).getCurrentNavigation) ? (this.router as any).getCurrentNavigation() : null;
+    const stateTab = (nav && nav.extras && nav.extras.state && (nav.extras.state as any).activeTab) || (history && (history.state && (history.state as any).activeTab));
+    if (stateTab === 'people' || stateTab === 'location') {
+      this.activeTab = stateTab;
+      console.log('[ChatPage.ngOnInit] activeTab set from navigation state:', this.activeTab);
+    }
+  } catch (e) {
+    // ignore
+  }
+
   const cachedUid = this.resolveCachedUid();
   if (cachedUid) {
     this.refreshCacheWarmStatus(cachedUid);

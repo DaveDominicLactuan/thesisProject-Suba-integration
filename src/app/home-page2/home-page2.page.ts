@@ -1025,6 +1025,20 @@ private persistUserProfileToStorage(): void {
     console.log('chat page');
   }
 
+  /** Navigate to chat page and open the 'people' tab. */
+  gochatPagePeople() {
+    this.removeBackButtonHandler();
+    this.router.navigate(['/chat-page'], { state: { activeTab: 'people' } });
+    console.log('chat page (people)');
+  }
+
+  /** Navigate to chat page and open the 'location' tab. */
+  gochatPageLocation() {
+    this.removeBackButtonHandler();
+    this.router.navigate(['/chat-page'], { state: { activeTab: 'location' } });
+    console.log('chat page (location)');
+  }
+
   /** Navigate to profile page. */
   goToProfilePage() {
     this.router.navigate(['/profile-page']);
