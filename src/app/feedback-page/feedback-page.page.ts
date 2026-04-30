@@ -231,6 +231,51 @@ private backButtonSub: any; // hardware back handler
     console.log('User ID:', info.userId || '(not loaded)');
     console.log('Session ID:', info.sessionId || '(no session selected)');
     console.log('Current Session:', this.selectedSessionId ? this.sessions.find(s => s.id === this.selectedSessionId) : 'None');
+    // Print image objects currently loaded for the active session (if any)
+    console.log('Session images for selected session:', this.imagePaths && this.imagePaths.length > 0 ? this.imagePaths : '(no images loaded)');
+    // Attempt to fetch and print the full stored image objects for the active session.
+    // Uses async IIFE so the parent function remains synchronous for callers.
+    (async () => {
+      try {
+        const svc: any = this.imageStorageService as any;
+        const currentSession = this.selectedSessionId ? this.sessions.find(s => s.id === this.selectedSessionId) : null;
+        if (!currentSession) {
+          console.log('Full session image objects:', '(no session selected)');
+          return;
+        }
+
+        const sessionImages: any[] = [];
+
+        // If session lists image keys, try to resolve each key via service APIs.
+        if (Array.isArray((currentSession as any).imageKeys) && (currentSession as any).imageKeys.length > 0) {
+          for (const key of (currentSession as any).imageKeys) {
+            let entry: any = undefined;
+            if (typeof svc.getEntryForImage === 'function') {
+              entry = await svc.getEntryForImage(key);
+            } else if (typeof svc.getEntry === 'function') {
+              entry = await svc.getEntry(key);
+            } else if (typeof svc.getAllEntries === 'function') {
+              const all = await svc.getAllEntries();
+              entry = all ? all[key] : undefined;
+            } else if (typeof svc.getAllImages === 'function') {
+              const allImgs = await svc.getAllImages();
+              if (Array.isArray(allImgs)) {
+                entry = allImgs.find((e: any) => (e.filename || e.original) && ((e.filename || e.original) === key));
+              }
+            }
+            if (entry) sessionImages.push(entry);
+          }
+
+        } else if (Array.isArray((currentSession as any).images)) {
+          // Some session implementations embed image objects directly
+          sessionImages.push(...(currentSession as any).images);
+        }
+
+        console.log('Full session image objects:', sessionImages.length > 0 ? sessionImages : '(no session images found)');
+      } catch (e) {
+        console.warn('[FeedbackPage] failed to load full session images for logging', e);
+      }
+    })();
     console.log('All loaded sessions:', this.sessions.length > 0 ? this.sessions : '(no sessions loaded)');
     console.groupEnd();
 

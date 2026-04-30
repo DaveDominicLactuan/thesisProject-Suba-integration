@@ -885,7 +885,7 @@ export class ImageStorageService {
   }
 
   /** Persist a single session and its images to Firestore using filename as image doc ID */
-  async saveSessionWithImagesToFirestore(sessionId: string, receiverId: string): Promise<void> {
+  async saveSessionWithImagesToFirestore(sessionId: string, receiverId?: string): Promise<void> {
     const session = this.sessions.find(s => s.id === sessionId);
     if (!session) {
       console.warn('[ImageStorageService] saveSessionWithImagesToFirestore: session not found', sessionId);
@@ -905,9 +905,11 @@ export class ImageStorageService {
         console.warn('[ImageStorageService] No authenticated user; skipping Firestore write');
         return;
       }
-      // CRITICAL: Ensure userId is ALWAYS set to currentUid (never null)
+      // CRITICAL: Ensure the payload always has a concrete owner/user value.
+      const targetUserId = receiverId || currentUid;
+      const createdBy = currentUid;
 
-      session.userId = currentUid;
+      session.userId = targetUserId;
 
       console.log('[ImageStorageService] Saving session to Firestore', {
         sessionId: session.id,
@@ -933,7 +935,8 @@ export class ImageStorageService {
         imageKeys: session.imageKeys || [],
         created: session.created,
         totalBoundingBoxes: session.totalBoundingBoxes || 0,
-        userId: receiverId,
+        userId: targetUserId,
+        createdBy,
         sessionId: session.sessionId || null
       };
 
@@ -950,8 +953,8 @@ export class ImageStorageService {
       console.log("Batch data ", batch);
 
       for (const image of imagesForSession) {
-        // CRITICAL: Ensure userId is ALWAYS set to currentUid (never null)
-        image.userId = currentUid;
+        // CRITICAL: Ensure userId is always concrete and share writes include a creator marker.
+        image.userId = targetUserId;
         // NOTE: Commented out base64 storage to save Firestore quota - using S3 references instead
         // const safeOriginal = await this.clampDataUrlToBytes(image.original, this.FIRESTORE_DOC_MAX_BYTES);
         // const safeWithBoxes = await this.clampDataUrlToBytes(image.withBoxes, this.FIRESTORE_DOC_MAX_BYTES);
@@ -959,7 +962,8 @@ export class ImageStorageService {
         batch.set(imageRef, {
           timestamp: image.timestamp,
           filename: image.filename,
-          userId: currentUid,
+          userId: targetUserId,
+          createdBy,
           sessionId: session.id,
           // NOTE: Commented out - base64 data stored in S3 instead
           // original: safeOriginal,
