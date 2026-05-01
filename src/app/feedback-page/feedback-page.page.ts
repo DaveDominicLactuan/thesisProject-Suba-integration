@@ -1,6 +1,6 @@
-import { Component, OnInit, ViewChild, ElementRef, AfterViewInit } from '@angular/core';
+﻿import { Component, OnInit, ViewChild, ElementRef, AfterViewInit } from '@angular/core';
 import { Router, ActivatedRoute } from '@angular/router';
-import { NavController, Platform } from '@ionic/angular';
+import { NavController, Platform, GestureController } from '@ionic/angular';
 import { ApiService } from '../api.service';
 import { ImageStorageService, StoredImage } from '../services/image-storage.service';
 import { CameraPreview, CameraPreviewOptions } from '@awesome-cordova-plugins/camera-preview/ngx';
@@ -51,6 +51,12 @@ imagePaths: DisplayImage[] = [];
 showWithBoxes: boolean = false;
 private backButtonSub: any; // hardware back handler
 
+  // Zoom modal properties
+  showZoomModal: boolean = false;
+  zoomImageSrc: string = '';
+  currentZoomLevel: number = 1;
+  private pinchGesture: any;
+
 
 
 
@@ -58,6 +64,7 @@ private backButtonSub: any; // hardware back handler
   routeSessionId?: string | null = null;
 
   @ViewChild('scrollContainer', { static: false }) scrollContainer!: ElementRef;
+  @ViewChild('zoomImageElement', { static: false }) zoomImageElement?: ElementRef;
   // Session support
   sessions: any[] = [];
   selectedSessionId?: string | null = null;
@@ -95,7 +102,8 @@ private backButtonSub: any; // hardware back handler
     private imageStorageService: ImageStorageService,
     private cameraPreview: CameraPreview,
     private navCtrl: NavController,
-    private platform: Platform
+    private platform: Platform,
+    private gestureCtrl: GestureController
   ) { }
 
   /**
@@ -106,7 +114,7 @@ private backButtonSub: any; // hardware back handler
     this.loadUserRole();
     this.loadUserId();
     try {
-      // CameraPreview is a Cordova/native plugin — on web it will throw; ignore on web
+      // CameraPreview is a Cordova/native plugin â€” on web it will throw; ignore on web
       this.cameraPreview.stopCamera();
     } catch (e) {
       console.warn('CameraPreview.stopCamera ignored (not available on web):', e);
@@ -231,7 +239,7 @@ private backButtonSub: any; // hardware back handler
       sessionId: this.selectedSessionId || null
     };
 
-    console.group('[FeedbackPage] 👤 User and Session Information');
+    console.group('[FeedbackPage] ðŸ‘¤ User and Session Information');
     console.log('User ID:', info.userId || '(not loaded)');
     console.log('Session ID:', info.sessionId || '(no session selected)');
     console.log('Current Session:', this.selectedSessionId ? this.sessions.find(s => s.id === this.selectedSessionId) : 'None');
@@ -330,8 +338,8 @@ private backButtonSub: any; // hardware back handler
       this.detectionResult = this.selectedStatusMessage;
     } else if (this.selectedPrediction) {
       const p = this.selectedPrediction;
-      this.detectionMessage = p.type ? `${p.type}${p.severity ? ' — ' + p.severity : ''}` : '⚠️ No info available';
-      this.detectionResult = p.shape ? `${p.shape}${p.severity ? ' — ' + p.severity : ''}` : (p.severity ?? '⚠️ No info available');
+      this.detectionMessage = p.type ? `${p.type}${p.severity ? ' â€” ' + p.severity : ''}` : 'âš ï¸ No info available';
+      this.detectionResult = p.shape ? `${p.shape}${p.severity ? ' â€” ' + p.severity : ''}` : (p.severity ?? 'âš ï¸ No info available');
     }
 
 
@@ -508,7 +516,7 @@ private backButtonSub: any; // hardware back handler
     this.imagePaths = [];
     try {
 
-      //No session selected — load all images fallback
+      //No session selected â€” load all images fallback
       if (!this.selectedSessionId) {
         // fallback: load all images if no session selected
         const allImgs: any[] = (typeof svc.getAllImages === 'function') ? svc.getAllImages() : (typeof svc.getAll === 'function' ? Object.values(await svc.getAll()) : []);
@@ -613,12 +621,12 @@ private backButtonSub: any; // hardware back handler
     //get the detectionMessage prefer human-readable statusMessage, else type+severity
     const detectionMessage = img.statusMessage && img.statusMessage.length > 0
       ? img.statusMessage
-      : (predType || predSeverity) ? `${predType}${predSeverity ? ' — ' + predSeverity : ''}` : '';
+      : (predType || predSeverity) ? `${predType}${predSeverity ? ' â€” ' + predSeverity : ''}` : '';
 
     //Compute detectionResult prefer to get statusMessage, else shape+severity
     const detectionResult = img.statusMessage && img.statusMessage.length > 0
       ? img.statusMessage
-      : (predShape || predSeverity) ? `${predShape}${predSeverity ? ' — ' + predSeverity : ''}` : '';
+      : (predShape || predSeverity) ? `${predShape}${predSeverity ? ' â€” ' + predSeverity : ''}` : '';
 
     //Build return object: choose withBoxes fallback, derive filename, 
     // include normalized prediction/status
@@ -712,20 +720,20 @@ detectCenterImage() {
     this.detectionMessage = matched.statusMessage;
   } else if (matched.rawPrediction) {
     const p = matched.rawPrediction;
-    this.detectionMessage = p.type ? `${p.type}${p.severity ? ' — ' + p.severity : ''}` : '⚠️ No info available';
+    this.detectionMessage = p.type ? `${p.type}${p.severity ? ' â€” ' + p.severity : ''}` : 'âš ï¸ No info available';
   } else {
-    this.detectionMessage = '⚠️ No info available';
+    this.detectionMessage = 'âš ï¸ No info available';
   }
 
   
   //get detectionResult prefer prediction.shape+severity, else statusMessage
   if (matched.rawPrediction) {
     const p = matched.rawPrediction;
-    this.detectionResult = p.shape ? `${p.shape}${p.severity ? ' — ' + p.severity : ''}` : (p.severity ?? '⚠️ No info available');
+    this.detectionResult = p.shape ? `${p.shape}${p.severity ? ' â€” ' + p.severity : ''}` : (p.severity ?? 'âš ï¸ No info available');
   } else if (matched.statusMessage && matched.statusMessage.length > 0) {
     this.detectionResult = matched.statusMessage;
   } else {
-    this.detectionResult = '⚠️ No info available';
+    this.detectionResult = 'âš ï¸ No info available';
   }
 
   //Set selectedImageTitle, selectedPrediction, and selectedStatusMessage
@@ -734,7 +742,7 @@ detectCenterImage() {
   this.selectedImageTitle = matched.fileName ?? '';
 
   // Debug: Log both full and shortened titles
-  console.group('[FeedbackPage] 📋 Image Title Debug');
+  console.group('[FeedbackPage] ðŸ“‹ Image Title Debug');
   console.log('Full selectedImageTitle:', this.selectedImageTitle);
   console.log('Shortened title:', this.getShortImageTitle(this.selectedImageTitle));
   console.groupEnd();
@@ -885,18 +893,18 @@ detectCenterImage() {
       if (status && status.length > 0) {
         detectionMessage = status;
       } else if (prediction) {
-        detectionMessage = prediction.type ? `${prediction.type}${prediction.severity ? ' — ' + prediction.severity : ''}` : '⚠️ No info available';
+        detectionMessage = prediction.type ? `${prediction.type}${prediction.severity ? ' â€” ' + prediction.severity : ''}` : 'âš ï¸ No info available';
       } else {
-        detectionMessage = '⚠️ No info available';
+        detectionMessage = 'âš ï¸ No info available';
       }
 
       let detectionResult = '';
       if (prediction) {
-        detectionResult = prediction.shape ? `${prediction.shape}${prediction.severity ? ' — ' + prediction.severity : ''}` : (prediction.severity ?? '⚠️ No info available');
+        detectionResult = prediction.shape ? `${prediction.shape}${prediction.severity ? ' â€” ' + prediction.severity : ''}` : (prediction.severity ?? 'âš ï¸ No info available');
       } else if (status && status.length > 0) {
         detectionResult = status;
       } else {
-        detectionResult = '⚠️ No info available';
+        detectionResult = 'âš ï¸ No info available';
       }
 
       return {
@@ -974,11 +982,11 @@ addEntry() {
     // Recompute derived detection strings
     matched.detectionMessage = matched.statusMessage && matched.statusMessage.length > 0
       ? matched.statusMessage
-      : `${matched.rawPrediction.type || ''}${matched.rawPrediction.severity ? ' — ' + matched.rawPrediction.severity : ''}`.trim();
+      : `${matched.rawPrediction.type || ''}${matched.rawPrediction.severity ? ' â€” ' + matched.rawPrediction.severity : ''}`.trim();
 
     matched.detectionResult = matched.statusMessage && matched.statusMessage.length > 0
       ? matched.statusMessage
-      : `${matched.rawPrediction.shape || ''}${matched.rawPrediction.severity ? ' — ' + matched.rawPrediction.severity : ''}`.trim();
+      : `${matched.rawPrediction.shape || ''}${matched.rawPrediction.severity ? ' â€” ' + matched.rawPrediction.severity : ''}`.trim();
 
     // Sync selected* fields so UI reflects latest edits
     this.selectedPrediction = { ...matched.rawPrediction };
@@ -1078,7 +1086,7 @@ addEntry() {
         this.selectedImageTitle = first.filename ?? '';
 
         // Debug: Log both full and shortened titles after deletion
-        console.group('[FeedbackPage] 📋 Image Title Debug (After Deletion)');
+        console.group('[FeedbackPage] ðŸ“‹ Image Title Debug (After Deletion)');
         console.log('Full selectedImageTitle:', this.selectedImageTitle);
         console.log('Shortened title:', this.getShortImageTitle(this.selectedImageTitle));
         console.log('Remaining images:', this.imagePaths.length);
@@ -1090,15 +1098,15 @@ addEntry() {
           this.detectionResult = this.selectedStatusMessage;
         } else if (this.selectedPrediction) {
           const p = this.selectedPrediction;
-          this.detectionMessage = p.type ? `${p.type}${p.severity ? ' — ' + p.severity : ''}` : '⚠️ No info available';
-          this.detectionResult = p.shape ? `${p.shape}${p.severity ? ' — ' + p.severity : ''}` : (p.severity ?? '⚠️ No info available');
+          this.detectionMessage = p.type ? `${p.type}${p.severity ? ' â€” ' + p.severity : ''}` : 'âš ï¸ No info available';
+          this.detectionResult = p.shape ? `${p.shape}${p.severity ? ' â€” ' + p.severity : ''}` : (p.severity ?? 'âš ï¸ No info available');
         }
 
         this.dropdown1 = this.selectedPrediction.type ?? this.selectedImageTitle;
         this.dropdown2 = this.selectedPrediction.shape ?? this.selectedImageTitle;
         this.dropdown3 = this.selectedPrediction.severity ?? this.selectedImageTitle;
       } else {
-        // cleared all images — reset UI
+        // cleared all images â€” reset UI
         //Reset UI when all images removed, if only all 
         // images are removed or no images in the session currently
         this.selectedImage = '';
@@ -1109,7 +1117,7 @@ addEntry() {
         this.detectionResult = '';
 
         // Debug: Log when all images cleared
-        console.group('[FeedbackPage] 📋 Image Title Debug (All Cleared)');
+        console.group('[FeedbackPage] ðŸ“‹ Image Title Debug (All Cleared)');
         console.log('All images deleted - selectedImageTitle reset to empty');
         console.log('Full selectedImageTitle:', this.selectedImageTitle);
         console.log('Shortened title:', this.getShortImageTitle(this.selectedImageTitle));
@@ -1223,7 +1231,7 @@ addEntry() {
 
   /**
    * Shorten the image title by removing userID, sessionId, and img1 prefixes.
-   * Example: "userID:abc123sessionId:xyz789img1crack1041120261109.jpg" → "crack1041120261109.jpg"
+   * Example: "userID:abc123sessionId:xyz789img1crack1041120261109.jpg" â†’ "crack1041120261109.jpg"
    * Handles cases where these prefixes don't exist.
    */
   getShortImageTitle(fullTitle: string): string {
@@ -1289,13 +1297,13 @@ addEntry() {
     if (!entry.detectionMessage || entry.detectionMessage.length === 0) {
       entry.detectionMessage = entry.statusMessage && entry.statusMessage.length > 0
         ? entry.statusMessage
-        : `${type || ''}${severity ? ' — ' + severity : ''}`.trim();
+        : `${type || ''}${severity ? ' â€” ' + severity : ''}`.trim();
     }
 
     if (!entry.detectionResult || entry.detectionResult.length === 0) {
       entry.detectionResult = entry.statusMessage && entry.statusMessage.length > 0
         ? entry.statusMessage
-        : `${shape || ''}${severity ? ' — ' + severity : ''}`.trim();
+        : `${shape || ''}${severity ? ' â€” ' + severity : ''}`.trim();
     }
 
     return entry;
@@ -1594,7 +1602,7 @@ addEntry() {
                     if (originalS3Result) {
                       imgEntry.storagePath = originalS3Result.s3Key;
                       imgEntry.storageUrl = originalS3Result.url;
-                      console.log(`✅ Original image ${imgIndex + 1} uploaded to S3 with key:`, originalS3Result?.s3Key);
+                      console.log(`âœ… Original image ${imgIndex + 1} uploaded to S3 with key:`, originalS3Result?.s3Key);
                     }
                   } catch (error) {
                     console.warn(`[FeedbackPage] Failed to upload original image ${imgIndex + 1} to S3:`, error);
@@ -1611,7 +1619,7 @@ addEntry() {
                     if (withBoxesS3Result) {
                       imgEntry.withBoxesStoragePath = withBoxesS3Result.s3Key;
                       imgEntry.withBoxesStorageUrl = withBoxesS3Result.url;
-                      console.log(`✅ WithBoxes image ${imgIndex + 1} uploaded to S3 with key:`, withBoxesS3Result?.s3Key);
+                      console.log(`âœ… WithBoxes image ${imgIndex + 1} uploaded to S3 with key:`, withBoxesS3Result?.s3Key);
                     }
                   } catch (error) {
                     console.warn(`[FeedbackPage] Failed to upload withBoxes image ${imgIndex + 1} to S3:`, error);
@@ -1642,17 +1650,17 @@ addEntry() {
               updateProgress(90, 'Saving Session: 90%');
               await svc.saveSessionWithImagesToFirestore(savedSessionId);
               firestoreSaved = true;
-              console.log('✅ Firestore save completed with S3 references');
+              console.log('âœ… Firestore save completed with S3 references');
               
               if (typeof svc.logSaveWorkflowStatus === 'function') {
                 try {
                   await svc.logSaveWorkflowStatus(savedSessionId);
                 } catch (logError) {
-                  console.warn('⚠️ Failed to log workflow status:', logError);
+                  console.warn('âš ï¸ Failed to log workflow status:', logError);
                 }
               }
             } catch (e) {
-              console.warn('⚠️ Failed to save to Firestore:', e);
+              console.warn('âš ï¸ Failed to save to Firestore:', e);
             }
           }
 
@@ -1667,15 +1675,15 @@ addEntry() {
               sessionImages.forEach((img: StoredImage, index: number) => {
                 const imgName = img.filename || `Image ${index + 1}`;
                 if (img.storagePath) {
-                  s3Summary.push(`✅ Original [${imgName}]: ${img.storagePath}`);
+                  s3Summary.push(`âœ… Original [${imgName}]: ${img.storagePath}`);
                 }
                 if (img.withBoxesStoragePath) {
-                  s3Summary.push(`✅ Processed [${imgName}]: ${img.withBoxesStoragePath}`);
+                  s3Summary.push(`âœ… Processed [${imgName}]: ${img.withBoxesStoragePath}`);
                 }
               });
             }
             
-            const firestoreMessage = `✅ Session saved to Firestore: ${savedSessionId}\n${s3Summary.length > 0 ? '📁 S3 Files:\n' + s3Summary.join('\n') : 'No S3 uploads found'}`;
+            const firestoreMessage = `âœ… Session saved to Firestore: ${savedSessionId}\n${s3Summary.length > 0 ? 'ðŸ“ S3 Files:\n' + s3Summary.join('\n') : 'No S3 uploads found'}`;
             console.log(firestoreMessage);
             await this.showFirestoreSavePrompt(firestoreMessage);
           } else if (sessionImages && sessionImages.some((img: StoredImage) => img.storagePath || img.withBoxesStoragePath)) {
@@ -1684,14 +1692,14 @@ addEntry() {
             sessionImages.forEach((img: StoredImage, index: number) => {
               const imgName = img.filename || `Image ${index + 1}`;
               if (img.storagePath) {
-                s3Summary.push(`✅ Original [${imgName}]: ${img.storagePath}`);
+                s3Summary.push(`âœ… Original [${imgName}]: ${img.storagePath}`);
               }
               if (img.withBoxesStoragePath) {
-                s3Summary.push(`✅ Processed [${imgName}]: ${img.withBoxesStoragePath}`);
+                s3Summary.push(`âœ… Processed [${imgName}]: ${img.withBoxesStoragePath}`);
               }
             });
             
-            const successMessage = `✅ Images uploaded to S3\n📁 S3 Files:\n${s3Summary.join('\n')}`;
+            const successMessage = `âœ… Images uploaded to S3\nðŸ“ S3 Files:\n${s3Summary.join('\n')}`;
             alert(successMessage);
           } else {
             alert('Session saved successfully');
@@ -1720,6 +1728,117 @@ addEntry() {
       // Focus input for inactive state
       setTimeout(() => input.focus(), 50);
     });
+  }
+
+  /**
+   * Open the zoom modal with the selected image.
+   * Initializes pinch gesture detection.
+   */
+  openZoomModal(imageSrc: string): void {
+    this.zoomImageSrc = imageSrc;
+    this.currentZoomLevel = 1;
+    this.showZoomModal = true;
+    
+    // Register pinch gesture for zoom on the zoom image element after a short delay
+    // to ensure the DOM element is rendered
+    setTimeout(() => this.registerPinchGesture(), 100);
+  }
+
+  /**
+   * Close the zoom modal and cleanup gesture handlers.
+   */
+  closeZoomModal(): void {
+    this.showZoomModal = false;
+    this.currentZoomLevel = 1;
+    
+    // Cleanup pinch gesture
+    if (this.pinchGesture) {
+      this.pinchGesture.destroy();
+      this.pinchGesture = null;
+    }
+  }
+
+  /**
+   * Register pinch gesture for zoom functionality on the zoomed image.
+   * Allows users to pinch-to-zoom in the modal.
+   */
+  private registerPinchGesture(): void {
+    if (!this.zoomImageElement?.nativeElement) {
+      return;
+    }
+
+    // Cleanup previous gesture if it exists
+    if (this.pinchGesture) {
+      this.pinchGesture.destroy();
+    }
+
+    const element = this.zoomImageElement.nativeElement;
+
+    // Create pinch gesture
+    this.pinchGesture = this.gestureCtrl.create({
+      el: element,
+      gestureName: 'pinch',
+      onStart: () => {
+        // Optional: add visual feedback on pinch start
+      },
+      onMove: (detail: any) => {
+        // Update zoom level based on pinch scale
+        if (detail.scale) {
+          this.currentZoomLevel = Math.max(1, Math.min(detail.scale * 3, 5)); // Limit zoom between 1x and 5x
+          element.style.transform = `scale(${this.currentZoomLevel})`;
+        }
+      },
+      onEnd: () => {
+        // Optional: add visual feedback on pinch end
+      }
+    });
+
+    this.pinchGesture.enable(true);
+  }
+
+  /**
+   * Handle zoom button clicks to increase/decrease zoom level.
+   * Provides manual zoom control in addition to pinch gestures.
+   */
+  zoomIn(): void {
+    this.currentZoomLevel = Math.min(this.currentZoomLevel + 0.5, 5);
+    this.updateZoomTransform();
+  }
+
+  /**
+   * Decrease zoom level on zoom-out button click.
+   */
+  zoomOut(): void {
+    this.currentZoomLevel = Math.max(this.currentZoomLevel - 0.5, 1);
+    this.updateZoomTransform();
+  }
+
+  /**
+   * Reset zoom to 1x on reset button click.
+   */
+  resetZoom(): void {
+    this.currentZoomLevel = 1;
+    this.updateZoomTransform();
+  }
+
+  /**
+   * Update the zoom transform for the zoomed image element.
+   */
+  private updateZoomTransform(): void {
+    if (this.zoomImageElement?.nativeElement) {
+      this.zoomImageElement.nativeElement.style.transform = `scale(${this.currentZoomLevel})`;
+    }
+  }
+
+  /**
+   * Handle click outside the zoom modal to close it.
+   * Only closes if clicking directly on the overlay, not on the image.
+   */
+  onZoomOverlayClick(event: MouseEvent): void {
+    // Only close if the click target is the overlay itself, not the image
+    if (event.target === event.currentTarget) {
+      this.closeZoomModal();
+    }
   }
 
   /** Show a Firestore save confirmation prompt with a close button. */
@@ -1781,4 +1900,5 @@ addEntry() {
   }
 
 }
+
 

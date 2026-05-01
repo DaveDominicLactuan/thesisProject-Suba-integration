@@ -1131,6 +1131,11 @@ export class ImageStorageService {
   }
 
   /** Sessions */
+  /** Generate a new session ID using the service's standard format. */
+  generateSessionId(): string {
+    return `s-${Date.now()}`;
+  }
+
   createSession(name: string, imageKeys: string[] = [], userId?: string): ImageSession {
     // compute total bounding boxes for provided keys
     let totalBoxes = 0;
@@ -1140,7 +1145,7 @@ export class ImageStorageService {
       //the length of the boxes array is added to totalBoxes.
       if (img && Array.isArray((img as any).boxes)) totalBoxes += (img as any).boxes.length;
     }
-    const sessionId = `s-${Date.now()}`;
+    const sessionId = this.generateSessionId();
     const s: ImageSession = { 
       id: sessionId, 
       name, 
@@ -2015,7 +2020,7 @@ export class ImageStorageService {
       updateProgress(5, 100, 'Initializing session copy...');
 
       // Step 1: Create NEW session with unique ID
-      const newSessionId = `s-${Date.now()}`;
+      const newSessionId = this.generateSessionId();
       console.log('[ImageStorageService] Original session ID:', originalSession.id);
       console.log('[ImageStorageService] New copied session ID:', newSessionId);
 

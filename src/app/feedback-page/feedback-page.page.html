@@ -31,8 +31,42 @@
             [src]="showWithBoxes ? img.withBoxes : img.original"
             [class.selected]="(showWithBoxes ? img.withBoxes : img.original) === selectedImage"
             (click)="onImageClick(img)"
+            (dblclick)="openZoomModal(showWithBoxes ? img.withBoxes : img.original)"
             class="image-item"
           />
+        </div>
+      </div>
+
+      <!-- Zoom Modal Overlay -->
+      <div *ngIf="showZoomModal" class="zoom-overlay" (click)="onZoomOverlayClick($event)">
+        <div class="zoom-modal">
+          <!-- Close Button -->
+          <button class="zoom-close-btn" (click)="closeZoomModal()">
+            <span class="close-icon">&times;</span>
+          </button>
+          
+          <!-- Zoom Controls -->
+          <div class="zoom-controls">
+            <button class="zoom-btn" (click)="zoomOut()" title="Zoom out">−</button>
+            <span class="zoom-level">{{ currentZoomLevel.toFixed(1) }}x</span>
+            <button class="zoom-btn" (click)="zoomIn()" title="Zoom in">+</button>
+            <button class="zoom-btn" (click)="resetZoom()" title="Reset zoom">Reset</button>
+          </div>
+          
+          <!-- Zoomed Image with scroll capability -->
+          <div class="zoom-image-container">
+            <img 
+              #zoomImageElement 
+              [src]="zoomImageSrc" 
+              alt="Zoomed image"
+              class="zoom-image"
+            />
+          </div>
+          
+          <!-- Instructions -->
+          <div class="zoom-instructions">
+            Pinch to zoom • Click outside to close
+          </div>
         </div>
       </div>
 

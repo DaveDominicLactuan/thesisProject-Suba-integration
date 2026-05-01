@@ -812,6 +812,14 @@ ion-menu ion-item:hover {
   color: #666;
 }
 
+.menu-item .menu-item-icon {
+  width: 22px;
+  height: 22px;
+  margin-right: 16px;
+  object-fit: contain;
+  flex-shrink: 0;
+}
+
 .menu-item span {
   font-size: 1rem;
   color: black;
