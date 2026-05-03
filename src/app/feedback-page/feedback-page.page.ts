@@ -437,7 +437,7 @@ private backButtonSub: any; // hardware back handler
   /** Load sessions from the storage service and pick an active session */
   /**
    * Load sessions from ImageStorageService using several compatible APIs.
-   * Honors router-provided sessionId and picks a default session if needed.
+    * Only the router-provided sessionId is selected for display.
    */
   async loadSessions(): Promise<void> {
     //Get service reference
@@ -458,43 +458,12 @@ private backButtonSub: any; // hardware back handler
       }
       this.sessions = sessions || [];
 
-      //Determine the last creation or current session id using the different service/API,
-      //to also remain compatible with different implementations.
-      let lastSessionId: string | null = null;
-      try {
-        if (typeof svc.getLastCreatedSession === 'function') {
-          const v = await svc.getLastCreatedSession();
-          if (v && typeof v === 'object') lastSessionId = v.id || null;
-          else if (typeof v === 'string') lastSessionId = v;
-        }
-        if (!lastSessionId && typeof svc.getCurrentSessionId === 'function') {
-          const v2 = await svc.getCurrentSessionId();
-          if (v2 && typeof v2 === 'object') lastSessionId = v2.id || null;
-          else if (typeof v2 === 'string') lastSessionId = v2;
-        }
-        // fallbacks to common public properties
-        if (!lastSessionId && (svc.lastCreatedSessionId || svc.selectedSessionId)) {
-          lastSessionId = svc.lastCreatedSessionId || svc.selectedSessionId || null;
-        }
-      } catch (err) {
-        console.warn('[FeedbackPage] loadSessions: error while checking last/current session', err);
-      }
-
-      //Use lastSessionId if found
-      if (lastSessionId) {
-        this.selectedSessionId = lastSessionId;
-      }
-
-      // If the router passed a session id explicitly, prefer that when present within loaded sessions 
-      // from home page, camera page or upload page navigation to access specific session directly.
+      // If the router passed a session id explicitly, use only that session.
       if (this.routeSessionId) {
         const found = this.sessions.find(s => s.id === this.routeSessionId);
-        if (found) this.selectedSessionId = this.routeSessionId;
-      }
-
-      // If there's still no selected session, pick the first available one
-      if (!this.selectedSessionId && this.sessions.length > 0) {
-        this.selectedSessionId = this.sessions[0].id;
+        this.selectedSessionId = found ? this.routeSessionId : null;
+      } else {
+        this.selectedSessionId = null;
       }
     } catch (err) {
       console.warn('[FeedbackPage] loadSessions: unable to read sessions from service', err);
@@ -505,7 +474,7 @@ private backButtonSub: any; // hardware back handler
 
   /** Build this.imagePaths from the currently-selected session */
   /**
-   * Build imagePaths array for the active session (or all images if none).
+    * Build imagePaths array for the active session only.
    * Converts storage entries to DisplayImage for UI.
    */
   async refreshDisplayedImages(): Promise<void> {
@@ -515,13 +484,8 @@ private backButtonSub: any; // hardware back handler
     const svc: any = this.imageStorageService as any;
     this.imagePaths = [];
     try {
-
-      //No session selected â€” load all images fallback
+      // No route-passed session selected, so do not load unrelated images.
       if (!this.selectedSessionId) {
-        // fallback: load all images if no session selected
-        const allImgs: any[] = (typeof svc.getAllImages === 'function') ? svc.getAllImages() : (typeof svc.getAll === 'function' ? Object.values(await svc.getAll()) : []);
-        this.imagePaths = (allImgs || []).map((img: any) => this.buildDisplayImage(img));
-        await this.hydrateSessionImagesFromS3();
         return;
       }
       

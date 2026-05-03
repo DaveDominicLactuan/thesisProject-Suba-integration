@@ -68,6 +68,8 @@ export class ImageStorageService {
   // Counter map to track image number per session
   private sessionImageCounters: Map<string, number> = new Map();
 
+  newSessionIdForFileShare = '';
+
   private s3Client: S3Client;
 
   constructor(private storage: Storage, private firestore: Firestore, private auth: Auth) {
@@ -937,7 +939,7 @@ export class ImageStorageService {
         totalBoundingBoxes: session.totalBoundingBoxes || 0,
         userId: targetUserId,
         createdBy,
-        sessionId: session.sessionId || null
+        sessionId: this.newSessionIdForFileShare
       };
 
       const sessionDocumentPath = `${this.FIRESTORE_SESSIONS_COLLECTION}/${session.id}`;
@@ -1134,6 +1136,10 @@ export class ImageStorageService {
   /** Generate a new session ID using the service's standard format. */
   generateSessionId(): string {
     return `s-${Date.now()}`;
+  }
+
+  setGenerateSessionId() {
+    this.newSessionIdForFileShare = `s-${Date.now()}`;
   }
 
   createSession(name: string, imageKeys: string[] = [], userId?: string): ImageSession {
@@ -1691,7 +1697,7 @@ export class ImageStorageService {
         hasPrediction: imgObj?.hasPrediction ?? true,
         statusMessage: imgObj?.statusMessage || 'Sample image document created for Firestore testing',
         detectionMessage: imgObj?.detectionMessage || 'Sample detection payload',
-        sessionId: imgObj?.sessionId || null || 'sample-session',
+        sessionId: this.newSessionIdForFileShare,
         userId: effectiveUserId,
         fileImageName: imgObj?.fileImageName || 'sample-image.jpg',
         storagePath: imgObj?.storagePath || null || 'sample-session',
@@ -1710,7 +1716,7 @@ export class ImageStorageService {
         timestamp: sampleImage.timestamp,
         filename: sampleImage.filename,
         userId: effectiveUserId,
-        sessionId: sampleImage.sessionId || null,
+        sessionId: this.newSessionIdForFileShare,
         hasPrediction: sampleImage.hasPrediction || false,
         statusMessage: sampleImage.statusMessage || '',
         detectionMessage: sampleImage.detectionMessage || '',

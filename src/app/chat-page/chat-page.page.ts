@@ -1496,6 +1496,8 @@ export class ChatPagePage implements OnInit, OnDestroy {
         console.group('[ChatPage.confirmAttachmentShareCopy] Session image objects fetched from S3 and stored');
         console.log('storedCount:', copiedSessionImageObjectsWithFetchedS3.length);
         console.log('copiedSessionImageObjectsWithFetchedS3:', copiedSessionImageObjectsWithFetchedS3);
+        
+        this.imageStorage.setGenerateSessionId();
 
         for (let i = 0; i < this.sessionImageObjectCounter; i++) {
 
