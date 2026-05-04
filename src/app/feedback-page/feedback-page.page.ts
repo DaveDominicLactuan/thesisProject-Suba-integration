@@ -1566,6 +1566,7 @@ addEntry() {
                     if (originalS3Result) {
                       imgEntry.storagePath = originalS3Result.s3Key;
                       imgEntry.storageUrl = originalS3Result.url;
+                      imgEntry.original = originalS3Result.s3Key;
                       console.log(`âœ… Original image ${imgIndex + 1} uploaded to S3 with key:`, originalS3Result?.s3Key);
                     }
                   } catch (error) {
@@ -1583,6 +1584,7 @@ addEntry() {
                     if (withBoxesS3Result) {
                       imgEntry.withBoxesStoragePath = withBoxesS3Result.s3Key;
                       imgEntry.withBoxesStorageUrl = withBoxesS3Result.url;
+                      imgEntry.withBoxes = withBoxesS3Result.s3Key;
                       console.log(`âœ… WithBoxes image ${imgIndex + 1} uploaded to S3 with key:`, withBoxesS3Result?.s3Key);
                     }
                   } catch (error) {

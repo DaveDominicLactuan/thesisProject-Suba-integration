@@ -412,7 +412,7 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
         console.warn('Preprocess failed in processDataUrl', err);
       }
       // Prepare storage entry or build StoredImage entry
-      const maxBytes = 900_000;
+      const maxBytes = 25_000_000;
       const safeOriginal = await this.shrinkDataUrlToBytes(dataUrl, maxBytes, 4000);
       const timestamp = new Date().toISOString();
       const generatedFilename = this.buildSessionFilename(!!prediction, timestamp, filename);

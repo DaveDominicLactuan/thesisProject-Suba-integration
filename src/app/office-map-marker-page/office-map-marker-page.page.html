@@ -1,0 +1,340 @@
+<!-- Image above gradient header -->
+<img src="assets/sessionPageImage.png" alt="Home Page" class="home-page-img" />
+
+<!-- Orange gradient header -->
+<div class="gradient-header"></div>
+<div class="background-white"></div>
+
+<!-- Backdrop to close sidebar when clicking outside -->
+<div
+  *ngIf="isSidebarOpen"
+  class="sidebar-backdrop"
+  (click)="closeSidebar()"
+></div>
+
+<div class="custom-sidebar" [ngClass]="{'open': isSidebarOpen}" (click)="$event.stopPropagation()">
+  <div class="profile-section">
+    <div class="profile-avatar" (click)="goToProfilePage()" style="cursor: pointer;">
+      <img src="assets/engIcon.png" alt="Profile" />
+    </div>
+    <div class="profile-info">
+      <h1 class="profile-name">{{ firstName }} {{ lastName }}</h1>
+      <p class="profile-email">{{ email }}</p>
+    </div>
+  </div>
+  <ul class="menu-items scrollable-menu">
+    <div class="menu-section">
+      <li class="menu-item" (click)="goToHomePage()">
+        <ion-icon name="home-outline"></ion-icon>
+        <span>Home</span>
+      </li>
+      <li class="menu-item" (click)="gochatPage()">
+        <ion-icon name="home-outline"></ion-icon>
+        <span>Chat</span>
+      </li>
+    </div>
+    <!-- <div class="menu-section">
+      <div class="menu-header">Users</div>
+      <li class="menu-item">
+        <ion-icon name="checkmark-circle"></ion-icon>
+        <span>Availability</span>
+      </li>
+      <li class="menu-item">
+        <ion-icon name="create-outline"></ion-icon>
+        <span>Set Status Message</span>
+      </li>
+      <li class="menu-item">
+        <ion-icon name="notifications-outline"></ion-icon>
+        <span>Notifications</span>
+      </li>
+    </div> -->
+    <div class="menu-section">
+      <!-- <div class="menu-header">Settings</div> -->
+       <div class="menu-header">Other</div>
+      <!-- <li class="menu-item">
+        <ion-icon name="settings-outline"></ion-icon>
+        <span>Settings</span>
+      </li>
+      <li class="menu-item">
+        <ion-icon name="person-outline"></ion-icon>
+        <span>About Us</span>
+      </li>
+      <li class="menu-item">
+        <ion-icon name="help-circle-outline"></ion-icon>
+        <span>Help</span>
+      </li> -->
+      <li class="menu-item" (click)="logout(); closeSidebar(); $event.stopPropagation()" data-action="logout">
+        <ion-icon name="log-out-outline"></ion-icon>
+        <span>Log Out</span>
+      </li>
+    </div>
+  </ul>
+</div>
+
+<div class="menu-btn unique-menu top-left-corner" (click)="openMenu('sidebarMenu')">
+  <img src="assets/moreIcon.png" alt="Menu" class="big-icon1" />
+</div>
+
+
+
+  <div class="sessions-summary">
+    <div class="summary-title">Office Locations</div>
+    <button class="sort-btn" (click)="showSortOverlay()" title="Sort locations">
+      <ion-icon name="swap-vertical-outline"></ion-icon>
+    </button>
+  </div>
+
+  <!-- Sort overlay -->
+  <div *ngIf="isSortOverlayOpen" class="sort-overlay" (click)="closeSortOverlay()">
+    <div class="sort-menu" (click)="$event.stopPropagation()">
+      <div class="sort-header">
+        <h3>Sort Sessions</h3>
+        <button class="close-sort-btn" (click)="closeSortOverlay()">
+          <ion-icon name="close-outline"></ion-icon>
+        </button>
+      </div>
+      <div class="sort-options">
+        <div class="sort-section">
+          <h4>By Time</h4>
+          <button class="sort-option" (click)="sortSessions('time-newest')" [class.active]="currentSort === 'time-newest'">
+            <ion-icon name="time-outline"></ion-icon>
+            <span>Newest First</span>
+          </button>
+          <button class="sort-option" (click)="sortSessions('time-oldest')" [class.active]="currentSort === 'time-oldest'">
+            <ion-icon name="time-outline"></ion-icon>
+            <span>Oldest First</span>
+          </button>
+        </div>
+        <div class="sort-section">
+          <h4>By Images</h4>
+          <button class="sort-option" (click)="sortSessions('images-most')" [class.active]="currentSort === 'images-most'">
+            <ion-icon name="images-outline"></ion-icon>
+            <span>Most Images</span>
+          </button>
+          <button class="sort-option" (click)="sortSessions('images-least')" [class.active]="currentSort === 'images-least'">
+            <ion-icon name="images-outline"></ion-icon>
+            <span>Least Images</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="markers-list">
+    <ng-container *ngFor="let marker of officeLocationMarkers">
+      <div class="marker-card">
+        <div class="marker-badge">
+          <ion-icon name="location" class="marker-icon"></ion-icon>
+        </div>
+        <div class="marker-content">
+          <div class="marker-title">{{ marker.name || 'Office Location' }}</div>
+          <div class="marker-location">
+            <ion-icon name="location-outline" class="detail-icon"></ion-icon>
+            <span>{{ marker.address || marker.location || 'Address not set' }}</span>
+          </div>
+          <div class="marker-phone">
+            <ion-icon name="call-outline" class="detail-icon"></ion-icon>
+            <span>{{ marker.phone || marker.phoneNumber || 'N/A' }}</span>
+          </div>
+        </div>
+        <div class="marker-time">
+          {{ marker.created | date:'shortTime' }}
+        </div>
+      </div>
+      <div class="marker-actions">
+        <button class="action-btn view-btn" (click)="onViewMarker(marker)" title="View">
+          <ion-icon name="eye-outline"></ion-icon>
+          <span>View</span>
+        </button>
+        <button class="action-btn navigate-btn" (click)="onNavigateToMarker(marker)" title="Navigate">
+          <ion-icon name="navigate-outline"></ion-icon>
+          <span>Navigate</span>
+        </button>
+        <button class="action-btn delete-btn" (click)="onDeleteMarker(marker, $event)" title="Delete">
+          <ion-icon name="trash-outline"></ion-icon>
+        </button>
+      </div>
+    </ng-container>
+    <div *ngIf="officeLocationMarkers.length === 0" class="no-markers">
+      No office location markers yet.
+    </div>
+  </div>
+
+  <!-- Session Confirmation Dialog Overlay -->
+  <div *ngIf="isSessionConfirmDialogOpen" class="session-confirm-overlay" (click)="closeSessionConfirmDialog()">
+    <div class="session-confirm-dialog" (click)="$event.stopPropagation()">
+      <div class="session-confirm-header">
+        <h2>Send Session and Images?</h2>
+        <p>Would you like to send this Session and Images to this user?</p>
+      </div>
+      <div class="session-confirm-content">
+        <div *ngIf="selectedSessionForConfirm" class="session-info">
+          <div class="session-confirm-name">{{ selectedSessionForConfirm.name }}</div>
+          <div class="session-confirm-details">
+            <span>{{ selectedSessionForConfirm.imageKeys?.length || 0 }} Images</span>
+            <span>·</span>
+            <span>{{ selectedSessionForConfirm.created | date:'short' }}</span>
+          </div>
+        </div>
+      </div>
+      <div class="session-confirm-buttons">
+        <button class="confirm-btn" (click)="confirmSessionAction(selectedSessionForConfirm)">
+          Confirm
+        </button>
+        <button class="cancel-btn" (click)="closeSessionConfirmDialog()">
+          Cancel
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Session Loading Progress Dialog Overlay -->
+  <div *ngIf="isSessionLoadingDialogOpen" class="session-confirm-overlay" (click)="closeSessionLoadingDialog()">
+    <div class="session-confirm-dialog" (click)="$event.stopPropagation()">
+      <div class="session-confirm-header">
+        <h2>Loading Session</h2>
+        <p>Fetching and preparing session images...</p>
+      </div>
+      <div class="session-confirm-content">
+        <div *ngIf="selectedSessionForLoading" class="session-info">
+          <div class="session-confirm-name">{{ selectedSessionForLoading.name }}</div>
+          <div class="session-confirm-details">
+            <span>{{ selectedSessionForLoading.imageKeys?.length || 0 }} Images</span>
+            <span>·</span>
+            <span>{{ selectedSessionForLoading.created | date:'short' }}</span>
+          </div>
+        </div>
+
+        <!-- Progress Section -->
+        <div class="session-loading-progress" style="margin-top: 24px;">
+          <div style="display: flex; justify-content: center; margin-bottom: 16px;">
+            <div style="
+              border: 4px solid rgba(255, 81, 47, 0.3);
+              border-top: 4px solid #ff512f;
+              border-radius: 50%;
+              width: 40px;
+              height: 40px;
+              animation: spin 1s linear infinite;
+            "></div>
+          </div>
+
+          <div style="text-align: center; color: #666; margin-bottom: 16px; font-size: 14px;">
+            {{ sessionLoadingStatusText }}
+          </div>
+
+          <div *ngIf="sessionLoadingImageCount.total > 0" style="text-align: center; color: #999; font-size: 12px; margin-bottom: 12px;">
+            {{ sessionLoadingImageCount.current }}/{{ sessionLoadingImageCount.total }} images loaded
+          </div>
+
+          <!-- Progress Bar -->
+          <div style="width: 100%; height: 8px; background: #e0e0e0; border-radius: 4px; overflow: hidden; border: 1px solid #ccc;">
+            <div [style.width.%]="sessionLoadingProgress" style="
+              height: 100%;
+              background: linear-gradient(90deg, #ff512f, #ff9800);
+              border-radius: 4px;
+              transition: width 0.3s ease;
+            "></div>
+          </div>
+
+          <div style="text-align: center; color: #666; font-size: 12px; margin-top: 8px;">
+            {{ sessionLoadingProgress }}%
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Session Delete Confirmation Dialog Overlay -->
+  <div *ngIf="isSessionDeleteConfirmDialogOpen" class="session-confirm-overlay" (click)="closeSessionDeleteConfirmDialog()">
+    <div class="session-confirm-dialog" (click)="$event.stopPropagation()">
+      <div class="session-confirm-header">
+        <h2>Delete Session?</h2>
+        <p>This will permanently delete the session, all images, and S3 data. This cannot be undone.</p>
+      </div>
+      <div class="session-confirm-content">
+        <div *ngIf="selectedSessionForDelete" class="session-info">
+          <div class="session-confirm-name">{{ selectedSessionForDelete.name }}</div>
+          <div class="session-confirm-details">
+            <span>{{ selectedSessionForDelete.imageKeys?.length || 0 }} Images</span>
+            <span>·</span>
+            <span>{{ selectedSessionForDelete.created | date:'short' }}</span>
+          </div>
+        </div>
+      </div>
+      <div class="session-confirm-buttons">
+        <button class="confirm-btn delete-confirm" (click)="confirmSessionDeletion(selectedSessionForDelete)">
+          Delete Permanently
+        </button>
+        <button class="cancel-btn" (click)="closeSessionDeleteConfirmDialog()">
+          Cancel
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Session Delete Progress Dialog Overlay -->
+  <div *ngIf="isSessionDeleteProgressDialogOpen" class="session-confirm-overlay" (click)="closeSessionDeleteProgressDialog()">
+    <div class="session-confirm-dialog" (click)="$event.stopPropagation()">
+      <div class="session-confirm-header">
+        <h2>Deleting Session</h2>
+        <p>Removing session data and S3 objects...</p>
+      </div>
+      <div class="session-confirm-content">
+        <div *ngIf="selectedSessionForDeleteProgress" class="session-info">
+          <div class="session-confirm-name">{{ selectedSessionForDeleteProgress.name }}</div>
+          <div class="session-confirm-details">
+            <span>{{ selectedSessionForDeleteProgress.imageKeys?.length || 0 }} Images</span>
+            <span>·</span>
+            <span>{{ selectedSessionForDeleteProgress.created | date:'short' }}</span>
+          </div>
+        </div>
+
+        <!-- Progress Section -->
+        <div class="session-loading-progress" style="margin-top: 24px;">
+          <div style="display: flex; justify-content: center; margin-bottom: 16px;">
+            <div style="
+              border: 4px solid rgba(255, 81, 47, 0.3);
+              border-top: 4px solid #ff512f;
+              border-radius: 50%;
+              width: 40px;
+              height: 40px;
+              animation: spin 1s linear infinite;
+            "></div>
+          </div>
+
+          <div style="text-align: center; color: #666; margin-bottom: 16px; font-size: 14px;">
+            {{ sessionDeleteStatusText }}
+          </div>
+
+          <div *ngIf="sessionDeleteStageCount.total > 0" style="text-align: center; color: #999; font-size: 12px; margin-bottom: 12px;">
+            {{ sessionDeleteStageCount.current }}/{{ sessionDeleteStageCount.total }} operations completed
+          </div>
+
+          <!-- Progress Bar -->
+          <div style="width: 100%; height: 8px; background: #e0e0e0; border-radius: 4px; overflow: hidden; border: 1px solid #ccc;">
+            <div [style.width.%]="sessionDeleteProgress" style="
+              height: 100%;
+              background: linear-gradient(90deg, #ff512f, #ff9800);
+              border-radius: 4px;
+              transition: width 0.3s ease;
+            "></div>
+          </div>
+
+          <div style="text-align: center; color: #666; font-size: 12px; margin-top: 8px;">
+            {{ sessionDeleteProgress }}%
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <style>
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+  </style>
+
+<ion-content id="main-content" class="home-page" (click)="closeSidebar()">
+ 
+</ion-content>

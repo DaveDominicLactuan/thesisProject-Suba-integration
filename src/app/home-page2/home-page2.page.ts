@@ -1039,6 +1039,15 @@ private persistUserProfileToStorage(): void {
     console.log('chat page (location)');
   }
 
+   /** Navigate to chat page and open the 'location' tab. */
+  goMarkerPage() {
+    this.removeBackButtonHandler();
+    this.router.navigate(['/office-map-marker-page']);
+    console.log('chat page (location)');
+  }
+
+
+
   /** Navigate to profile page. */
   goToProfilePage() {
     this.router.navigate(['/profile-page']);

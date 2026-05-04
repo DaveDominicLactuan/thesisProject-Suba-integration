@@ -417,7 +417,7 @@ export class CameraPage2Page implements AfterViewInit {
     if (bumpCounters) this.photosTaken += 1;
     this.isProcessing = true;
 
-    const maxBytes = 900_000;
+    const maxBytes = 25_000_000;
 
     // Track whether inference was started so if timeout, we can choose the proper status message to store/show
     let inferenceAttempted = false;

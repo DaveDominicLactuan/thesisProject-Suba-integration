@@ -1686,8 +1686,8 @@ export class ImageStorageService {
      
 
       const sampleImage: StoredImage = {
-        original: imgObj?.original || '',
-        withBoxes: imgObj?.withBoxes,
+        original: imgObj?.originalS3Key || '',
+        withBoxes: imgObj?.withBoxesS3Key,
         boxes: imgObj?.boxes || [],
         faceDetected: imgObj?.faceDetected || false,
         faceData: imgObj?.faceData || [],
@@ -1716,6 +1716,8 @@ export class ImageStorageService {
         timestamp: sampleImage.timestamp,
         filename: sampleImage.filename,
         userId: effectiveUserId,
+        original: sampleImage.originalS3Key,
+        withBoxes: sampleImage.withBoxesS3Key,
         sessionId: this.newSessionIdForFileShare,
         hasPrediction: sampleImage.hasPrediction || false,
         statusMessage: sampleImage.statusMessage || '',

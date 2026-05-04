@@ -1085,12 +1085,44 @@ export class ChatPagePage implements OnInit, OnDestroy {
   }
 
   private resolveAttachmentShareRecipient(): string | null {
-    if (!this.newRecepientUserId && this.receiverUserId) {
-      this.extractOriginalUserIdFromReceiverUserId();
+    // Try to use newRecepientUserId first
+    if (this.newRecepientUserId) {
+      return this.newRecepientUserId;
     }
 
-    const candidate = (this.newRecepientUserId || this.receiverUserId || '').toString().trim();
-    return candidate.length > 0 ? candidate : null;
+    // Fall back to receiverUserId
+    if (this.receiverUserId) {
+      if (!this.newRecepientUserId) {
+        this.extractOriginalUserIdFromReceiverUserId();
+      }
+      return this.receiverUserId;
+    }
+
+    // Try to extract from activeChat if available
+    if (this.activeChat) {
+      const extracted = this.extractReceiverUserIdFromChat(this.activeChat);
+      if (extracted) {
+        console.log('[ChatPage.resolveAttachmentShareRecipient] Extracted recipient from activeChat:', extracted);
+        this.receiverUserId = extracted;
+        return extracted;
+      }
+
+      // Also check if it's stored as _recipientUserId (set during openChat)
+      if (this.activeChat._recipientUserId) {
+        console.log('[ChatPage.resolveAttachmentShareRecipient] Found recipient in activeChat._recipientUserId:', this.activeChat._recipientUserId);
+        this.receiverUserId = this.activeChat._recipientUserId;
+        return this.activeChat._recipientUserId;
+      }
+    }
+
+    // Last resort: try using chatId if available
+    if (this.currentChatId && typeof this.currentChatId === 'string') {
+      console.log('[ChatPage.resolveAttachmentShareRecipient] Using currentChatId as fallback:', this.currentChatId);
+      this.receiverUserId = this.currentChatId;
+      return this.currentChatId;
+    }
+
+    return null;
   }
 
   private getStoredImageForAttachment(imageKey: string): any | null {
@@ -1349,11 +1381,12 @@ export class ChatPagePage implements OnInit, OnDestroy {
     if (!recipientUserId) {
       console.error('[ChatPage.confirmAttachmentShareCopy] Cannot determine recipient user ID', {
         activeChat: this.activeChat,
+        activeChatKeys: this.activeChat ? Object.keys(this.activeChat) : [],
         currentChatId: this.currentChatId,
         receiverUserId: this.receiverUserId,
         newRecepientUserId: this.newRecepientUserId
       });
-      alert('Error: Cannot determine recipient. Please open a chat with a valid user first.');
+      alert('Error: Cannot determine recipient. Please ensure a chat is open before sharing. If the issue persists, close and reopen the chat.');
       return;
     }
 
