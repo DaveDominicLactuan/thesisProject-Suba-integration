@@ -2914,11 +2914,7 @@ export class ChatPagePage implements OnInit, OnDestroy {
 
   // Test markers (similar to goalTasks) for placing sample markers on the Leaflet map
   testMarkers: Array<{ id: number; name: string; latitude: number; longitude: number }> = [
-    { id: 1, name: 'Test Marker A', latitude: 10.324849, longitude: 123.849164 },
-    { id: 2, name: 'Test Marker B', latitude: 10.326000, longitude: 123.850000 },
-    { id: 3, name: 'Test Marker C', latitude: 10.323500, longitude: 123.847500 },
-    { id: 4, name: 'Test Marker D', latitude: 10.327200, longitude: 123.848900 },
-    { id: 5, name: 'Test Marker E', latitude: 10.317700, longitude: 123.903700 }
+    
   ];
 
   // Ensure the stories property is declared and initialized

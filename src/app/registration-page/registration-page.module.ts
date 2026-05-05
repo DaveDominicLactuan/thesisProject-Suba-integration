@@ -8,15 +8,16 @@ import { RegistrationPagePageRoutingModule } from './registration-page-routing.m
 
 import { RegistrationPagePage } from './registration-page.page';
 import { ReactiveFormsModule } from '@angular/forms';
-import { RegistrationLeafletMapComponent } from './registration-leaflet-map/registration-leaflet-map.component';
+import { RegistrationLeafletMapModule } from './registration-leaflet-map/registration-leaflet-map.module';
 
 @NgModule({
   imports: [
     CommonModule,
     FormsModule,
     IonicModule, ReactiveFormsModule,
-    RegistrationPagePageRoutingModule
+    RegistrationPagePageRoutingModule,
+    RegistrationLeafletMapModule
   ],
-  declarations: [RegistrationPagePage, RegistrationLeafletMapComponent]
+  declarations: [RegistrationPagePage]
 })
 export class RegistrationPagePageModule {}

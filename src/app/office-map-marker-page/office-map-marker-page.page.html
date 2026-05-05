@@ -79,9 +79,94 @@
 
   <div class="sessions-summary">
     <div class="summary-title">Office Locations</div>
-    <button class="sort-btn" (click)="showSortOverlay()" title="Sort locations">
-      <ion-icon name="swap-vertical-outline"></ion-icon>
-    </button>
+    <div class="summary-actions">
+      <button class="create-marker-btn" (click)="openMarkerCreationDialog()" title="Create new marker">
+        <ion-icon name="add-outline"></ion-icon>
+        <span>Add Location</span>
+      </button>
+      <button class="sort-btn" (click)="showSortOverlay()" title="Sort locations">
+        <ion-icon name="swap-vertical-outline"></ion-icon>
+      </button>
+    </div>
+  </div>
+
+  <!-- Marker Creation Dialog Overlay -->
+  <div *ngIf="isMarkerCreationDialogOpen" class="marker-creation-overlay" (click)="closeMarkerCreationDialog()">
+    <div class="marker-creation-dialog" (click)="$event.stopPropagation()">
+      <div class="marker-creation-header">
+        <h2>Create New Marker</h2>
+        <button class="close-btn" (click)="closeMarkerCreationDialog()">
+          <ion-icon name="close-outline"></ion-icon>
+        </button>
+      </div>
+
+      <div class="marker-creation-content">
+        <!-- Account Details Section -->
+        <div class="form-section">
+          <div class="section-header">
+            <ion-icon name="business-outline" class="section-icon"></ion-icon>
+            <span>Account Details</span>
+          </div>
+          <div class="form-group">
+            <label>Marker Name</label>
+            <input type="text" placeholder="Enter marker name" [(ngModel)]="markerFormData.name" class="form-input" />
+          </div>
+        </div>
+
+        <!-- Personal Information Section -->
+        <div class="form-section">
+          <div class="section-header">
+            <ion-icon name="person-outline" class="section-icon"></ion-icon>
+            <span>Personal Information</span>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Available Time</label>
+              <input type="time" [(ngModel)]="markerFormData.availableTime" class="form-input" />
+            </div>
+            <div class="form-group">
+              <label>Unavailable Time</label>
+              <input type="time" [(ngModel)]="markerFormData.unavailableTime" class="form-input" />
+            </div>
+          </div>
+          <div class="form-group">
+            <label>Contact Info</label>
+            <input type="tel" placeholder="Enter contact number" [(ngModel)]="markerFormData.contactInfo" class="form-input" />
+          </div>
+        </div>
+
+        <!-- Location Section -->
+        <div class="form-section">
+          <div class="section-header">
+            <ion-icon name="location-outline" class="section-icon"></ion-icon>
+            <span>Location</span>
+          </div>
+          <div class="location-note">
+            Use the below map to set the location for the marker
+          </div>
+          <div class="map-placeholder">
+            <app-registration-leaflet-map
+              [selectedLocation]="markerFormData.location"
+              (locationSelected)="onOfficeLocationSelected($event)"
+            ></app-registration-leaflet-map>
+          </div>
+          <div class="form-group">
+            <label>Address</label>
+            <input type="text" placeholder="Enter address" [(ngModel)]="markerFormData.address" class="form-input" />
+          </div>
+        </div>
+      </div>
+
+      <div class="marker-creation-footer">
+        <button class="cancel-btn" (click)="closeMarkerCreationDialog()">
+          <span>Cancel</span>
+        </button>
+        <button class="submit-btn" (click)="confirmAddOffice($event)">
+          <ion-icon name="checkmark-outline"></ion-icon>
+          <span>Create Marker</span>
+        </button>
+      </div>
+    </div>
   </div>
 
   <!-- Sort overlay -->

@@ -61,6 +61,17 @@ export class OfficeMapMarkerPagePage implements OnInit, OnDestroy {
   private sessionIdTrackingKey = 'sessionIdTracking';
   private sessionIdListKey = 'storedSessionIds';
 
+  // --- Marker Creation Dialog State ---
+  isMarkerCreationDialogOpen: boolean = false;
+  markerFormData = {
+    name: '',
+    availableTime: '',
+    unavailableTime: '',
+    contactInfo: '',
+    location: { latitude: 0, longitude: 0 },
+    address: ''
+  };
+
   /** Inject auth, router, and image storage services for navigation and data. */
   constructor(private formBuilder: FormBuilder, private router: Router, private authService: AuthService, private navCtrl: NavController, private auth3: Auth3Service, private imageStorage: ImageStorageService, private platform: Platform) {
 
@@ -1679,6 +1690,111 @@ private startUserSyncInBackground(userId: string): void {
     this.removeBackButtonHandler();
     this.router.navigate(['/chat-page']);
     console.log('chat page');
+  }
+
+  /**
+   * Open the marker creation dialog overlay
+   */
+  openMarkerCreationDialog(): void {
+    console.log('[OfficeMapMarkerPage.openMarkerCreationDialog] Opening marker creation dialog');
+    this.resetMarkerForm();
+    this.isMarkerCreationDialogOpen = true;
+  }
+
+  onOfficeLocationSelected(location: { latitude: number; longitude: number }): void {
+    this.markerFormData.location = {
+      latitude: location.latitude,
+      longitude: location.longitude
+    };
+
+    console.log('[OfficeMapMarkerPage.onOfficeLocationSelected] Location selected:', {
+      latitude: location.latitude,
+      longitude: location.longitude
+    });
+  }
+
+  /**
+   * Close the marker creation dialog overlay
+   */
+  closeMarkerCreationDialog(): void {
+    console.log('[OfficeMapMarkerPage.closeMarkerCreationDialog] Closing marker creation dialog');
+    this.isMarkerCreationDialogOpen = false;
+    this.resetMarkerForm();
+  }
+
+  /**
+   * Reset the marker form to empty state
+   */
+  private resetMarkerForm(): void {
+    this.markerFormData = {
+      name: '',
+      availableTime: '',
+      unavailableTime: '',
+      contactInfo: '',
+      location: { latitude: 0, longitude: 0 },
+      address: ''
+    };
+  }
+
+  /**
+   * Persist a new office marker to Firestore.
+   */
+  async confirmAddOffice(event?: Event): Promise<void> {
+    event?.preventDefault();
+
+    const name = this.markerFormData.name.trim();
+    const address = this.markerFormData.address.trim();
+    const contactInfo = this.markerFormData.contactInfo.trim();
+    const availableTime = this.markerFormData.availableTime.trim();
+    const unavailableTime = this.markerFormData.unavailableTime.trim();
+
+    if (!name || !address || !contactInfo || !availableTime || !unavailableTime) {
+      console.warn('[OfficeMapMarkerPage.confirmAddOffice] Marker creation blocked: required fields are missing.');
+      return;
+    }
+
+    const userId = this.userID || this.auth3.getCurrentUser()?.uid || null;
+    if (!userId) {
+      console.warn('[OfficeMapMarkerPage.confirmAddOffice] Marker creation blocked: no user ID available.');
+      return;
+    }
+
+    const payload = {
+      userID: userId,
+      name,
+      address,
+      contactInfo,
+      availableTime,
+      unavailableTime,
+      location: {
+        latitude: this.markerFormData.location.latitude,
+        longitude: this.markerFormData.location.longitude,
+      },
+      created: new Date().toISOString(),
+      createdAt: new Date().toISOString(),
+    };
+
+    try {
+      const { collection, doc, getFirestore, setDoc } = await import('firebase/firestore');
+      const firestore = getFirestore();
+      const markerCollectionRef = collection(firestore, 'userOfficeLocationMarker');
+      const markerDocRef = doc(markerCollectionRef);
+
+      await setDoc(markerDocRef, {
+        ...payload,
+        markerId: markerDocRef.id,
+      });
+
+      console.log('[OfficeMapMarkerPage.confirmAddOffice] Office location marker saved:', markerDocRef.id);
+      this.closeMarkerCreationDialog();
+      await this.loadOfficeLocationMarkers();
+    } catch (error) {
+      console.error('[OfficeMapMarkerPage.confirmAddOffice] Failed to save office location marker:', error);
+    }
+  }
+
+  submitMarkerForm(): void {
+    void this.confirmAddOffice();
   }
   
 }

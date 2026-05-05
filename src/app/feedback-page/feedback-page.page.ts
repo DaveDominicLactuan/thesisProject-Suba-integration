@@ -22,6 +22,11 @@ interface DisplayImage {
   withBoxesStoragePath?: string;
   storageUrl?: string;
   withBoxesStorageUrl?: string;
+  // S3 key fields for mobile compatibility
+  originalS3Key?: string;
+  withBoxesS3Key?: string;
+  originalS3Url?: string;
+  withBoxesS3Url?: string;
 }
 
 @Component({
@@ -268,8 +273,9 @@ private backButtonSub: any; // hardware back handler
    */
   private async hydrateSessionImagesFromStoragePaths(): Promise<void> {
     const imagesToHydrate = (this.imagePaths || []).filter((img: DisplayImage) => {
-      const needsOriginal = !!img.storagePath && !img.original?.startsWith('data:');
-      const needsWithBoxes = !!img.withBoxesStoragePath && !img.withBoxes?.startsWith('data:');
+      // Check for storagePath OR S3 keys
+      const needsOriginal = (!!img.storagePath || !!img.originalS3Key) && !img.original?.startsWith('data:');
+      const needsWithBoxes = (!!img.withBoxesStoragePath || !!img.withBoxesS3Key) && !img.withBoxes?.startsWith('data:');
       return needsOriginal || needsWithBoxes;
     });
 
@@ -284,19 +290,39 @@ private backButtonSub: any; // hardware back handler
 
     for (const img of imagesToHydrate) {
       try {
-        if (img.storagePath && !img.original?.startsWith('data:')) {
-          console.log('[FeedbackPage] Hydrating original from storagePath:', img.storagePath);
-          const originalData = await this.imageStorageService.fetchS3ObjectAsDataUrl(img.storagePath);
-          if (originalData) {
-            img.original = originalData;
+        // Fetch original image - try storagePath first, then S3 key as fallback
+        if (!img.original?.startsWith('data:')) {
+          if (img.storagePath) {
+            console.log('[FeedbackPage] Hydrating original from storagePath:', img.storagePath);
+            const originalData = await this.imageStorageService.fetchS3ObjectAsDataUrl(img.storagePath);
+            if (originalData) {
+              img.original = originalData;
+            }
+          } else if (img.originalS3Key) {
+            // Fallback to S3 key if storagePath not available (mobile compatibility)
+            console.log('[FeedbackPage] Hydrating original from S3 key:', img.originalS3Key);
+            const originalData = await this.imageStorageService.fetchS3ObjectAsDataUrl(img.originalS3Key);
+            if (originalData) {
+              img.original = originalData;
+            }
           }
         }
 
-        if (img.withBoxesStoragePath && !img.withBoxes?.startsWith('data:')) {
-          console.log('[FeedbackPage] Hydrating withBoxes from withBoxesStoragePath:', img.withBoxesStoragePath);
-          const withBoxesData = await this.imageStorageService.fetchS3ObjectAsDataUrl(img.withBoxesStoragePath);
-          if (withBoxesData) {
-            img.withBoxes = withBoxesData;
+        // Fetch withBoxes image - try withBoxesStoragePath first, then S3 key as fallback
+        if (!img.withBoxes?.startsWith('data:')) {
+          if (img.withBoxesStoragePath) {
+            console.log('[FeedbackPage] Hydrating withBoxes from withBoxesStoragePath:', img.withBoxesStoragePath);
+            const withBoxesData = await this.imageStorageService.fetchS3ObjectAsDataUrl(img.withBoxesStoragePath);
+            if (withBoxesData) {
+              img.withBoxes = withBoxesData;
+            }
+          } else if (img.withBoxesS3Key) {
+            // Fallback to S3 key if withBoxesStoragePath not available (mobile compatibility)
+            console.log('[FeedbackPage] Hydrating withBoxes from S3 key:', img.withBoxesS3Key);
+            const withBoxesData = await this.imageStorageService.fetchS3ObjectAsDataUrl(img.withBoxesS3Key);
+            if (withBoxesData) {
+              img.withBoxes = withBoxesData;
+            }
           }
         }
       } catch (error) {
@@ -304,6 +330,8 @@ private backButtonSub: any; // hardware back handler
           filename: img.filename,
           storagePath: img.storagePath,
           withBoxesStoragePath: img.withBoxesStoragePath,
+          originalS3Key: img.originalS3Key,
+          withBoxesS3Key: img.withBoxesS3Key,
           error
         });
       }
@@ -529,7 +557,9 @@ private backButtonSub: any; // hardware back handler
       return;
     }
 
-    const imagesToHydrate = this.imagePaths.filter((img: DisplayImage) => img?.storagePath || img?.withBoxesStoragePath);
+    const imagesToHydrate = this.imagePaths.filter((img: DisplayImage) => 
+      img?.storagePath || img?.withBoxesStoragePath || img?.originalS3Key || img?.withBoxesS3Key
+    );
     if (imagesToHydrate.length === 0) {
       return;
     }
@@ -539,6 +569,7 @@ private backButtonSub: any; // hardware back handler
     for (const img of imagesToHydrate) {
       const imageName = img.filename || img.fileName || '(unnamed)';
 
+      // Fetch original image - try storagePath first, then S3 key as fallback
       if (img.storagePath) {
         console.log(`[FeedbackPage] storagePath for ${imageName}:`, img.storagePath);
         try {
@@ -549,8 +580,20 @@ private backButtonSub: any; // hardware back handler
         } catch (error) {
           console.warn(`[FeedbackPage] Failed to fetch original image for ${imageName}`, error);
         }
+      } else if (img.originalS3Key) {
+        // Fallback to S3 key if storagePath not available (mobile compatibility)
+        console.log(`[FeedbackPage] originalS3Key for ${imageName}:`, img.originalS3Key);
+        try {
+          const originalData = await svc.fetchS3ObjectAsDataUrl(img.originalS3Key);
+          if (originalData) {
+            img.original = originalData;
+          }
+        } catch (error) {
+          console.warn(`[FeedbackPage] Failed to fetch original image from S3 key for ${imageName}`, error);
+        }
       }
 
+      // Fetch withBoxes image - try withBoxesStoragePath first, then S3 key as fallback
       if (img.withBoxesStoragePath) {
         console.log(`[FeedbackPage] withBoxesStoragePath for ${imageName}:`, img.withBoxesStoragePath);
         try {
@@ -560,6 +603,17 @@ private backButtonSub: any; // hardware back handler
           }
         } catch (error) {
           console.warn(`[FeedbackPage] Failed to fetch withBoxes image for ${imageName}`, error);
+        }
+      } else if (img.withBoxesS3Key) {
+        // Fallback to S3 key if withBoxesStoragePath not available (mobile compatibility)
+        console.log(`[FeedbackPage] withBoxesS3Key for ${imageName}:`, img.withBoxesS3Key);
+        try {
+          const withBoxesData = await svc.fetchS3ObjectAsDataUrl(img.withBoxesS3Key);
+          if (withBoxesData) {
+            img.withBoxes = withBoxesData;
+          }
+        } catch (error) {
+          console.warn(`[FeedbackPage] Failed to fetch withBoxes image from S3 key for ${imageName}`, error);
         }
       }
 
@@ -593,7 +647,7 @@ private backButtonSub: any; // hardware back handler
       : (predShape || predSeverity) ? `${predShape}${predSeverity ? ' â€” ' + predSeverity : ''}` : '';
 
     //Build return object: choose withBoxes fallback, derive filename, 
-    // include normalized prediction/status
+    // include normalized prediction/status, and include S3 keys for mobile compatibility
       return {
       original: img.original,
       withBoxes: img.withBoxes ?? img.original,
@@ -601,6 +655,12 @@ private backButtonSub: any; // hardware back handler
       fileName: img.filename || '',
         storagePath: img.storagePath,
         withBoxesStoragePath: img.withBoxesStoragePath,
+        storageUrl: img.storageUrl,
+        withBoxesStorageUrl: img.withBoxesStorageUrl,
+        originalS3Key: img.originalS3Key,
+        withBoxesS3Key: img.withBoxesS3Key,
+        originalS3Url: img.originalS3Url,
+        withBoxesS3Url: img.withBoxesS3Url,
       detectionMessage,
       detectionResult,
       rawPrediction: prediction ? { type: predType, shape: predShape, severity: predSeverity } : undefined,
