@@ -22,47 +22,32 @@
   <ul class="menu-items scrollable-menu">
     <div class="menu-section">
       <li class="menu-item" (click)="goToHomePage()">
-        <ion-icon name="home-outline"></ion-icon>
+        <img src="assets/newHomeIcon.png" alt="Chat" class="menu-item-icon" />
         <span>Home</span>
       </li>
-      <li class="menu-item" (click)="gochatPage()">
-        <ion-icon name="home-outline"></ion-icon>
-        <span>Chat</span>
+      <li class="menu-item" (click)="gochatPagePeople()">
+        <img src="assets/ChatIconNew.png" alt="Chat" class="menu-item-icon" />
+        <span>Chat</span>      
+      </li>
+      <li class="menu-item" (click)="gochatPageLocation()">
+        <img src="assets/MapIcon.png" alt="Map" class="menu-item-icon" />
+        <span>Map</span>
+      </li>
+       <li class="menu-item" (click)="goMarkerPage()">
+        <img src="assets/bottomBarMarker.png" alt="Map" class="menu-item-icon" />
+        <span>Map</span>
       </li>
     </div>
-    <!-- <div class="menu-section">
-      <div class="menu-header">Users</div>
-      <li class="menu-item">
-        <ion-icon name="checkmark-circle"></ion-icon>
-        <span>Availability</span>
-      </li>
-      <li class="menu-item">
-        <ion-icon name="create-outline"></ion-icon>
-        <span>Set Status Message</span>
-      </li>
-      <li class="menu-item">
-        <ion-icon name="notifications-outline"></ion-icon>
-        <span>Notifications</span>
-      </li>
-    </div> -->
-    <div class="menu-section">
-      <!-- <div class="menu-header">Settings</div> -->
-      <div class="menu-header">Other</div>
-      <!-- <li class="menu-item">
-        <ion-icon name="settings-outline"></ion-icon>
-        <span>Settings</span>
-      </li>
-      <li class="menu-item">
-        <ion-icon name="person-outline"></ion-icon>
-        <span>About Us</span>
-      </li>
-      <li class="menu-item">
-        <ion-icon name="help-circle-outline"></ion-icon>
-        <span>Help</span>
-      </li> -->
+ 
+      <div class="menu-section">
+    
+    </div>
+     <div class="menu-section">
+        <div class="menu-header">Other</div>
+   
       <li class="menu-item" (click)="logout(); closeSidebar(); $event.stopPropagation()" data-action="logout">
-        <ion-icon name="log-out-outline"></ion-icon>
-        <span>Log Out</span>
+        <img src="assets/newLoginIcon.png" alt="Chat" class="menu-item-icon" />
+                <span>Log Out</span>
       </li>
     </div>
   </ul>

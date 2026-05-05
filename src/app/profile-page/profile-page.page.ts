@@ -1204,4 +1204,25 @@ private async initialize(): Promise<void> {
       alert('Failed to update profile. Please try again.');
     }
   }
+
+   /** Navigate to chat page and open the 'people' tab. */
+  gochatPagePeople() {
+    this.removeBackButtonHandler();
+    this.router.navigate(['/chat-page'], { state: { activeTab: 'people' } });
+    console.log('chat page (people)');
+  }
+
+  /** Navigate to chat page and open the 'location' tab. */
+  gochatPageLocation() {
+    this.removeBackButtonHandler();
+    this.router.navigate(['/chat-page'], { state: { activeTab: 'location' } });
+    console.log('chat page (location)');
+  }
+
+   /** Navigate to chat page and open the 'location' tab. */
+  goMarkerPage() {
+    this.removeBackButtonHandler();
+    this.router.navigate(['/office-map-marker-page']);
+    console.log('chat page (location)');
+  }
 }

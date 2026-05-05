@@ -1046,6 +1046,13 @@ private persistUserProfileToStorage(): void {
     console.log('chat page (location)');
   }
 
+   /** Navigate to chat page and open the 'location' tab. */
+  goS3Page() {
+    this.removeBackButtonHandler();
+    this.router.navigate(['/s3-page']);
+    console.log('chat page (s3-page)');
+  }
+
 
 
   /** Navigate to profile page. */

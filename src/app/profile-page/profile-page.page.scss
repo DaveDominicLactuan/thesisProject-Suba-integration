@@ -2,6 +2,27 @@
   font-family: 'Segoe UI Variable Text Semibold', sans-serif;
 }
 
+.scrollable-menu {
+  max-height: 78vh;
+  overflow-y: auto;
+  padding-right: 4px;
+  scrollbar-width: thin;
+  scrollbar-color: #ffb347 #f0f0f0;
+}
+
+/* Custom scrollbar for webkit browsers */
+.scrollable-menu::-webkit-scrollbar {
+  width: 7px;
+}
+.scrollable-menu::-webkit-scrollbar-thumb {
+  background: #ffb347;
+  border-radius: 6px;
+}
+.scrollable-menu::-webkit-scrollbar-track {
+  background: #f0f0f0;
+  border-radius: 6px;
+}
+
 .home-page {
   /* Ensure white base on devices that default to dark backgrounds */
   --background: #ffffff !important;
@@ -968,6 +989,15 @@ ion-menu ion-item:hover {
   padding: 0;
   margin: 0;
 }
+
+.menu-item .menu-item-icon {
+  width: 22px;
+  height: 22px;
+  margin-right: 16px;
+  object-fit: contain;
+  flex-shrink: 0;
+}
+
 
 .menu-section {
   display: flex;

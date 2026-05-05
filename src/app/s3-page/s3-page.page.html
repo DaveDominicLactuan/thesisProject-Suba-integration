@@ -1,0 +1,103 @@
+<!-- Image above gradient header -->
+<img src="assets/sessionPageImage.png" alt="Home Page" class="home-page-img" />
+
+<!-- Orange gradient header -->
+<div class="gradient-header"></div>
+<div class="background-white"></div>
+
+<!-- Backdrop to close sidebar when clicking outside -->
+<div
+  *ngIf="isSidebarOpen"
+  class="sidebar-backdrop"
+  (click)="closeSidebar()"
+></div>
+
+<div class="custom-sidebar" [ngClass]="{'open': isSidebarOpen}" (click)="$event.stopPropagation()">
+  <div class="profile-section">
+    <div class="profile-avatar" (click)="goToProfilePage()" style="cursor: pointer;">
+      <img src="assets/engIcon.png" alt="Profile" />
+    </div>
+    <div class="profile-info">
+      <h1 class="profile-name">{{ firstName }} {{ lastName }}</h1>
+      <p class="profile-email">{{ email }}</p>
+    </div>
+  </div>
+  <ul class="menu-items scrollable-menu">
+    <div class="menu-section">
+      <li class="menu-item" (click)="goToHomePage()">
+        <img src="assets/newHomeIcon.png" alt="Chat" class="menu-item-icon" />
+        <span>Home</span>
+      </li>
+      <li class="menu-item" (click)="gochatPagePeople()">
+        <img src="assets/ChatIconNew.png" alt="Chat" class="menu-item-icon" />
+        <span>Chat</span>      
+      </li>
+      <li class="menu-item" (click)="gochatPageLocation()">
+        <img src="assets/MapIcon.png" alt="Map" class="menu-item-icon" />
+        <span>Map</span>
+      </li>
+       <li class="menu-item" (click)="goMarkerPage()">
+        <img src="assets/bottomBarMarker.png" alt="Map" class="menu-item-icon" />
+        <span>Map</span>
+      </li>
+    </div>
+ 
+      <div class="menu-section">
+    
+    </div>
+     <div class="menu-section">
+        <div class="menu-header">Other</div>
+   
+      <li class="menu-item" (click)="logout(); closeSidebar(); $event.stopPropagation()" data-action="logout">
+        <img src="assets/newLoginIcon.png" alt="Chat" class="menu-item-icon" />
+                <span>Log Out</span>
+      </li>
+    </div>
+   
+  </ul>
+</div>
+
+<div class="menu-btn unique-menu top-left-corner" (click)="openMenu('sidebarMenu')">
+  <img src="assets/moreIcon.png" alt="Menu" class="big-icon1" />
+</div>
+
+
+
+  <style>
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+  </style>
+
+<ion-content id="main-content" class="home-page" (click)="closeSidebar()">
+</ion-content>
+
+<!-- S3 Key Search UI and Modal -->
+<div class="s3-search-container">
+  <h2>S3 Image Lookup</h2>
+
+  <div class="search-row">
+    <input type="text" placeholder="Paste S3 Key here..." [(ngModel)]="searchKey" />
+    <button (click)="searchImage()" [disabled]="isSearching || !searchKey?.trim()">
+      {{ isSearching ? 'Searching...' : 'Fetch Image' }}
+    </button>
+  </div>
+</div>
+
+<!-- Modal backdrop for fetched image -->
+<div *ngIf="fetchedImageData" class="modal-backdrop" (click)="closeSearchModal()">
+  <div class="modal-content" (click)="$event.stopPropagation()">
+    <div class="modal-left">
+      <img [src]="fetchedImageData.url" alt="Searched Image" />
+    </div>
+    <div class="modal-right">
+      <button class="close-btn" (click)="closeSearchModal()">×</button>
+      <h3>Image Metadata</h3>
+      <div class="meta-row"><strong>File Key:</strong> <span>{{ fetchedImageData.details?.key }}</span></div>
+      <div class="meta-row"><strong>Type:</strong> <span>{{ fetchedImageData.details?.contentType || '—' }}</span></div>
+      <div class="meta-row"><strong>Size (bytes):</strong> <span>{{ fetchedImageData.details?.sizeBytes || '—' }}</span></div>
+      <div class="meta-row"><strong>Last Modified:</strong> <span>{{ fetchedImageData.details?.lastModified ? (fetchedImageData.details.lastModified | date:'medium') : '—' }}</span></div>
+    </div>
+  </div>
+</div>

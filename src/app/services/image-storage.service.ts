@@ -2199,5 +2199,115 @@ async verifyImageExists(key: string): Promise<void> {
   // getEntryForImage(imageKey: string): StoredImage | undefined {
   //   return this.selectImageByKey(imageKey);
   // }
+
+   /**
+   * Fetches metadata and a secure URL for a specific S3 Key
+   */
+  async fetchSpecificImage(key: string) {
+    try {
+      // 1. Get the Metadata (Size, Content Type, Dates)
+      const headCommand = new HeadObjectCommand({ Bucket: this.bucketName, Key: key });
+      const metadata = await this.s3Client.send(headCommand);
+
+      // 2. Get the Secure Display URL
+      const getCommand = new GetObjectCommand({ Bucket: this.bucketName, Key: key });
+      const url = await getSignedUrl(this.s3Client, getCommand, { expiresIn: 3600 });
+
+      // Print success to console as requested!
+      console.log(`✅ Success! Found image: ${key}`);
+
+      return {
+        url: url,
+        details: {
+          key: key,
+          contentType: metadata.ContentType,
+          sizeBytes: metadata.ContentLength,
+          lastModified: metadata.LastModified
+        }
+      };
+    } catch (error) {
+      console.error(`❌ Could not find image with key: ${key}`, error);
+      throw error;
+    }
+  }
+
+async checkIfFileExists(key: string): Promise<boolean> {
+  try {
+    const command = new HeadObjectCommand({
+      Bucket: 'my-angular-test-bucket-12345',
+      Key: key
+    });
+
+    console.log(`🌐 S3 Service: Checking existence of ${key}...`);
+    await this.s3Client.send(command);
+    return true; // File exists
+  } catch (error: any) {
+    // If S3 returns 404, it throws a 'NotFound' error
+    if (error.name === 'NotFound' || error.$metadata?.httpStatusCode === 404) {
+      return false;
+    }
+    // If it's a 403 or other error, rethrow it so app.ts can handle it
+    throw error;
+  }
+}
+
+// async getMetadata(key: string): Promise<any> {
+//   console.log(`🌐 S3 Service [START]: Fetching metadata for key: ${key}`);
+
+//   try {
+//     const command = new HeadObjectCommand({
+//       Bucket: 'my-angular-test-bucket-12345',
+//       Key: key
+//     });
+
+//     // Send the command to AWS
+//     const response = await this.s3Client.send(command);
+    
+//     console.log(`🌐 S3 Service [SUCCESS]: Metadata retrieved for ${key}`);
+    
+//     // This response contains: ContentType, ContentLength, LastModified, etc.
+//     return response;
+
+//   } catch (error: any) {
+//     console.error(`🌐 S3 Service [ERROR]: Could not get metadata for ${key}`, error);
+    
+//     // Propagate the error so the UI can catch it (e.g., for 404 or 403 errors)
+//     throw error;
+//   }
+// }
+
+async getMetadata(key: string): Promise<any> {
+  console.log(`🌐 Service [START]: Fetching metadata natively for key: ${key}`);
+
+  const bucketBaseUrl = 'https://my-angular-test-bucket-12345.s3.ap-southeast-2.amazonaws.com/';
+  // Use a cache-buster so the browser doesn't use the old failed CORS request
+  const url = `${bucketBaseUrl}${key}?t=${new Date().getTime()}`;
+
+  try {
+    // 1. Native Fetch instead of HeadObjectCommand
+    const response = await fetch(url, {
+      method: 'HEAD',
+      mode: 'cors'
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP Error: ${response.status} - ${response.statusText}`);
+    }
+
+    console.log(`🌐 Service [SUCCESS]: Native metadata retrieved for ${key}`);
+
+    // 2. Read the standard HTTP headers
+    // Note: To read these, your S3 CORS ExposeHeaders MUST include them
+    return {
+      ContentType: response.headers.get('content-type'),
+      ContentLength: response.headers.get('content-length'),
+      LastModified: response.headers.get('last-modified')
+    };
+
+  } catch (error: any) {
+    console.error(`🌐 Service [ERROR]: Native fetch failed for ${key}`, error);
+    throw error; // Let the UI handle the alert
+  }
+}
   
 }

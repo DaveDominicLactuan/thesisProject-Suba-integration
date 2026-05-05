@@ -47,6 +47,7 @@ regForm!: FormGroup; // our single form
   registrationSuccess: string | null = null;
   isRegistering: boolean = false;
   officeLocationCoordinates: RegistrationMapCoordinates | null = null;
+  showRegistrationNotice: boolean = false;
 
 // signupForm: FormGroup;
 
@@ -396,77 +397,14 @@ toggleConfirmPasswordVisibility() {
    * which will call `closeNoticeWindow()` to remove it and navigate.
    */
   showNoticeWindow() {
-    // Avoid creating duplicate overlays
-    if (document.getElementById('registration-notice-overlay')) return;
-
-    const overlay = document.createElement('div');
-    overlay.id = 'registration-notice-overlay';
-    overlay.style.position = 'fixed';
-    overlay.style.left = '0';
-    overlay.style.top = '0';
-    overlay.style.width = '100%';
-    overlay.style.height = '100%';
-    overlay.style.display = 'flex';
-    overlay.style.alignItems = 'center';
-    overlay.style.justifyContent = 'center';
-    overlay.style.background = 'rgba(0,0,0,0.35)';
-    overlay.style.zIndex = '9999';
-
-    const card = document.createElement('div');
-    card.style.width = '560px';
-    card.style.maxWidth = '92%';
-    card.style.background = '#fff';
-    card.style.borderRadius = '12px';
-    card.style.overflow = 'hidden';
-    card.style.boxShadow = '0 8px 24px rgba(0,0,0,0.2)';
-    card.style.fontFamily = 'Arial, Helvetica, sans-serif';
-
-    const header = document.createElement('div');
-    header.textContent = 'Notice';
-    header.style.background = '#f26522';
-    header.style.color = '#fff';
-    header.style.fontSize = '40px';
-    header.style.textAlign = 'center';
-    header.style.padding = '22px 16px';
-
-    const body = document.createElement('div');
-    body.style.padding = '20px 26px';
-    body.style.color = '#111';
-    body.style.textAlign = 'center';
-    body.style.lineHeight = '1.4';
-    body.style.fontSize = '16px';
-    body.innerHTML = `Your request for an account as engineer is sent and processing will take 3 - 5 days. Once confirmation is completed, credentials will be sent to the email used in registration.`;
-
-    const actions = document.createElement('div');
-    actions.style.padding = '18px';
-    actions.style.display = 'flex';
-    actions.style.justifyContent = 'center';
-
-    const btn = document.createElement('button');
-    btn.textContent = 'Confirm';
-    btn.style.background = '#f26522';
-    btn.style.color = '#fff';
-    btn.style.border = 'none';
-    btn.style.padding = '12px 34px';
-    btn.style.borderRadius = '8px';
-    btn.style.cursor = 'pointer';
-    btn.style.fontSize = '18px';
-    btn.onclick = () => this.closeNoticeWindow(true);
-
-    actions.appendChild(btn);
-    card.appendChild(header);
-    card.appendChild(body);
-    card.appendChild(actions);
-    overlay.appendChild(card);
-    document.body.appendChild(overlay);
+    this.showRegistrationNotice = true;
   }
 
   /**
    * Remove the notice overlay. If `navigate` is true, navigate to landing page.
    */
   closeNoticeWindow(navigate: boolean = false) {
-    const el = document.getElementById('registration-notice-overlay');
-    if (el && el.parentElement) el.parentElement.removeChild(el);
+    this.showRegistrationNotice = false;
     if (navigate) {
       try {
         this.router.navigate(['/landing-page']);

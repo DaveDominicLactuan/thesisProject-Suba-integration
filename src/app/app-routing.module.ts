@@ -67,6 +67,10 @@ const routes: Routes = [
     path: 'office-map-marker-page',
     loadChildren: () => import('./office-map-marker-page/office-map-marker-page.module').then( m => m.OfficeMapMarkerPagePageModule)
   },
+  {
+    path: 's3-page',
+    loadChildren: () => import('./s3-page/s3-page.module').then( m => m.S3PagePageModule)
+  },
 
 
 

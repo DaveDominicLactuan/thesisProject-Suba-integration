@@ -25,12 +25,12 @@
   <ul class="menu-items scrollable-menu">
     <div class="menu-section">
       <li class="menu-item" (click)="goToHomePage()">
-        <ion-icon name="home-outline"></ion-icon>
+        <img src="assets/newHomeIcon.png" alt="Chat" class="menu-item-icon" />
         <span>Home</span>
       </li>
       <li class="menu-item" (click)="gochatPagePeople()">
         <img src="assets/ChatIconNew.png" alt="Chat" class="menu-item-icon" />
-        <span>Chat</span>
+        <span>Chat</span>      
       </li>
       <li class="menu-item" (click)="gochatPageLocation()">
         <img src="assets/MapIcon.png" alt="Map" class="menu-item-icon" />
@@ -40,176 +40,24 @@
         <img src="assets/bottomBarMarker.png" alt="Map" class="menu-item-icon" />
         <span>Map</span>
       </li>
-    </div>
-    <!-- <div class="menu-section">
-      <div class="menu-header">Activity</div>
-         <li class="menu-item" (click)="goSessionPage()">
-        <ion-icon name="bookmark-outline"></ion-icon>
-        <span>Show Current Sessions</span>
-        <span class="sync-status-pill" [ngClass]="syncStatusState">{{ syncStatusText }}</span>
-      </li>
-         <li class="menu-item" (click)="goNetworkPage()">
-        <ion-icon name="wifi-outline"></ion-icon>
-        <span>Network Page</span>
-        <span class="sync-status-pill" [ngClass]="syncStatusState">{{ syncStatusText }}</span>
-      </li>
-      <li class="menu-item">
-        <ion-icon name="cloud-done-outline"></ion-icon>
-        <span>{{ cacheWarmStatusText }}</span>
+       <li class="menu-item" (click)="goS3Page()">
+        <img src="assets/bottomBarMarker.png" alt="Map" class="menu-item-icon" />
+        <span>S3</span>
       </li>
     </div>
-    <div class="menu-section">
-      <div class="menu-header">Location</div>
-        <li class="menu-item" (click)="requestLocationPermissionFromMenu()">
-        <ion-icon name="create-outline"></ion-icon>
-        <span>Request Location Permission</span>
-      </li>
-      <li class="menu-item" (click)="getAndStoreCurrentLocation()">
-        <ion-icon name="locate-outline"></ion-icon>
-        <span>Get Current Location</span>
-      </li>
-      <li class="menu-item" (click)="showLocationOverlay()">
-        <ion-icon name="information-circle-outline"></ion-icon>
-        <span>Show Location Details</span>
-      </li>
-      <li class="menu-item" *ngIf="currentLocation">
-        <ion-icon name="location-outline"></ion-icon>
-        <span>Lat {{ currentLocation.latitude | number:'1.4-4' }}, Lng {{ currentLocation.longitude | number:'1.4-4' }}</span>
-      </li>
-      <li class="menu-item">
-        <ion-icon name="time-outline"></ion-icon>
-        <span>{{ locationStatusText }}</span>
-      </li>
-      <li class="menu-item" *ngIf="locationErrorText">
-        <ion-icon name="alert-circle-outline"></ion-icon>
-        <span>{{ locationErrorText }}</span>
-      </li>
-    </div> -->
+ 
       <div class="menu-section">
-      <!-- <div class="menu-header">User</div> -->
-        <!-- <div class="menu-header">Users</div> -->
-       <!-- <li class="menu-item" (click)="goToAvailabilityPage()">
-        <ion-icon name="checkmark-circle"></ion-icon>
-        <span>Availability</span>
-      </li>
-          <li class="menu-item">
-        <ion-icon name="create-outline"></ion-icon>
-        <span>Set Status Message</span>
-      </li>
-      <li class="menu-item">
-        <ion-icon name="notifications-outline"></ion-icon>
-        <span>Notifications</span>
-      </li>
-      <li class="menu-item">
-        <ion-icon 
-          [name]="isLocationAvailable ? 'location-outline' : 'location-sharp'" 
-          [style.color]="isLocationAvailable ? '#4CAF50' : '#999'">
-        </ion-icon>
-        <span>Location: {{ isLocationAvailable ? 'Enabled' : 'Disabled' }}</span>
-      </li> -->
-      <!-- <li class="menu-item" *ngIf="isLocationDataFetched">
-        <ion-icon name="checkmark-circle" style="color: #4CAF50;"></ion-icon>
-        <span>Location Data Fetched</span>
-      </li> -->
-      <!-- <li class="menu-item" *ngIf="!isLocationDataFetched && isLocationAvailable">
-        <ion-icon name="sync" style="color: #FF9800;"></ion-icon>
-        <span>Fetching Location...</span>
-      </li> -->
+    
     </div>
      <div class="menu-section">
-      <!-- <div class="menu-header">Settings</div> -->
         <div class="menu-header">Other</div>
-      <!-- <li class="menu-item">
-        <ion-icon name="settings-outline"></ion-icon>
-        <span>Settings</span>
-      </li>
-      <li class="menu-item">
-        <ion-icon name="person-outline"></ion-icon>
-        <span>About Us</span>
-      </li>
-      <li class="menu-item">
-        <ion-icon name="help-circle-outline"></ion-icon>
-        <span>Help</span>
-      </li> -->
+   
       <li class="menu-item" (click)="logout(); closeSidebar(); $event.stopPropagation()" data-action="logout">
-        <ion-icon name="log-out-outline"></ion-icon>
-        <span>Log Out</span>
+        <img src="assets/newLoginIcon.png" alt="Chat" class="menu-item-icon" />
+                <span>Log Out</span>
       </li>
     </div>
-    <!-- <div class="menu-section">
-      <div class="menu-header">Other Options</div>
-      <li class="menu-item">
-        <ion-icon name="checkmark-circle"></ion-icon>
-        <span>Availability</span>
-      </li>
-      <li class="menu-item" (click)="requestLocationPermissionFromMenu()">
-        <ion-icon name="create-outline"></ion-icon>
-        <span>Request Location Permission</span>
-      </li>
-      <li class="menu-item">
-        <ion-icon name="notifications-outline"></ion-icon>
-        <span>Notifications</span>
-      </li>
-      <li class="menu-item">
-        <ion-icon name="cloud-done-outline"></ion-icon>
-        <span>{{ cacheWarmStatusText }}</span>
-      </li>
-      <li class="menu-item" (click)="goToHomePage()">
-        <ion-icon name="home-outline"></ion-icon>
-        <span>Home</span>
-      </li>
-      <li class="menu-item" (click)="goSessionPage()">
-        <ion-icon name="bookmark-outline"></ion-icon>
-        <span>Show Current Sessions</span>
-        <span class="sync-status-pill" [ngClass]="syncStatusState">{{ syncStatusText }}</span>
-      </li>
-    </div>
-    <hr class="menu-divider" />
-    <div class="menu-section">     
-      <li class="menu-item">
-        <ion-icon name="folder-outline"></ion-icon>
-        <span>Files</span>
-      </li>
-      <li class="menu-item" (click)="getAndStoreCurrentLocation()">
-        <ion-icon name="locate-outline"></ion-icon>
-        <span>Get Current Location</span>
-      </li>
-      <li class="menu-item" (click)="showLocationOverlay()">
-        <ion-icon name="information-circle-outline"></ion-icon>
-        <span>Show Location Details</span>
-      </li>
-      <li class="menu-item" *ngIf="currentLocation">
-        <ion-icon name="location-outline"></ion-icon>
-        <span>Lat {{ currentLocation.latitude | number:'1.4-4' }}, Lng {{ currentLocation.longitude | number:'1.4-4' }}</span>
-      </li>
-      <li class="menu-item">
-        <ion-icon name="time-outline"></ion-icon>
-        <span>{{ locationStatusText }}</span>
-      </li>
-      <li class="menu-item" *ngIf="locationErrorText">
-        <ion-icon name="alert-circle-outline"></ion-icon>
-        <span>{{ locationErrorText }}</span>
-      </li>
-      <li class="menu-item">
-        <ion-icon name="settings-outline"></ion-icon>
-        <span>Settings</span>
-      </li>
-    </div>
-    <hr class="menu-divider" />
-    <div class="menu-section">
-      <li class="menu-item">
-        <ion-icon name="person-outline"></ion-icon>
-        <span>About Us</span>
-      </li>
-      <li class="menu-item">
-        <ion-icon name="help-circle-outline"></ion-icon>
-        <span>Help</span>
-      </li>
-      <li class="menu-item" (click)="logout()">
-        <ion-icon name="log-out-outline"></ion-icon>
-        <span>Log Out</span>
-      </li>
-    </div> -->
+   
   </ul>
 </div>
 

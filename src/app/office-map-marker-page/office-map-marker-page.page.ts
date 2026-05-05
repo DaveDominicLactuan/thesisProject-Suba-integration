@@ -3,7 +3,6 @@ import { Router } from '@angular/router';
 import { FormBuilder, FormGroup, Validators } from '@angular/forms';
 import { AuthService } from '../services/auth.service';
 import { NavController, Platform } from '@ionic/angular';
-import { User } from 'firebase/auth';
 import { Auth3Service } from '../services/auth3.service';
 import { ImageStorageService } from '../services/image-storage.service';
 import { App } from '@capacitor/app';
@@ -87,25 +86,27 @@ ngOnInit(): void {
 private async initialize(): Promise<void> {
   console.log('[SessionPage.initialize] ===== PAGE INIT START =====');
   try {
-    // Step 1: Try to load profile from localStorage first for immediate UI update
-    // This is the fastest path for already-logged-in users
-    const cachedUserData = this.loadCachedUserProfile();
-    if (cachedUserData) {
-      console.log('[SessionPage.initialize] Loaded user profile from cache (fast path)');
+    const storedProfile = this.readStoredUserProfile();
+    if (storedProfile) {
+      this.userID = storedProfile.userID || null;
+      this.firstName = storedProfile.firstName || null;
+      this.lastName = storedProfile.lastName || null;
+      this.userName = storedProfile.username || null;
+      this.userRole = storedProfile.userRole || 'user';
+      this.email = storedProfile.email || null;
+      this.engineeringID = storedProfile.engineeringID || null;
+      console.log('[SessionPage.initialize] Loaded user profile from storage');
     }
+
+    this.userID = this.userID || this.getStoredUserId() || this.auth3.getCurrentUser()?.uid || null;
+    this.isLoggedIn = !!this.userID;
 
     // Step 2: Load sessions immediately from local storage for quick UI display
     // Don't wait for Firestore — display what we have locally first
     console.log('[SessionPage.initialize] Loading sessions from local storage (non-blocking)...');
     await this.loadSessions().catch(e => console.warn('[SessionPage.initialize] loadSessions failed:', e));
 
-    // Step 3: Ensure Firebase auth state is ready and fetch fresh profile from Firestore
-    // This runs in parallel and will update UI if data changed
-    this.loadUserProfileWithAuthWait().catch(error => {
-      console.error('[SessionPage.initialize] Profile loading failed:', error);
-    });
-
-    // Step 4: Start background sync for Firestore data without blocking UI
+    // Step 3: Start background sync for Firestore data without blocking UI
     const resolvedUserId = this.userID || this.auth3.getCurrentUser()?.uid || '';
     if (resolvedUserId) {
       this.startUserSyncInBackground(resolvedUserId);
@@ -115,95 +116,16 @@ private async initialize(): Promise<void> {
   }
 }
 
-/**
- * Load user profile immediately from localStorage for already logged-in users.
- * Maximum speed, no network calls.
- */
-private loadCachedUserProfile(): boolean {
+private readStoredUserProfile(): any | null {
   try {
     const cached = localStorage.getItem('userData');
     if (cached) {
-      const data = JSON.parse(cached);
-      this.userID = data.userID || null;
-      this.firstName = data.firstName || null;
-      this.lastName = data.lastName || null;
-      this.userName = data.username || null;
-      this.userRole = data.userRole || 'user';
-      this.email = data.email || null;
-      this.engineeringID = data.engineeringID || null;
-      console.log('[SessionPage.loadCachedUserProfile] Loaded from cache:', data);
-      return true;
+      return JSON.parse(cached);
     }
   } catch (e) {
-    console.warn('[SessionPage.loadCachedUserProfile] Failed to load cache:', e);
+    console.warn('[SessionPage.readStoredUserProfile] Failed to load cache:', e);
   }
-  return false;
-}
-
-/**
- * Fetch fresh user profile from Firestore and update local data.
- * Called after cache load so it can refresh stale data without blocking initial UI.
- */
-private async loadUserProfileWithAuthWait(): Promise<void> {
-  try {
-    // Wait for auth to be ready
-    if (!this.auth3.getCurrentUser()) {
-      console.log('[SessionPage.loadUserProfileWithAuthWait] Waiting for auth state...');
-      await this.waitForUserAuth(8000);
-    }
-
-    // Fetch fresh profile from Firestore
-    const profile = await this.auth3.getUserProfile();
-    const currentUser = this.auth3.getCurrentUser();
-    
-    // Update profile data
-    this.userID = currentUser?.uid || profile['userID'] || this.userID;
-    this.firstName = profile['firstName'] || this.firstName;
-    this.lastName = profile['lastName'] || this.lastName;
-    this.engineeringID = profile['engineeringID'] || this.engineeringID || '';
-    this.email = profile['email'] || this.email || '';
-    this.userRole = profile['role'] || (this.engineeringID ? 'engineer' : 'user');
-    this.userName = (this.firstName && this.lastName)
-      ? `${this.firstName} ${this.lastName}`
-      : (this.email || this.userName);
-    this.isLoggedIn = true;
-
-    console.log('[SessionPage.loadUserProfileWithAuthWait] Profile refreshed:', {
-      userID: this.userID,
-      firstName: this.firstName,
-      userName: this.userName
-    });
-
-    // Save updated profile to localStorage
-    this.persistUserProfileToStorage();
-  } catch (error) {
-    console.warn('[SessionPage.loadUserProfileWithAuthWait] Profile refresh failed:', error);
-    // Keep using cached profile
-  }
-}
-
-/**
- * Persist current user profile to localStorage.
- */
-private persistUserProfileToStorage(): void {
-  try {
-    const profileData = {
-      userID: this.userID || '',
-      username: this.userName || '',
-      userRole: this.userRole || 'user',
-      firstName: this.firstName || '',
-      lastName: this.lastName || '',
-      engineeringID: this.engineeringID || '',
-      email: this.email || ''
-    };
-    localStorage.setItem('userData', JSON.stringify(profileData));
-    localStorage.setItem('isLoggedIn', 'true');
-    
-    sessionStorage.setItem('userProfile', JSON.stringify(profileData));
-    sessionStorage.setItem('isLoggedInSession', 'true');
-  } catch (e) {
-    console.warn('[SessionPage.persistUserProfileToStorage] Failed:', e);
-  }
+  return null;
 }
 
 /**
@@ -226,41 +148,6 @@ private startUserSyncInBackground(userId: string): void {
       console.warn('[SessionPage.startUserSyncInBackground] Background sync failed:', error);
     });
 }
-
-  // Wait for Firebase auth to emit a user or timeout
-  private waitForUserAuth(timeoutMs: number = 8000): Promise<User | null> {
-    //A new Promise is created to handle the asynchronous waiting process.
-    //The settled flag ensures that the promise is resolved only once, 
-    //even if multiple events occur (e.g., user detected and timeout).
-    return new Promise((resolve) => {
-      let settled = false as boolean;
-      //This helper function resolves the promise with the provided user 
-      // u) only if the promise has not already been resolved (settled is false).
-      const maybeResolve = (u: User | null) => {
-        if (!settled) { settled = true; resolve(u); }
-      };
-      //The onAuthChange method from auth3 is used to listen for changes 
-      // in the authentication state. user (u) is detected, the promise 
-      // is resolved with the user, and the listener (unsub) is unsubscribed to 
-      // prevent further calls.
-      let unsub: any = null;
-      try {
-        unsub = this.auth3.onAuthChange((u) => {
-          if (u) {
-            try { if (unsub) unsub(); } catch {}
-            maybeResolve(u);
-          }
-        });
-      } catch {}
-      //A setTimeout is used to enforce the maximum wait time (timeoutMs). 
-      //If the timeout is reached, the listener is unsubscribed, and the promise 
-      // is resolved with the current user (if available) or null.
-      setTimeout(() => {
-        try { if (unsub) unsub(); } catch {}
-        maybeResolve(this.auth3.getCurrentUser() || null);
-      }, timeoutMs);
-    });
-  }
 
   // Called by Ionic when page becomes active — refresh and loads sessions/counts/
   /** Ionic hook: refresh sessions each time page becomes active. */
@@ -1673,11 +1560,50 @@ private startUserSyncInBackground(userId: string): void {
   }
 
   onViewMarker(marker: any): void {
-    console.log('[SessionPage.onViewMarker] View marker:', marker);
+    console.log('[SessionPage.onViewMarker] ===== VIEW MARKER DATA START =====');
+    console.log('[SessionPage.onViewMarker] Full marker object:', marker);
+    console.log('[SessionPage.onViewMarker] Marker ID:', marker?.id);
+    console.log('[SessionPage.onViewMarker] Marker Name:', marker?.name);
+    console.log('[SessionPage.onViewMarker] Marker Address:', marker?.address);
+    console.log('[SessionPage.onViewMarker] Marker Location:', marker?.location);
+    console.log('[SessionPage.onViewMarker] Marker Latitude:', marker?.location?.latitude);
+    console.log('[SessionPage.onViewMarker] Marker Longitude:', marker?.location?.longitude);
+    console.log('[SessionPage.onViewMarker] Marker Contact Info:', marker?.contactInfo);
+    console.log('[SessionPage.onViewMarker] Marker Phone:', marker?.phone || marker?.phoneNumber);
+    console.log('[SessionPage.onViewMarker] Marker Available Time:', marker?.availableTime);
+    console.log('[SessionPage.onViewMarker] Marker Unavailable Time:', marker?.unavailableTime);
+    console.log('[SessionPage.onViewMarker] Marker Created:', marker?.created);
+    console.log('[SessionPage.onViewMarker] Marker Payload:', marker?.payload);
+    console.log('[SessionPage.onViewMarker] ===== VIEW MARKER DATA END =====');
   }
 
   onNavigateToMarker(marker: any): void {
-    console.log('[SessionPage.onNavigateToMarker] Navigate to marker:', marker);
+    console.log('[SessionPage.onNavigateToMarker] ===== NAVIGATE TO MARKER START =====');
+    console.log('[SessionPage.onNavigateToMarker] Marker Latitude:', marker?.location?.latitude);
+    console.log('[SessionPage.onNavigateToMarker] Marker Longitude:', marker?.location?.longitude);
+    console.log('[SessionPage.onNavigateToMarker] Full marker object:', marker);
+    console.log('[SessionPage.onNavigateToMarker] ===== NAVIGATE TO MARKER END =====');
+    
+    // Store the marker location data in sessionStorage for the chat-page to retrieve
+    if (marker?.location?.latitude && marker?.location?.longitude) {
+      sessionStorage.setItem('selectedMarkerLocation', JSON.stringify({
+        latitude: marker.location.latitude,
+        longitude: marker.location.longitude,
+        markerData: marker
+      }));
+      console.log('[SessionPage.onNavigateToMarker] Stored marker location in sessionStorage');
+    }
+    
+    // Navigate to chat-page with location tab active
+    this.removeBackButtonHandler();
+    this.router.navigate(['/chat-page'], { 
+      queryParams: { 
+        tab: 'location',
+        markerLat: marker?.location?.latitude,
+        markerLng: marker?.location?.longitude
+      }
+    });
+    console.log('[SessionPage.onNavigateToMarker] Navigating to chat-page with location tab');
   }
 
   onDeleteMarker(marker: any, event?: Event): void {

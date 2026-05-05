@@ -55,6 +55,14 @@ formDataMap: {
 imagePaths: DisplayImage[] = [];
 showWithBoxes: boolean = false;
 private backButtonSub: any; // hardware back handler
+showSessionLoadingWindow: boolean = false;
+sessionLoadingMessage: string = 'Fetching S3 images...';
+sessionLoadingDetail: string = 'Preparing session images';
+sessionLoadingCompleted: number = 0;
+sessionLoadingTotal: number = 0;
+private sessionLoadingWindowTimer: any;
+private backNavigationInProgress: boolean = false;
+private lastBackTapAt: number = 0;
 
   // Zoom modal properties
   showZoomModal: boolean = false;
@@ -253,8 +261,6 @@ private backButtonSub: any; // hardware back handler
     // (Previously attempted to fetch full session image objects here; removed.)
     console.log('All loaded sessions:', this.sessions.length > 0 ? this.sessions : '(no sessions loaded)');
     console.groupEnd();
-
-    void this.hydrateSessionImagesFromStoragePaths();
 
     return info;
   }
@@ -540,10 +546,48 @@ private backButtonSub: any; // hardware back handler
         }
         if (entry) this.imagePaths.push(this.buildDisplayImage(entry));
       }
-      await this.hydrateSessionImagesFromS3();
+
+      const hasS3BackedImages = this.imagePaths.some((img: DisplayImage) =>
+        !!img.storagePath || !!img.withBoxesStoragePath || !!img.originalS3Key || !!img.withBoxesS3Key
+      );
+      if (hasS3BackedImages) {
+        await this.runSessionLoadingWindow(() => this.hydrateSessionImagesFromS3(), Math.max(1800, this.imagePaths.length * 450));
+      } else {
+        await this.hydrateSessionImagesFromS3();
+      }
       //Top-level error handling
     } catch (err) {
       console.warn('[FeedbackPage] refreshDisplayedImages failed', err);
+    }
+  }
+
+  private async runSessionLoadingWindow(task: () => Promise<void>, minimumDurationMs: number = 4000): Promise<void> {
+    if (this.sessionLoadingWindowTimer) {
+      clearTimeout(this.sessionLoadingWindowTimer);
+      this.sessionLoadingWindowTimer = null;
+    }
+
+    this.showSessionLoadingWindow = true;
+    this.sessionLoadingMessage = 'Fetching S3 images...';
+    this.sessionLoadingDetail = 'Preparing session images';
+    this.sessionLoadingCompleted = 0;
+    this.sessionLoadingTotal = Math.max(this.imagePaths.length, 1);
+    const startedAt = Date.now();
+
+    try {
+      await task();
+    } finally {
+      const elapsed = Date.now() - startedAt;
+      const remaining = Math.max(0, minimumDurationMs - elapsed);
+
+      this.sessionLoadingWindowTimer = setTimeout(() => {
+        this.showSessionLoadingWindow = false;
+        this.sessionLoadingMessage = 'Fetching S3 images...';
+        this.sessionLoadingDetail = 'Preparing session images';
+        this.sessionLoadingCompleted = 0;
+        this.sessionLoadingTotal = 0;
+        this.sessionLoadingWindowTimer = null;
+      }, remaining);
     }
   }
 
@@ -565,60 +609,81 @@ private backButtonSub: any; // hardware back handler
     }
 
     console.log(`[FeedbackPage] S3 hydration triggered for ${imagesToHydrate.length} image(s)`);
+    this.sessionLoadingTotal = imagesToHydrate.length;
+    this.sessionLoadingCompleted = 0;
+    // helper: try service fetch first, fall back to direct http(s) fetch->dataURL
+    const fetchCandidateAsDataUrl = async (candidate: string | undefined): Promise<string | undefined> => {
+      if (!candidate) return undefined;
 
-    for (const img of imagesToHydrate) {
-      const imageName = img.filename || img.fileName || '(unnamed)';
-
-      // Fetch original image - try storagePath first, then S3 key as fallback
-      if (img.storagePath) {
-        console.log(`[FeedbackPage] storagePath for ${imageName}:`, img.storagePath);
-        try {
-          const originalData = await svc.fetchS3ObjectAsDataUrl(img.storagePath);
-          if (originalData) {
-            img.original = originalData;
-          }
-        } catch (error) {
-          console.warn(`[FeedbackPage] Failed to fetch original image for ${imageName}`, error);
+      // If the service exposes a fetch function, try it first
+      try {
+        if (typeof svc.fetchS3ObjectAsDataUrl === 'function') {
+          const result = await svc.fetchS3ObjectAsDataUrl(candidate);
+          if (result) return result;
         }
-      } else if (img.originalS3Key) {
-        // Fallback to S3 key if storagePath not available (mobile compatibility)
-        console.log(`[FeedbackPage] originalS3Key for ${imageName}:`, img.originalS3Key);
+      } catch (e) {
+        console.warn('[FeedbackPage] service.fetchS3ObjectAsDataUrl failed for', candidate, e);
+      }
+
+      // If candidate looks like a URL, fetch it directly
+      try {
+        if (/^https?:\/\//i.test(candidate)) {
+          const resp = await fetch(candidate);
+          if (!resp.ok) throw new Error('HTTP ' + resp.status);
+          const blob = await resp.blob();
+          return await new Promise<string>((resolve, reject) => {
+            const fr = new FileReader();
+            fr.onload = () => resolve(fr.result as string);
+            fr.onerror = () => reject(new Error('Failed to read blob'));
+            fr.readAsDataURL(blob);
+          });
+        }
+      } catch (e) {
+        console.warn('[FeedbackPage] direct fetch failed for', candidate, e);
+      }
+
+      return undefined;
+    };
+
+    for (let index = 0; index < imagesToHydrate.length; index++) {
+      const img = imagesToHydrate[index];
+      const imageName = img.filename || img.fileName || '(unnamed)';
+      this.sessionLoadingDetail = `Loading ${imageName} (${index + 1} of ${imagesToHydrate.length})`;
+
+      // Build candidate list for original image
+      const originalCandidates = [img.storagePath, img.storageUrl, img.originalS3Url, img.originalS3Key];
+      for (const cand of originalCandidates) {
         try {
-          const originalData = await svc.fetchS3ObjectAsDataUrl(img.originalS3Key);
-          if (originalData) {
-            img.original = originalData;
+          const data = await fetchCandidateAsDataUrl(cand as string | undefined);
+          if (data) {
+            img.original = data;
+            break;
           }
-        } catch (error) {
-          console.warn(`[FeedbackPage] Failed to fetch original image from S3 key for ${imageName}`, error);
+        } catch (e) {
+          console.warn('[FeedbackPage] original candidate failed', { imageName, cand, e });
         }
       }
 
-      // Fetch withBoxes image - try withBoxesStoragePath first, then S3 key as fallback
-      if (img.withBoxesStoragePath) {
-        console.log(`[FeedbackPage] withBoxesStoragePath for ${imageName}:`, img.withBoxesStoragePath);
+      // Build candidate list for withBoxes image
+      const withBoxesCandidates = [img.withBoxesStoragePath, img.withBoxesStorageUrl, img.withBoxesS3Url, img.withBoxesS3Key];
+      for (const cand of withBoxesCandidates) {
         try {
-          const withBoxesData = await svc.fetchS3ObjectAsDataUrl(img.withBoxesStoragePath);
-          if (withBoxesData) {
-            img.withBoxes = withBoxesData;
+          const data = await fetchCandidateAsDataUrl(cand as string | undefined);
+          if (data) {
+            img.withBoxes = data;
+            break;
           }
-        } catch (error) {
-          console.warn(`[FeedbackPage] Failed to fetch withBoxes image for ${imageName}`, error);
-        }
-      } else if (img.withBoxesS3Key) {
-        // Fallback to S3 key if withBoxesStoragePath not available (mobile compatibility)
-        console.log(`[FeedbackPage] withBoxesS3Key for ${imageName}:`, img.withBoxesS3Key);
-        try {
-          const withBoxesData = await svc.fetchS3ObjectAsDataUrl(img.withBoxesS3Key);
-          if (withBoxesData) {
-            img.withBoxes = withBoxesData;
-          }
-        } catch (error) {
-          console.warn(`[FeedbackPage] Failed to fetch withBoxes image from S3 key for ${imageName}`, error);
+        } catch (e) {
+          console.warn('[FeedbackPage] withBoxes candidate failed', { imageName, cand, e });
         }
       }
 
       this.printSelectedSessionImages();
+      this.sessionLoadingCompleted = index + 1;
     }
+
+    this.sessionLoadingMessage = 'S3 images ready';
+    this.sessionLoadingDetail = 'Displaying hydrated session images';
   }
 
   // Normalize StoredImage-like object into DisplayImage 
@@ -1192,12 +1257,41 @@ addEntry() {
     this.goBack();
   }
 
+  /**
+   * Fast back-button handler for touch and mouse input.
+   * Pointer-down starts navigation immediately; the click fallback is ignored
+   * if it follows the pointer event within a short debounce window.
+   */
+  handleBackTap(event: Event) {
+    event.preventDefault();
+    event.stopPropagation();
+
+    const now = Date.now();
+    if (this.backNavigationInProgress || now - this.lastBackTapAt < 400) {
+      return;
+    }
+
+    this.backNavigationInProgress = true;
+    this.lastBackTapAt = now;
+
+    void this.goBack().finally(() => {
+      setTimeout(() => {
+        this.backNavigationInProgress = false;
+      }, 250);
+    });
+  }
+
   ionViewDidEnter() {
     this.registerBackButtonHandler();
   }
 
   ionViewWillLeave() {
     this.removeBackButtonHandler();
+    if (this.sessionLoadingWindowTimer) {
+      clearTimeout(this.sessionLoadingWindowTimer);
+      this.sessionLoadingWindowTimer = null;
+    }
+    this.showSessionLoadingWindow = false;
   }
 
   private registerBackButtonHandler() {
@@ -1251,6 +1345,66 @@ addEntry() {
       //Navigate without session id
       this.router.navigate(['/results-dashboard']);
     }
+  }
+
+  /**
+   * Debug function: Test and verify S3 fetch status.
+   * Logs detailed information about loaded images and their S3 data.
+   */
+  testS3Fetch() {
+    console.group('[FeedbackPage] Debug S3 Fetch Test');
+    
+    console.log('Total images loaded:', this.imagePaths.length);
+    console.log('Current session ID:', this.selectedSessionId || '(none)');
+    console.log('Route session ID:', this.routeSessionId || '(none)');
+    
+    if (this.imagePaths.length === 0) {
+      console.warn('No images loaded');
+    } else {
+      console.table(this.imagePaths.map((img, idx) => ({
+        index: idx,
+        filename: img.filename || img.fileName || '(unnamed)',
+        hasOriginal: !!img.original && img.original.length > 0,
+        originalLength: img.original?.length || 0,
+        isOriginalDataUrl: img.original?.startsWith('data:') ? 'YES' : 'NO',
+        hasWithBoxes: !!img.withBoxes && img.withBoxes.length > 0,
+        withBoxesLength: img.withBoxes?.length || 0,
+        isWithBoxesDataUrl: img.withBoxes?.startsWith('data:') ? 'YES' : 'NO',
+        storagePath: img.storagePath || '(none)',
+        originalS3Key: img.originalS3Key || '(none)',
+        hasPrediction: !!img.rawPrediction,
+        statusMessage: img.statusMessage || '(none)'
+      })));
+
+      const s3Status = this.imagePaths.map((img, idx) => {
+        const hasDataUrl = (img.original?.startsWith('data:') || false) && (img.withBoxes?.startsWith('data:') || false);
+        const hasSizableData = (img.original?.length || 0) > 1000 && (img.withBoxes?.length || 0) > 1000;
+        return {
+          index: idx,
+          name: img.filename || '(unnamed)',
+          loaded: hasDataUrl ? 'LOADED' : 'PENDING',
+          sizable: hasSizableData ? 'OK' : 'SMALL',
+          status: hasDataUrl && hasSizableData ? 'READY' : 'PENDING/FAILED'
+        };
+      });
+
+      console.log('\nS3 Hydration Status:');
+      console.table(s3Status);
+    }
+
+    console.log('\nLoading window state:');
+    console.log('showSessionLoadingWindow:', this.showSessionLoadingWindow);
+    console.log('sessionLoadingMessage:', this.sessionLoadingMessage);
+    console.log('sessionLoadingDetail:', this.sessionLoadingDetail);
+    console.log('sessionLoadingCompleted:', this.sessionLoadingCompleted);
+    console.log('sessionLoadingTotal:', this.sessionLoadingTotal);
+
+    console.groupEnd();
+
+    const readyCount = this.imagePaths.filter(img => 
+      img.original?.startsWith('data:') && img.withBoxes?.startsWith('data:')
+    ).length;
+    alert(`S3 Fetch Status:\nReady: ${readyCount}/${this.imagePaths.length} images\n\nCheck console for full details.`);
   }
 
   /**

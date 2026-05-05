@@ -16,6 +16,117 @@
 .confirm-row:last-child {
   border-bottom: none;
 }
+
+.registration-notice-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 20000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 18px;
+  background: rgba(0, 0, 0, 0.18);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+.registration-notice-card {
+  width: min(92vw, 560px);
+  background: #fff;
+  border-radius: 28px;
+  padding: 34px 28px 30px;
+  text-align: center;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.18);
+  border: 2px solid rgba(242, 101, 34, 0.18);
+}
+
+.registration-notice-icon-wrap {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 22px;
+}
+
+.registration-notice-icon {
+  width: 120px;
+  height: 120px;
+  border-radius: 50%;
+  background: linear-gradient(to bottom right, #ffb12a, #ff9800);
+  color: #fff;
+  font-size: 92px;
+  font-weight: 700;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 12px 28px rgba(255, 152, 0, 0.28);
+}
+
+.registration-notice-title {
+  margin: 0 0 18px;
+  font-size: 3rem;
+  line-height: 1;
+  font-weight: 800;
+  color: #1b2233;
+}
+
+.registration-notice-message {
+  margin: 0 auto 34px;
+  max-width: 440px;
+  color: #666;
+  font-size: 1.2rem;
+  line-height: 1.65;
+  font-weight: 600;
+}
+
+.registration-notice-close {
+  min-width: 240px;
+  padding: 16px 34px;
+  border: none;
+  border-radius: 16px;
+  background: linear-gradient(to right, #ff6a33, #f59a16);
+  color: #fff;
+  font-size: 1.35rem;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 12px 24px rgba(245, 154, 22, 0.35);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.registration-notice-close:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 14px 28px rgba(245, 154, 22, 0.42);
+}
+
+.registration-notice-close:active {
+  transform: translateY(0);
+}
+
+@media (max-width: 480px) {
+  .registration-notice-card {
+    padding: 28px 20px 24px;
+  }
+
+  .registration-notice-icon {
+    width: 96px;
+    height: 96px;
+    font-size: 72px;
+  }
+
+  .registration-notice-title {
+    font-size: 2.4rem;
+  }
+
+  .registration-notice-message {
+    font-size: 1rem;
+    margin-bottom: 28px;
+  }
+
+  .registration-notice-close {
+    min-width: 200px;
+    font-size: 1.1rem;
+    padding: 14px 26px;
+  }
+}
 // Stepper styles for registration
 .stepper {
   display: flex;

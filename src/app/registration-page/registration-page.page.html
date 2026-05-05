@@ -9,6 +9,19 @@
 
 <div class="background scrollable-container">
 
+  <div *ngIf="showRegistrationNotice" class="registration-notice-overlay" role="dialog" aria-modal="true" aria-labelledby="registration-notice-title">
+    <div class="registration-notice-card">
+      <div class="registration-notice-icon-wrap" aria-hidden="true">
+        <div class="registration-notice-icon">!</div>
+      </div>
+      <h2 id="registration-notice-title" class="registration-notice-title">Notice</h2>
+      <p class="registration-notice-message">
+        There is a 3 - 5 day review period of the account before the account is approved and created.
+      </p>
+      <button type="button" class="registration-notice-close" (click)="closeNoticeWindow(true)">Close</button>
+    </div>
+  </div>
+
   <!-- actual content starts here -->
   <div class="logo">
     <img src="assets/thesisIcon1.png" alt="D.A.M.A.G.E. Logo">
@@ -154,6 +167,7 @@
           <div *ngIf="regForm.errors?.['mismatch'] && f['confirmPassword'].touched" class="field-error">Passwords do not match.</div>
 
           <button class="signup-btn" type="button" (click)="nextStep(); submitted=false" [disabled]="isRegistering || f['email'].invalid || f['password'].invalid || f['confirmPassword'].invalid || (f['password'].value && f['confirmPassword'].value && regForm.errors?.['mismatch'])">Next</button>
+          <button class="signup-btn" type="button" (click)="showNoticeWindow()">Back</button>
         </div>
 
         <!-- Step 2: User Info -->
