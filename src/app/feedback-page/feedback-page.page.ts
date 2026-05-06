@@ -1735,26 +1735,46 @@ addEntry() {
 
           // Get all images in the session to upload to S3
           let sessionImages: StoredImage[] = [];
-          if (savedSessionId && typeof svc.getAllImages === 'function') {
-            try {
-              const allImages = await svc.getAllImagesAsync ? await svc.getAllImagesAsync() : svc.getAllImages();
-              // Filter for images in this session
-              sessionImages = allImages.filter((img: StoredImage) => {
-                const imgKey = img.filename || img.original;
-                // Check if image is in the session (by checking if it's in formDataMap or by session logic)
-                return imgKey && (this.formDataMap[imgKey] !== undefined || img.sessionId === savedSessionId);
-              });
-              // Ensure the current entry is included
-              if (entry && sessionImages.length === 0) {
+              if (savedSessionId && typeof svc.getAllImages === 'function') {
+                try {
+                  const allImages = await svc.getAllImagesAsync ? await svc.getAllImagesAsync() : svc.getAllImages();
+
+                  // Prefer using the session's recorded imageKeys to determine which images belong to the session.
+                  // This avoids relying on transient formDataMap or sessionId flags that may not be set for all images.
+                  let sessionObj: any = null;
+                  try {
+                    sessionObj = typeof svc.getSession === 'function' ? svc.getSession(savedSessionId) : null;
+                  } catch (e) {
+                    sessionObj = null;
+                  }
+
+                  if (sessionObj && Array.isArray(sessionObj.imageKeys) && sessionObj.imageKeys.length > 0) {
+                    sessionImages = sessionObj.imageKeys.map((k: string) => allImages.find((img: StoredImage) => (img.filename === k || img.original === k || img.withBoxes === k))).filter(Boolean) as StoredImage[];
+                  } else {
+                    // Fallback: include images that explicitly reference sessionId, whose filename contains the sessionId,
+                    // or that exist in the formDataMap. This covers cases where session imageKeys were not populated yet.
+                    sessionImages = allImages.filter((img: StoredImage) => {
+                      const imgKey = img.filename || img.original || '';
+                      const filenameContainsSession = typeof imgKey === 'string' && savedSessionId ? imgKey.includes(savedSessionId) : false;
+                      return imgKey && (
+                        this.formDataMap[imgKey] !== undefined ||
+                        img.sessionId === savedSessionId ||
+                        filenameContainsSession
+                      );
+                    });
+                  }
+
+                  // Ensure the current entry is included at minimum
+                  if (entry && sessionImages.length === 0) {
+                    sessionImages = [entry];
+                  }
+                } catch (e) {
+                  console.warn('[FeedbackPage] Failed to retrieve session images:', e);
+                  sessionImages = [entry]; // Fallback to just the current entry
+                }
+              } else {
                 sessionImages = [entry];
               }
-            } catch (e) {
-              console.warn('[FeedbackPage] Failed to retrieve session images:', e);
-              sessionImages = [entry]; // Fallback to just the current entry
-            }
-          } else {
-            sessionImages = [entry];
-          }
 
           console.log(`[FeedbackPage] Processing ${sessionImages.length} image(s) for S3 upload in session ${savedSessionId}`);
 
