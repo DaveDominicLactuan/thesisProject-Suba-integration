@@ -1546,9 +1546,15 @@ private startUserSyncInBackground(userId: string): void {
       
       const markers: any[] = [];
       markerSnapshot.forEach((doc) => {
+        const data: any = doc.data();
+        const officeLocation = data.officeLocation ?? data.location ?? null;
         markers.push({
           id: doc.id,
-          ...doc.data()
+          ...data,
+          officeAddress: data.officeAddress ?? data.address ?? '',
+          address: data.address ?? data.officeAddress ?? '',
+          officeLocation,
+          location: officeLocation
         });
       });
       
@@ -1564,10 +1570,10 @@ private startUserSyncInBackground(userId: string): void {
     console.log('[SessionPage.onViewMarker] Full marker object:', marker);
     console.log('[SessionPage.onViewMarker] Marker ID:', marker?.id);
     console.log('[SessionPage.onViewMarker] Marker Name:', marker?.name);
-    console.log('[SessionPage.onViewMarker] Marker Address:', marker?.address);
-    console.log('[SessionPage.onViewMarker] Marker Location:', marker?.location);
-    console.log('[SessionPage.onViewMarker] Marker Latitude:', marker?.location?.latitude);
-    console.log('[SessionPage.onViewMarker] Marker Longitude:', marker?.location?.longitude);
+    console.log('[SessionPage.onViewMarker] Marker Address:', marker?.officeAddress ?? marker?.address);
+    console.log('[SessionPage.onViewMarker] Marker Location:', marker?.officeLocation ?? marker?.location);
+    console.log('[SessionPage.onViewMarker] Marker Latitude:', marker?.officeLocation?.latitude ?? marker?.location?.latitude);
+    console.log('[SessionPage.onViewMarker] Marker Longitude:', marker?.officeLocation?.longitude ?? marker?.location?.longitude);
     console.log('[SessionPage.onViewMarker] Marker Contact Info:', marker?.contactInfo);
     console.log('[SessionPage.onViewMarker] Marker Phone:', marker?.phone || marker?.phoneNumber);
     console.log('[SessionPage.onViewMarker] Marker Available Time:', marker?.availableTime);
@@ -1579,16 +1585,17 @@ private startUserSyncInBackground(userId: string): void {
 
   onNavigateToMarker(marker: any): void {
     console.log('[SessionPage.onNavigateToMarker] ===== NAVIGATE TO MARKER START =====');
-    console.log('[SessionPage.onNavigateToMarker] Marker Latitude:', marker?.location?.latitude);
-    console.log('[SessionPage.onNavigateToMarker] Marker Longitude:', marker?.location?.longitude);
+    console.log('[SessionPage.onNavigateToMarker] Marker Latitude:', marker?.officeLocation?.latitude ?? marker?.location?.latitude);
+    console.log('[SessionPage.onNavigateToMarker] Marker Longitude:', marker?.officeLocation?.longitude ?? marker?.location?.longitude);
     console.log('[SessionPage.onNavigateToMarker] Full marker object:', marker);
     console.log('[SessionPage.onNavigateToMarker] ===== NAVIGATE TO MARKER END =====');
     
     // Store the marker location data in sessionStorage for the chat-page to retrieve
-    if (marker?.location?.latitude && marker?.location?.longitude) {
+    const markerLocation = marker?.officeLocation ?? marker?.location;
+    if (markerLocation?.latitude && markerLocation?.longitude) {
       sessionStorage.setItem('selectedMarkerLocation', JSON.stringify({
-        latitude: marker.location.latitude,
-        longitude: marker.location.longitude,
+        latitude: markerLocation.latitude,
+        longitude: markerLocation.longitude,
         markerData: marker
       }));
       console.log('[SessionPage.onNavigateToMarker] Stored marker location in sessionStorage');
@@ -1599,8 +1606,8 @@ private startUserSyncInBackground(userId: string): void {
     this.router.navigate(['/chat-page'], { 
       queryParams: { 
         tab: 'location',
-        markerLat: marker?.location?.latitude,
-        markerLng: marker?.location?.longitude
+        markerLat: markerLocation?.latitude,
+        markerLng: markerLocation?.longitude
       }
     });
     console.log('[SessionPage.onNavigateToMarker] Navigating to chat-page with location tab');
@@ -1685,20 +1692,30 @@ private startUserSyncInBackground(userId: string): void {
       return;
     }
 
+    const storedProfile = (this.readStoredUserProfile && this.readStoredUserProfile()) || null;
+    const officeLocation = {
+      latitude: this.markerFormData.location.latitude,
+      longitude: this.markerFormData.location.longitude,
+    };
     const payload = {
       userID: userId,
       name,
       address,
+      officeAddress: address,
       contactInfo,
       availableTime,
       unavailableTime,
-      location: {
-        latitude: this.markerFormData.location.latitude,
-        longitude: this.markerFormData.location.longitude,
-      },
+      // include profile fields (prefer live component props, fall back to stored profile)
+      firstName: this.firstName || storedProfile?.firstName || storedProfile?.givenName || '',
+      lastName: this.lastName || storedProfile?.lastName || storedProfile?.familyName || '',
+      email: this.email || storedProfile?.email || '',
+      location: officeLocation,
+      officeLocation,
       created: new Date().toISOString(),
       createdAt: new Date().toISOString(),
     };
+
+    console.log("office location Payload", payload);
 
     try {
       const { collection, doc, getFirestore, setDoc } = await import('firebase/firestore');

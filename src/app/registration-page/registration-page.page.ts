@@ -204,11 +204,31 @@ async onRegister() {
         approvedBy: null
       };
 
+      const pendingOfficeLocationPayload = {
+        markerId: pendingUid,
+        pendingAccountId: pendingUid,
+        userID: pendingUid,
+        firstName: firstName ?? '',
+        lastName: lastName ?? '',
+        role: 'engineer',
+        status: 'pending',
+        location: {
+          latitude: officeLatitude ?? null,
+          longitude: officeLongitude ?? null
+        },
+        officeAddress: location ?? '',
+        createdAt: new Date()
+      };
+
       console.log('[RegistrationPage] Pending engineer account payload:', pendingPayload);
       
       // Write to pendingAccounts collection only (no Firebase Auth user created)
       await setDoc(doc(this.firestore, 'pendingAccounts', pendingUid), pendingPayload);
       console.log('[RegistrationPage] Pending engineer account written with id:', pendingUid);
+
+      // Write the pending engineer office location marker to its own collection.
+      await setDoc(doc(this.firestore, 'pendingUserOfficeLocationMarker', pendingUid), pendingOfficeLocationPayload);
+      console.log('[RegistrationPage] Pending engineer office location written with id:', pendingUid);
 
       // Set success message
       this.registrationSuccess = 'Account request submitted successfully. Your account is under review.';

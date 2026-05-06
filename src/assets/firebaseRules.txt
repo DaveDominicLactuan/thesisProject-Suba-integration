@@ -167,9 +167,27 @@ service cloud.firestore {
     // ========== PENDING ACCOUNTS COLLECTION ==========
     match /pendingAccounts/{userId} {
       allow read: if true;
-      allow create: if isSignedIn()
-        && request.resource.data.userID == request.auth.uid;
+      // Allow unauthenticated creation of pending engineer accounts during registration
+      allow create: if request.resource.data.userID is string
+        && request.resource.data.email is string
+        && request.resource.data.firstName is string
+        && request.resource.data.lastName is string
+        && request.resource.data.role == 'engineer'
+        && request.resource.data.status == 'pending'
+        && request.resource.data.prcNumber is string;
       allow update, delete: if isSignedIn() && request.auth.token.admin == true;
+    }
+
+    // ========== OFFICE LOCATIONS COLLECTION ==========
+    match /officeLocations/{userId} {
+      allow read: if isSignedIn() && (isAdmin() || userId == request.auth.uid);
+      allow create, update: if isSignedIn()
+        && (isAdmin() || userId == request.auth.uid)
+        && request.resource.data.userID == request.auth.uid
+        && request.resource.data.officeLocation is map
+        && request.resource.data.officeLocation.latitude is number
+        && request.resource.data.officeLocation.longitude is number;
+      allow delete: if isSignedIn() && (isAdmin() || userId == request.auth.uid);
     }
 
     // ========== USER OFFICE LOCATION MARKERS COLLECTION ==========
@@ -179,29 +197,37 @@ service cloud.firestore {
 
       allow create: if isSignedIn()
         && (isAdmin() || request.resource.data.userID == request.auth.uid)
-        && request.resource.data.markerId == markerId
-        && request.resource.data.locationName is string
-        && request.resource.data.address is string
-        && request.resource.data.contactInfo is string
-        && request.resource.data.availableTime is string
+        && request.resource.data.userID is string
         && request.resource.data.email is string
-        && request.resource.data.unavailableTime is string
-        && (
-          request.resource.data.latitude == null
-          || request.resource.data.latitude is number
-        )
-        && (
-          request.resource.data.longitude == null
-          || request.resource.data.longitude is number
-        );
+        && request.resource.data.officeAddress is string
+        && request.resource.data.officeLocation is map
+        && request.resource.data.officeLocation.latitude is number
+        && request.resource.data.officeLocation.longitude is number;
 
       allow update: if isSignedIn()
         && (isAdmin() || resource.data.userID == request.auth.uid)
-        && request.resource.data.userID == resource.data.userID
-        && request.resource.data.markerId == resource.data.markerId;
+        && request.resource.data.userID == resource.data.userID;
 
       allow delete: if isSignedIn()
         && (isAdmin() || resource.data.userID == request.auth.uid);
+    }
+
+    // ========== PENDING USER OFFICE LOCATION MARKERS COLLECTION ==========
+    match /pendingUserOfficeLocationMarker/{markerId} {
+      allow read: if true;
+      // Allow unauthenticated creation of pending engineer office location markers during registration
+      allow create: if request.resource.data.userID is string
+        && request.resource.data.userID == markerId
+        && request.resource.data.firstName is string
+        && request.resource.data.lastName is string
+        && request.resource.data.officeAddress is string
+        && request.resource.data.role == 'engineer'
+        && request.resource.data.status == 'pending'
+        && (request.resource.data.location == null
+          || (request.resource.data.location is map
+            && request.resource.data.location.latitude is number
+            && request.resource.data.location.longitude is number));
+      allow update, delete: if isSignedIn() && request.auth.token.admin == true;
     }
 
     // ========== DENY ALL OTHER ACCESS ==========

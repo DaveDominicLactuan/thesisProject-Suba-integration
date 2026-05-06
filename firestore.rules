@@ -167,6 +167,18 @@ service cloud.firestore {
       allow update, delete: if isSignedIn() && request.auth.token.admin == true;
     }
 
+    // ========== OFFICE LOCATIONS COLLECTION ==========
+    match /officeLocations/{userId} {
+      allow read: if isSignedIn() && (isAdmin() || userId == request.auth.uid);
+      allow create, update: if isSignedIn()
+        && (isAdmin() || userId == request.auth.uid)
+        && request.resource.data.userID == request.auth.uid
+        && request.resource.data.officeLocation is map
+        && request.resource.data.officeLocation.latitude is number
+        && request.resource.data.officeLocation.longitude is number;
+      allow delete: if isSignedIn() && (isAdmin() || userId == request.auth.uid);
+    }
+
     // ========== OFFICE LOCATION MARKERS ==========
     // Chat map reads the full collection for all signed-in users.
     match /userOfficeLocationMarker/{markerId} {

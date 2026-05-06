@@ -251,16 +251,16 @@
             <div class="confirm-row"><span>Email:</span> <span>{{ regForm.value.email }}</span></div>
             <div class="confirm-row"><span>Phone Number:</span> <span>{{ regForm.value.phoneNumber }}</span></div>
             <div class="confirm-row"><span>Location:</span> <span>{{ regForm.value.location }}</span></div>
-            <div class="confirm-row"><span>Office Coordinates:</span> <span>{{ regForm.value.officeLatitude | number: '1.6-6' }}, {{ regForm.value.officeLongitude | number: '1.6-6' }}</span></div>
+            <!-- <div class="confirm-row"><span>Office Coordinates:</span> <span>{{ regForm.value.officeLatitude | number: '1.6-6' }}, {{ regForm.value.officeLongitude | number: '1.6-6' }}</span></div> -->
             <div class="confirm-row"><span>Password:</span> <span>••••••••</span></div>
             <div class="confirm-row"><span>Role:</span> <span>{{ selectedRole | titlecase }}</span></div>
           </div>
           <div class="step-actions">
-            <button class="signup-btn" type="button" (click)="prevStep()" [disabled]="isRegistering">Back</button>
             <button class="signup-btn" type="submit" [disabled]="isRegistering || regForm.invalid || !selectedRole">
               <ion-spinner *ngIf="isRegistering" name="crescent"></ion-spinner>
               <span>{{ isRegistering ? 'Creating account...' : 'Confirm & Sign Up' }}</span>
             </button>
+            <button class="signup-btn" type="button" (click)="prevStep()" [disabled]="isRegistering">Back</button>
           </div>
         </div>
       </div>

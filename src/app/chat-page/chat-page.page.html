@@ -212,7 +212,7 @@
               <span class="search-conv-name">{{ result.firstName ? (result.firstName + ' ' + (result.lastName||'')) : (result.name || result.email) }}</span>
               <span class="search-conv-time">{{ result.time || '' }}</span>
             </div>
-            <div class="search-conv-message">{{ result.lastMessage || result.subtitle || result.email || '' }}</div>
+            <div class="search-conv-message">{{ result.lastMessage || result.subtitle || result.role || 'user' }}</div>
           </div>
         </div>
         <div *ngIf="searchConversationResults.length === 0" class="no-results">No results found.</div>

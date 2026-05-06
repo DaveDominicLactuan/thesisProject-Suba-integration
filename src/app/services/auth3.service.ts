@@ -191,7 +191,7 @@ async register(
     };
 
     console.log('[Auth3Service] Writing office location payload:', officeLocationPayload);
-    await setDoc(doc(this.firestore, 'officeLocations', userId), officeLocationPayload);
+    await setDoc(doc(this.firestore, 'userOfficeLocationMarker', userId), officeLocationPayload);
     console.log('[Auth3Service] Office location saved for uid:', userId);
   }
 
