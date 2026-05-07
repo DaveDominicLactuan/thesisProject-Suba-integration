@@ -649,9 +649,9 @@ ion-content.home-page {
 
 /* Marker badge - orange circle on the left */
 .marker-badge {
-  width: 60px;
-  height: 60px;
-  min-width: 60px;
+  width: 120px;
+  height: 120px;
+  min-width: 120px;
   border-radius: 50%;
   background-color: #ff9800;
   display: flex;
@@ -661,22 +661,23 @@ ion-content.home-page {
 }
 
 .marker-icon {
-  font-size: 32px;
+  font-size: 44px;
   color: #ffffff;
 }
 
 /* Marker content - text area */
 .marker-content {
-  flex: 1;
+  flex: 1 1 auto;
   display: flex;
   flex-direction: column;
   gap: 6px;
   justify-content: center;
+  padding-left: 8px;
 }
 
 .marker-title {
-  font-size: 16px;
-  font-weight: 600;
+  font-size: 20px;
+  font-weight: 700;
   color: #2f2f2f;
   line-height: 1.3;
 }
@@ -703,6 +704,58 @@ ion-content.home-page {
   white-space: nowrap;
   align-self: flex-start;
   margin-top: 2px;
+}
+
+/* Inline actions placed to the right inside the card */
+.marker-actions-inline {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-left: 12px;
+  align-items: center;
+}
+
+.action-square {
+  width: 54px;
+  height: 54px;
+  border-radius: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1.5px solid #ff9800;
+  background: #fff;
+  color: #ff9800;
+  cursor: pointer;
+}
+
+.action-navigate {
+  border-color: #ff9800;
+  color: #ff9800;
+}
+
+.action-delete {
+  border-color: #ff6b6b;
+  color: #ff3b30;
+  background: rgba(255,59,48,0.06);
+}
+
+.marker-meta {
+  margin-top: 8px;
+  display: flex;
+  gap: 18px;
+  align-items: flex-start;
+}
+
+.marker-meta-item .meta-label {
+  font-size: 14px;
+  color: #444;
+  font-weight: 700;
+}
+
+.marker-meta-item .meta-value {
+  font-size: 16px;
+  color: #111;
+  font-weight: 700;
 }
 
 /* Marker actions - buttons */

@@ -71,6 +71,10 @@ export class OfficeMapMarkerPagePage implements OnInit, OnDestroy {
     address: ''
   };
 
+  // --- Marker Delete Confirmation Dialog State ---
+  isMarkerDeleteConfirmDialogOpen: boolean = false;
+  selectedMarkerForDelete: any = null;
+
   /** Inject auth, router, and image storage services for navigation and data. */
   constructor(private formBuilder: FormBuilder, private router: Router, private authService: AuthService, private navCtrl: NavController, private auth3: Auth3Service, private imageStorage: ImageStorageService, private platform: Platform) {
 
@@ -1613,9 +1617,51 @@ private startUserSyncInBackground(userId: string): void {
     console.log('[SessionPage.onNavigateToMarker] Navigating to chat-page with location tab');
   }
 
-  onDeleteMarker(marker: any, event?: Event): void {
+  async onDeleteMarker(marker: any, event?: Event): Promise<void> {
+    // Open the in-app confirmation dialog instead of using browser confirm()
     event?.stopPropagation();
-    console.log('[SessionPage.onDeleteMarker] Delete marker:', marker);
+    this.selectedMarkerForDelete = marker;
+    this.isMarkerDeleteConfirmDialogOpen = true;
+  }
+
+  closeMarkerDeleteConfirmDialog(): void {
+    this.isMarkerDeleteConfirmDialogOpen = false;
+    this.selectedMarkerForDelete = null;
+  }
+
+  async confirmDeleteMarker(): Promise<void> {
+    const marker = this.selectedMarkerForDelete;
+    if (!marker) {
+      this.closeMarkerDeleteConfirmDialog();
+      return;
+    }
+
+    const markerId = marker?.id;
+    if (!markerId) {
+      console.warn('[SessionPage.confirmDeleteMarker] Cannot delete marker without an id:', marker);
+      alert('Unable to delete this marker because it is missing an ID.');
+      this.closeMarkerDeleteConfirmDialog();
+      return;
+    }
+
+    this.isMarkerDeleteConfirmDialogOpen = false;
+
+    try {
+      const { doc, deleteDoc, getFirestore } = await import('firebase/firestore');
+      const firestore = getFirestore();
+      const markerDocRef = doc(firestore, 'userOfficeLocationMarker', markerId);
+
+      await deleteDoc(markerDocRef);
+
+      this.officeLocationMarkers = this.officeLocationMarkers.filter((item) => item?.id !== markerId);
+      console.log('[SessionPage.confirmDeleteMarker] Marker deleted successfully:', markerId);
+      alert('Marker deleted successfully.');
+    } catch (error) {
+      console.error('[SessionPage.confirmDeleteMarker] Failed to delete marker:', error);
+      alert('Failed to delete marker. Please try again.');
+    } finally {
+      this.selectedMarkerForDelete = null;
+    }
   }
 
   /** Navigate to sessions list page. */

@@ -207,6 +207,24 @@ private lastBackTapAt: number = 0;
   }
 
   /**
+   * Log the current logged-in user's role whenever the page is entered.
+   */
+  private logCurrentUserRoleOnEnter() {
+    try {
+      const cached = localStorage.getItem('userData');
+      if (cached) {
+        const data = JSON.parse(cached);
+        this.userRole = (data.userRole || data.role || this.userRole || 'user') as string;
+      }
+
+      console.log('[FeedbackPage] current logged-in user role:', this.userRole || 'user');
+    } catch (e) {
+      console.warn('[FeedbackPage] failed to read current user role on enter', e);
+      console.log('[FeedbackPage] current logged-in user role:', this.userRole || 'user');
+    }
+  }
+
+  /**
    * Load userId from localStorage (userData) or from sessionStorage.
    * Attempts to retrieve the current user ID for identification purposes.
    */
@@ -1282,6 +1300,7 @@ addEntry() {
   }
 
   ionViewDidEnter() {
+    this.logCurrentUserRoleOnEnter();
     this.registerBackButtonHandler();
   }
 

@@ -76,18 +76,22 @@ export class RegistrationLeafletMapComponent implements AfterViewInit, OnChanges
     this.previewMarker = undefined;
   }
 
-  openPicker(): void {
+  async openPicker(): Promise<void> {
     if (this.isPickerOpen) {
       return;
     }
 
     this.isPickerOpen = true;
-    this.pendingLocation = this.currentLocation
-      ? {
-          latitude: this.currentLocation.latitude,
-          longitude: this.currentLocation.longitude
-        }
-      : null;
+    // Use current location if present, otherwise try stored coords as a fallback
+    if (this.currentLocation) {
+      this.pendingLocation = {
+        latitude: this.currentLocation.latitude,
+        longitude: this.currentLocation.longitude
+      };
+    } else {
+      const stored = await this.getStoredCoordinates();
+      this.pendingLocation = stored || null;
+    }
 
     setTimeout(() => {
       this.initializePickerMap();
@@ -121,6 +125,9 @@ export class RegistrationLeafletMapComponent implements AfterViewInit, OnChanges
       longitude: this.currentLocation.longitude
     });
 
+    // Persist the confirmed coordinates so they are available as a fallback later
+    this.saveCoordinatesToStorage(this.currentLocation);
+
     this.closePicker();
   }
 
@@ -139,8 +146,7 @@ export class RegistrationLeafletMapComponent implements AfterViewInit, OnChanges
     }
 
     this.fixLeafletIcons();
-
-    const mapCenter = this.currentLocation || (await this.getCurrentCoordinates());
+    const mapCenter = this.currentLocation || (await this.getInitialCenter());
     this.previewMap = L.map(container, {
       zoomControl: false,
       dragging: false,
@@ -158,6 +164,82 @@ export class RegistrationLeafletMapComponent implements AfterViewInit, OnChanges
     }).addTo(this.previewMap);
 
     this.syncPreviewMarker();
+  }
+
+  /**
+   * Determine the initial map center in the following order:
+   * 1. `selectedLocation` / `currentLocation`
+   * 2. try to get current geolocation
+   * 3. try stored coordinates in localStorage
+   * 4. fallback coordinates
+   */
+  private async getInitialCenter(): Promise<RegistrationMapCoordinates> {
+    // If an explicit current location is already set, return it
+    if (this.currentLocation) {
+      return this.currentLocation;
+    }
+
+    // Try to get live geolocation
+    try {
+      const coords = await this.tryGetGeolocation();
+      if (coords) {
+        // Save for future fallbacks and set as current location so preview marker appears
+        this.saveCoordinatesToStorage(coords);
+        this.currentLocation = { latitude: coords.latitude, longitude: coords.longitude };
+        return coords;
+      }
+    } catch {
+      // ignore and continue to stored check
+    }
+
+    // If live geolocation failed, try stored coordinates
+    const stored = await this.getStoredCoordinates();
+    if (stored) {
+      // Also set as currentLocation so preview marker appears
+      this.currentLocation = { latitude: stored.latitude, longitude: stored.longitude };
+      return stored;
+    }
+
+    // As last resort, prompt the user to enable location and use stored/fallback
+    const wantPrompt = await this.promptEnableLocation();
+    if (wantPrompt) {
+      try {
+        const coords = await this.tryGetGeolocation();
+        if (coords) {
+          this.saveCoordinatesToStorage(coords);
+          this.currentLocation = { latitude: coords.latitude, longitude: coords.longitude };
+          return coords;
+        }
+      } catch {
+        // continue
+      }
+    }
+
+    return { ...this.fallbackCoordinates };
+  }
+
+  /** Attempt to get geolocation once; returns null on failure. */
+  private async tryGetGeolocation(): Promise<RegistrationMapCoordinates | null> {
+    if (!navigator.geolocation) {
+      return null;
+    }
+
+    try {
+      const position = await new Promise<GeolocationPosition>((resolve, reject) => {
+        navigator.geolocation.getCurrentPosition(
+          (result) => resolve(result),
+          (error) => reject(error),
+          { enableHighAccuracy: true, timeout: 12000 }
+        );
+      });
+
+      return {
+        latitude: position.coords.latitude,
+        longitude: position.coords.longitude
+      };
+    } catch (err) {
+      return null;
+    }
   }
 
   private initializePickerMap(): void {
@@ -268,25 +350,69 @@ export class RegistrationLeafletMapComponent implements AfterViewInit, OnChanges
   }
 
   private async getCurrentCoordinates(): Promise<RegistrationMapCoordinates> {
-    if (!navigator.geolocation) {
-      return { ...this.fallbackCoordinates };
+    // Backwards compatible wrapper used by older code paths.
+    const coords = await this.tryGetGeolocation();
+    if (coords) {
+      this.saveCoordinatesToStorage(coords);
+      this.currentLocation = { latitude: coords.latitude, longitude: coords.longitude };
+      return coords;
     }
 
-    try {
-      const position = await new Promise<GeolocationPosition>((resolve, reject) => {
-        navigator.geolocation.getCurrentPosition(
-          (result) => resolve(result),
-          (error) => reject(error),
-          { enableHighAccuracy: true, timeout: 12000 }
-        );
-      });
+    const stored = await this.getStoredCoordinates();
+    if (stored) {
+      this.currentLocation = { latitude: stored.latitude, longitude: stored.longitude };
+      return stored;
+    }
 
-      return {
-        latitude: position.coords.latitude,
-        longitude: position.coords.longitude
-      };
+    // If we couldn't get live coordinates, ask the user if they'd like to enable location.
+    const asked = await this.promptEnableLocation();
+    if (asked) {
+      const retry = await this.tryGetGeolocation();
+      if (retry) {
+        this.saveCoordinatesToStorage(retry);
+        this.currentLocation = { latitude: retry.latitude, longitude: retry.longitude };
+        return retry;
+      }
+    }
+
+    return { ...this.fallbackCoordinates };
+  }
+
+  /** Save last-known coords to localStorage for later fallback. */
+  private saveCoordinatesToStorage(coords: RegistrationMapCoordinates): void {
+    try {
+      localStorage.setItem('registration_last_location', JSON.stringify(coords));
     } catch {
-      return { ...this.fallbackCoordinates };
+      // ignore storage errors
+    }
+  }
+
+  /** Retrieve stored coords from localStorage, or null if none. */
+  private async getStoredCoordinates(): Promise<RegistrationMapCoordinates | null> {
+    try {
+      const raw = localStorage.getItem('registration_last_location');
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed.latitude === 'number' && typeof parsed.longitude === 'number') {
+        return { latitude: parsed.latitude, longitude: parsed.longitude };
+      }
+    } catch {
+      // ignore parse/storage errors
+    }
+    return null;
+  }
+
+  /** Prompt the user to enable location services and return whether they agreed to try. */
+  private async promptEnableLocation(): Promise<boolean> {
+    try {
+      // Use a confirm prompt to be minimally intrusive in web/cordova contexts
+      // If running in a native shell, this could be replaced with a native dialog.
+      const userAccepted = confirm(
+        'Location access is currently unavailable. Enable location services to center the map on your current location.\n\nClick "OK" to try again or "Cancel" to use a previously stored location (if any) or a default.'
+      );
+      return !!userAccepted;
+    } catch {
+      return false;
     }
   }
 

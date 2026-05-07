@@ -207,37 +207,43 @@
 
   <div class="markers-list">
     <ng-container *ngFor="let marker of officeLocationMarkers">
-      <div class="marker-card">
-        <div class="marker-badge">
+      <div class="marker-card" (click)="onViewMarker(marker)">
+        <!-- <div class="marker-badge">
           <ion-icon name="location" class="marker-icon"></ion-icon>
-        </div>
+        </div> -->
+
         <div class="marker-content">
           <div class="marker-title">{{ marker.name || 'Office Location' }}</div>
+
           <div class="marker-location">
             <ion-icon name="location-outline" class="detail-icon"></ion-icon>
             <span>{{ marker.address || marker.location || 'Address not set' }}</span>
           </div>
-          <div class="marker-phone">
-            <ion-icon name="call-outline" class="detail-icon"></ion-icon>
-            <span>{{ marker.phone || marker.phoneNumber || 'N/A' }}</span>
+
+          <div class="marker-meta">
+            <div class="marker-meta-item">
+              <div class="meta-label">Available Time:</div>
+              <div class="meta-value">{{ marker.availableTime || '' }}</div>
+            </div>
+            <div class="marker-meta-item">
+              <div class="meta-label">Unavailable Time:</div>
+              <div class="meta-value">{{ marker.unavailableTime || '' }}</div>
+            </div>
           </div>
         </div>
+
+        <div class="marker-actions-inline">
+          <button class="action-square action-navigate" (click)="$event.stopPropagation(); onNavigateToMarker(marker)">
+            <ion-icon name="navigate-outline"></ion-icon>
+          </button>
+          <button class="action-square action-delete" (click)="$event.stopPropagation(); onDeleteMarker(marker, $event)">
+            <ion-icon name="trash-outline"></ion-icon>
+          </button>
+        </div>
+
         <div class="marker-time">
           {{ marker.created | date:'shortTime' }}
         </div>
-      </div>
-      <div class="marker-actions">
-        <button class="action-btn view-btn" (click)="onViewMarker(marker)" title="View">
-          <ion-icon name="eye-outline"></ion-icon>
-          <span>View</span>
-        </button>
-        <button class="action-btn navigate-btn" (click)="onNavigateToMarker(marker)" title="Navigate">
-          <ion-icon name="navigate-outline"></ion-icon>
-          <span>Navigate</span>
-        </button>
-        <button class="action-btn delete-btn" (click)="onDeleteMarker(marker, $event)" title="Delete">
-          <ion-icon name="trash-outline"></ion-icon>
-        </button>
       </div>
     </ng-container>
     <div *ngIf="officeLocationMarkers.length === 0" class="no-markers">
@@ -419,6 +425,37 @@
       100% { transform: rotate(360deg); }
     }
   </style>
+
+  <!-- Marker Delete Confirmation Dialog Overlay -->
+  <div *ngIf="isMarkerDeleteConfirmDialogOpen" class="session-confirm-overlay" (click)="closeMarkerDeleteConfirmDialog()">
+    <div class="session-confirm-dialog" (click)="$event.stopPropagation()">
+      <div class="session-confirm-header">
+        <h2>Do you want to delete the marker</h2>
+        <p>Confirm deletion of the marker</p>
+      </div>
+      <div class="session-confirm-content">
+        <div *ngIf="selectedMarkerForDelete" class="session-info">
+          <div class="session-confirm-name">{{ selectedMarkerForDelete.name || 'Office Location' }}</div>
+          <div class="session-confirm-details" style="margin-top:12px;">
+            <div style="background:#f0f0f0;padding:12px;border-radius:6px;color:#333;">
+              <div><strong>Address:</strong> {{ selectedMarkerForDelete.address || selectedMarkerForDelete.officeAddress || 'Not set' }}</div>
+              <div *ngIf="selectedMarkerForDelete.officeLocation || selectedMarkerForDelete.location" style="margin-top:6px;"><strong>Coords:</strong>
+                {{ (selectedMarkerForDelete.officeLocation?.latitude || selectedMarkerForDelete.location?.latitude) || '-' }},
+                {{ (selectedMarkerForDelete.officeLocation?.longitude || selectedMarkerForDelete.location?.longitude) || '-' }}</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="session-confirm-buttons" style="margin-top:16px;">
+        <button class="confirm-btn delete-confirm" (click)="confirmDeleteMarker()">
+          Delete Marker
+        </button>
+        <button class="cancel-btn" (click)="closeMarkerDeleteConfirmDialog()">
+          Cancel
+        </button>
+      </div>
+    </div>
+  </div>
 
 <ion-content id="main-content" class="home-page" (click)="closeSidebar()">
  
