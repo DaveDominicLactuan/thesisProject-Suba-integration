@@ -1,5 +1,5 @@
 import { Component, OnInit, OnDestroy, NgZone } from '@angular/core';
-import { Router } from '@angular/router';
+import { ActivatedRoute, Router } from '@angular/router';
 import { FormBuilder, FormGroup, Validators } from '@angular/forms';
 import { AuthService } from '../services/auth.service';
 import { NavController, Platform } from '@ionic/angular';
@@ -2454,6 +2454,7 @@ export class ChatPagePage implements OnInit, OnDestroy {
   private baseTileLayer?: OfflineLeafletTileLayer;
   private userLocationMarker?: L.Marker;
   private readonly fallbackCoordinates = { latitude: 10.324849, longitude: 123.849164 };
+  private pendingMapLocation: { latitude: number; longitude: number; label?: string } | null = null;
   private readonly osmTileTemplate = 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
   private readonly offlineTileSubdomains = ['a', 'b', 'c'];
   offlineModeEnabled = false;
@@ -2921,7 +2922,7 @@ export class ChatPagePage implements OnInit, OnDestroy {
   stories: any[] = [];
 
   /** Inject auth, router, and image storage services for navigation and data. */
-  constructor(private formBuilder: FormBuilder, private router: Router, private authService: AuthService, private navCtrl: NavController, public auth3: Auth3Service, private imageStorage: ImageStorageService, private platform: Platform, private firestore: Firestore, private chatService: ChatService, private presenceService: PresenceService, private userPrefetchCache: UserPrefetchCacheService, private offlineMapTileService: OfflineMapTileService, private ngZone: NgZone) {
+  constructor(private formBuilder: FormBuilder, private router: Router, private route: ActivatedRoute, private authService: AuthService, private navCtrl: NavController, public auth3: Auth3Service, private imageStorage: ImageStorageService, private platform: Platform, private firestore: Firestore, private chatService: ChatService, private presenceService: PresenceService, private userPrefetchCache: UserPrefetchCacheService, private offlineMapTileService: OfflineMapTileService, private ngZone: NgZone) {
 
   }
 
@@ -2929,6 +2930,8 @@ export class ChatPagePage implements OnInit, OnDestroy {
 ngOnInit(): void {
   console.log('[ChatPage.ngOnInit] ===== PAGE INIT START (ngOnInit called) =====');
   console.log('[ChatPage.ngOnInit] Auth currentUser on ngOnInit:', this.auth3.getCurrentUser()?.uid || 'null');
+
+  this.loadIncomingMapLocation();
 
   // If navigation passed an `activeTab` via navigation state, apply it here.
   try {
@@ -2940,6 +2943,12 @@ ngOnInit(): void {
     }
   } catch (e) {
     // ignore
+  }
+
+  if (this.activeTab === 'location') {
+    this.scheduleMapInitialization();
+    this.startMapRefreshTimer();
+    void this.triggerOfflineDownloadWithDefaults();
   }
 
   const cachedUid = this.resolveCachedUid();
@@ -2985,6 +2994,53 @@ ngOnInit(): void {
 
   // Setup hardware back button handler
   this.setupHardwareBackButton();
+}
+
+private loadIncomingMapLocation(): void {
+  const queryParamMap = this.route?.snapshot?.queryParamMap;
+  const queryLatitude = queryParamMap ? Number.parseFloat(queryParamMap.get('markerLat') || '') : Number.NaN;
+  const queryLongitude = queryParamMap ? Number.parseFloat(queryParamMap.get('markerLng') || '') : Number.NaN;
+  const navState: any = history?.state || {};
+  const stateLatitude = Number.parseFloat(navState?.markerLat);
+  const stateLongitude = Number.parseFloat(navState?.markerLng);
+
+  if (Number.isFinite(queryLatitude) && Number.isFinite(queryLongitude)) {
+    this.pendingMapLocation = {
+      latitude: queryLatitude,
+      longitude: queryLongitude,
+      label: queryParamMap?.get('markerLabel') || undefined
+    };
+  } else if (Number.isFinite(stateLatitude) && Number.isFinite(stateLongitude)) {
+    this.pendingMapLocation = {
+      latitude: stateLatitude,
+      longitude: stateLongitude,
+      label: navState?.markerLabel || undefined
+    };
+  } else {
+    try {
+      const storedMarkerLocationRaw = sessionStorage.getItem('selectedMarkerLocation');
+      if (storedMarkerLocationRaw) {
+        const storedMarkerLocation = JSON.parse(storedMarkerLocationRaw);
+        const storedLatitude = Number.parseFloat(storedMarkerLocation?.latitude);
+        const storedLongitude = Number.parseFloat(storedMarkerLocation?.longitude);
+
+        if (Number.isFinite(storedLatitude) && Number.isFinite(storedLongitude)) {
+          this.pendingMapLocation = {
+            latitude: storedLatitude,
+            longitude: storedLongitude,
+            label: storedMarkerLocation?.markerData?.name || storedMarkerLocation?.markerData?.address || undefined
+          };
+        }
+      }
+    } catch (error) {
+      console.warn('[ChatPage.loadIncomingMapLocation] Failed to read stored marker location:', error);
+    }
+  }
+
+  if (this.pendingMapLocation) {
+    this.activeTab = 'location';
+    console.log('[ChatPage.loadIncomingMapLocation] Incoming map location loaded:', this.pendingMapLocation);
+  }
 }
 
 getCurrentMapBoundsBBox(): { west: number; south: number; east: number; north: number } | null {
@@ -3258,6 +3314,14 @@ private async maybePromptForLocationActivation(): Promise<void> {
 }
 
 private async getInitialCoordinatesWithTimeout(timeoutMs: number = 4500): Promise<{ latitude: number; longitude: number } | null> {
+  if (this.pendingMapLocation) {
+    console.log('[ChatPage.getInitialCoordinatesWithTimeout] Using incoming marker location:', this.pendingMapLocation);
+    return {
+      latitude: this.pendingMapLocation.latitude,
+      longitude: this.pendingMapLocation.longitude
+    };
+  }
+
   try {
     // First, try to get current coordinates with timeout
     const coordinates = await Promise.race<
@@ -4047,6 +4111,7 @@ onMsgBubbleTap(message: Message): void {
     const sessionStorageKeys = [
       this.STORAGE_KEYS.userProfile,
       this.STORAGE_KEYS.isLoggedInSession,
+      'selectedMarkerLocation',
       'userProfile',
       'isLoggedInSession'
     ];
@@ -6171,7 +6236,7 @@ onMsgBubbleTap(message: Message): void {
         this.applyEffectiveTileLayerMode();
         this.bindMapTapCapture();
         this.map.setView(center, 15);
-        await this.markUserLocation(this.map, coordinates);
+        await this.markUserLocation(this.map, coordinates, this.pendingMapLocation?.label ? `Marker: ${this.pendingMapLocation.label}` : 'You are here!');
         // Start background online refresh (won't block map display since markers & tiles are already visible)
         void this.runStaggeredOnlineBootstrap(bootstrapId);
         return;
@@ -6201,7 +6266,7 @@ onMsgBubbleTap(message: Message): void {
       console.log('[ChatPage.initMap] Rendering local marker cache immediately with offline tiles (before any internet checks).');
       this.renderLocalMarkerCacheImmediately();
       
-      await this.markUserLocation(this.map, coordinates);
+      await this.markUserLocation(this.map, coordinates, this.pendingMapLocation?.label ? `Marker: ${this.pendingMapLocation.label}` : 'You are here!');
       
       // Start background online refresh (won't block display since markers & tiles are already rendered)
       // If online & location detected, refreshes markers from Firestore and stores them locally
@@ -6213,7 +6278,7 @@ onMsgBubbleTap(message: Message): void {
     }
   }
 
-  async markUserLocation(map: L.Map, coordinates?: { latitude: number; longitude: number } | null) {
+  async markUserLocation(map: L.Map, coordinates?: { latitude: number; longitude: number } | null, popupText: string = 'You are here!') {
       console.log('[ChatPage.markUserLocation] Marking user location...', { coordinatesFromCaller: coordinates });
       try {
         const resolvedCoordinates = coordinates ?? await this.getCurrentCoordinates();
@@ -6238,7 +6303,7 @@ onMsgBubbleTap(message: Message): void {
   icon: this.userLocationIcon
 })
   .addTo(map)
-  .bindPopup('You are here!')
+  .bindPopup(popupText)
   .openPopup();
           this.bindMarkerSelectionTrigger(this.userLocationMarker, 'You are here Selection Overlay');
 

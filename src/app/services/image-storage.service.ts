@@ -965,7 +965,7 @@ export class ImageStorageService {
           timestamp: image.timestamp,
           filename: image.filename,
           userId: targetUserId,
-          createdBy,
+          createdBy: image.userId,
           sessionId: session.id,
           // NOTE: Commented out - base64 data stored in S3 instead
           // original: safeOriginal,

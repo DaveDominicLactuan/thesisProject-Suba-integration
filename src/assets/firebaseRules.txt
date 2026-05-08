@@ -12,7 +12,10 @@ service cloud.firestore {
     function isAdmin() {
       return isSignedIn()
         && exists(/databases/$(database)/documents/users/$(request.auth.uid))
-        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isAdmin == true;
+        && (
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isAdmin == true
+          || get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isAdmin == 'true'
+        );
     }
 
     function isOwnedByCurrentUser(data) {
@@ -198,15 +201,50 @@ service cloud.firestore {
       allow create: if isSignedIn()
         && (isAdmin() || request.resource.data.userID == request.auth.uid)
         && request.resource.data.userID is string
+        && (request.resource.data.name is string || request.resource.data.locationName is string)
+        && request.resource.data.contactInfo is string
+        && request.resource.data.availableTime is string
+        && request.resource.data.unavailableTime is string
         && request.resource.data.email is string
-        && request.resource.data.officeAddress is string
-        && request.resource.data.officeLocation is map
-        && request.resource.data.officeLocation.latitude is number
-        && request.resource.data.officeLocation.longitude is number;
+        && (
+          (
+            request.resource.data.address is string
+            && request.resource.data.officeLocation is map
+            && request.resource.data.officeLocation.latitude is number
+            && request.resource.data.officeLocation.longitude is number
+          )
+          ||
+          (
+            request.resource.data.officeAddress is string
+            && request.resource.data.officeLocation is map
+            && request.resource.data.officeLocation.latitude is number
+            && request.resource.data.officeLocation.longitude is number
+          )
+        );
 
       allow update: if isSignedIn()
         && (isAdmin() || resource.data.userID == request.auth.uid)
-        && request.resource.data.userID == resource.data.userID;
+        && request.resource.data.userID == resource.data.userID
+        && (request.resource.data.name is string || request.resource.data.locationName is string)
+        && request.resource.data.contactInfo is string
+        && request.resource.data.availableTime is string
+        && request.resource.data.unavailableTime is string
+        && request.resource.data.email is string
+        && (
+          (
+            request.resource.data.address is string
+            && request.resource.data.officeLocation is map
+            && request.resource.data.officeLocation.latitude is number
+            && request.resource.data.officeLocation.longitude is number
+          )
+          ||
+          (
+            request.resource.data.officeAddress is string
+            && request.resource.data.officeLocation is map
+            && request.resource.data.officeLocation.latitude is number
+            && request.resource.data.officeLocation.longitude is number
+          )
+        );
 
       allow delete: if isSignedIn()
         && (isAdmin() || resource.data.userID == request.auth.uid);

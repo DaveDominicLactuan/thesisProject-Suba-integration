@@ -69,7 +69,15 @@ export class CrackDetectionService {
     try {
       await this.init();
 
-      const tensor = new ort.Tensor('float32', inputTensor, [1, 3, 128, 128]);
+      const channels = 3;
+      const pixels = inputTensor.length / channels;
+      const side = Math.round(Math.sqrt(pixels));
+
+      if (!Number.isInteger(pixels) || side * side * channels !== inputTensor.length) {
+        throw new Error(`Invalid input tensor length ${inputTensor.length}; expected a flat CHW tensor with 3 channels and square spatial dimensions.`);
+      }
+
+      const tensor = new ort.Tensor('float32', inputTensor, [1, 3, side, side]);
       const feeds: Record<string, any> = { input: tensor };
 
       const results = await this.session.run(feeds);

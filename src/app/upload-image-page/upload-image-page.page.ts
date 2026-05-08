@@ -643,23 +643,24 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
     img.src = dataUrl;
     await new Promise(resolve => (img.onload = resolve));
 
+    const size = 224;
     const canvas = document.createElement('canvas');
-    canvas.width = 128;
-    canvas.height = 128;
+    canvas.width = size;
+    canvas.height = size;
     const ctx = canvas.getContext('2d')!;
-    ctx.drawImage(img, 0, 0, 128, 128);
+    ctx.drawImage(img, 0, 0, size, size);
 
-    const imageData = ctx.getImageData(0, 0, 128, 128);
-    const data = new Float32Array(1 * 3 * 128 * 128);
+    const imageData = ctx.getImageData(0, 0, size, size);
+    const data = new Float32Array(1 * 3 * size * size);
 
-    for (let i = 0; i < 128 * 128; i++) {
+    for (let i = 0; i < size * size; i++) {
       const r = imageData.data[i * 4 + 0] / 255.0;
       const g = imageData.data[i * 4 + 1] / 255.0;
       const b = imageData.data[i * 4 + 2] / 255.0;
       // CHW order
       data[i] = r;
-      data[128 * 128 + i] = g;
-      data[2 * 128 * 128 + i] = b;
+      data[size * size + i] = g;
+      data[2 * size * size + i] = b;
     }
 
     return data;

@@ -606,19 +606,20 @@ export class CameraPage2Page implements AfterViewInit {
     img.src = dataUrl;
     await new Promise(resolve => (img.onload = resolve));
 
+    const size = 224;
     const canvas = document.createElement('canvas');
-    canvas.width = 128;
-    canvas.height = 128;
+    canvas.width = size;
+    canvas.height = size;
     const ctx = canvas.getContext('2d')!;
-    ctx.drawImage(img, 0, 0, 128, 128);
+    ctx.drawImage(img, 0, 0, size, size);
 
-    const imageData = ctx.getImageData(0, 0, 128, 128);
-    const data = new Float32Array(1 * 3 * 128 * 128);
+    const imageData = ctx.getImageData(0, 0, size, size);
+    const data = new Float32Array(1 * 3 * size * size);
 
-    for (let i = 0; i < 128 * 128; i++) {
+    for (let i = 0; i < size * size; i++) {
       data[i] = (imageData.data[i * 4] / 255 - 0.5) / 0.5;           // R
-      data[i + 128 * 128] = (imageData.data[i * 4 + 1] / 255 - 0.5) / 0.5; // G
-      data[i + 2 * 128 * 128] = (imageData.data[i * 4 + 2] / 255 - 0.5) / 0.5; // B
+      data[i + size * size] = (imageData.data[i * 4 + 1] / 255 - 0.5) / 0.5; // G
+      data[i + 2 * size * size] = (imageData.data[i * 4 + 2] / 255 - 0.5) / 0.5; // B
     }
 
     return data;

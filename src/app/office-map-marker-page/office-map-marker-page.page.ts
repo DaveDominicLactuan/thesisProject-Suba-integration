@@ -70,6 +70,12 @@ export class OfficeMapMarkerPagePage implements OnInit, OnDestroy {
     location: { latitude: 0, longitude: 0 },
     address: ''
   };
+  isMarkerEditMode: boolean = false;
+  editingMarkerId: string | null = null;
+  selectedMarkerForEdit: any = null;
+  private longPressTimeout: any = null;
+  private longPressTriggeredMarkerId: string | null = null;
+  private readonly LONG_PRESS_DURATION = 500; // milliseconds
 
   // --- Marker Delete Confirmation Dialog State ---
   isMarkerDeleteConfirmDialogOpen: boolean = false;
@@ -104,17 +110,6 @@ private async initialize(): Promise<void> {
 
     this.userID = this.userID || this.getStoredUserId() || this.auth3.getCurrentUser()?.uid || null;
     this.isLoggedIn = !!this.userID;
-
-    // Step 2: Load sessions immediately from local storage for quick UI display
-    // Don't wait for Firestore — display what we have locally first
-    console.log('[SessionPage.initialize] Loading sessions from local storage (non-blocking)...');
-    await this.loadSessions().catch(e => console.warn('[SessionPage.initialize] loadSessions failed:', e));
-
-    // Step 3: Start background sync for Firestore data without blocking UI
-    const resolvedUserId = this.userID || this.auth3.getCurrentUser()?.uid || '';
-    if (resolvedUserId) {
-      this.startUserSyncInBackground(resolvedUserId);
-    }
   } catch (error) {
     console.error('[SessionPage.initialize] Fatal initialization error:', error);
   }
@@ -159,16 +154,8 @@ private startUserSyncInBackground(userId: string): void {
     // Ensure any existing back button handlers are cleared before entering
     this.removeBackButtonHandler();
     
-    // Refresh sessions and office location markers
-    this.loadSessions().catch(e => console.warn('[SessionPage.ionViewWillEnter] loadSessions failed:', e));
+    // Refresh office location markers only
     this.loadOfficeLocationMarkers().catch(e => console.warn('[SessionPage.ionViewWillEnter] loadOfficeLocationMarkers failed:', e));
-    
-    const uid = this.userID || this.auth3.getCurrentUser()?.uid || '';
-    if (uid) {
-      this.loadPersistedSyncStatus(uid);
-      // Optionally refresh Firestore sync on page re-entry
-      this.startUserSyncInBackground(uid);
-    }
   }
 
   private getSyncStatusStorageKey(userId: string): string {
@@ -1217,50 +1204,6 @@ private startUserSyncInBackground(userId: string): void {
       await this.logout(true);
     });
 
-    // Test create session button: create a session populated with stored images and refresh list
-    const createSessionBtn = document.createElement('button');
-    createSessionBtn.innerText = 'Create Test Session';
-    createSessionBtn.style.padding = '10px 14px';
-    createSessionBtn.style.border = 'none';
-    createSessionBtn.style.borderRadius = '6px';
-    createSessionBtn.style.background = '#28a745';
-    createSessionBtn.style.color = '#fff';
-    createSessionBtn.style.cursor = 'pointer';
-    createSessionBtn.addEventListener('click', async () => {
-      try {
-        if (this.imageStorage && typeof (this.imageStorage as any).createTestSession === 'function') {
-          const s = (this.imageStorage as any).createTestSession('Test Session', true, 6);
-          // refresh local session view
-          try { await this.loadSessions(); } catch (e) {}
-          alert('Test session created: ' + s.id);
-        } else {
-          // Fallback: older ImageStorageService implementations may not provide
-          // createTestSession. Use available APIs to create a session from stored
-          // images (up to 6) so the UI button still works.
-          try {
-            let stored: any[] = [];
-            if (typeof (this.imageStorage as any).getAllImages === 'function') {
-              stored = await (this.imageStorage as any).getAllImages();
-            } else if (typeof (this.imageStorage as any).getImages === 'function') {
-              stored = (this.imageStorage as any).getImages();
-            } else {
-              stored = [];
-            }
-            const keys = Array.isArray(stored) ? stored.slice(0, 6).map((item: any) => item.original) : [];
-            const s = (typeof this.imageStorage.createSession === 'function') ? this.imageStorage.createSession('Test Session', keys) : null;
-            try { await this.loadSessions(); } catch (e) {}
-            alert(s ? ('Test session created: ' + (s as any).id) : 'Test session created (fallback)');
-          } catch (e) {
-            console.warn('fallback createTestSession failed', e);
-            alert('createTestSession not available on ImageStorageService');
-          }
-        }
-      } catch (err) {
-        console.warn('createTestSession failed', err);
-        alert('Failed to create test session. See console.');
-      }
-    });
-
     close.addEventListener('click', () => {
       cleanupOverlay();
     });
@@ -1284,7 +1227,6 @@ private startUserSyncInBackground(userId: string): void {
     // Style buttons to be full width
     btn.style.width = '100%';
     btn2.style.width = '100%';
-    createSessionBtn.style.width = '100%';
     openPdfViewerBtn.style.width = '100%';
     openPdfPreviewBtn.style.width = '100%';
     openPdfGeneratorBtn.style.width = '100%';
@@ -1295,7 +1237,6 @@ private startUserSyncInBackground(userId: string): void {
     
     // mainBtnsContainer.appendChild(btn);
     // mainBtnsContainer.appendChild(btn2);
-    // mainBtnsContainer.appendChild(createSessionBtn);
     // mainBtnsContainer.appendChild(openPdfViewerBtn);
     // mainBtnsContainer.appendChild(openPdfPreviewBtn);
     // mainBtnsContainer.appendChild(openPdfGeneratorBtn);
@@ -1570,6 +1511,11 @@ private startUserSyncInBackground(userId: string): void {
   }
 
   onViewMarker(marker: any): void {
+    if (this.longPressTriggeredMarkerId && this.longPressTriggeredMarkerId === marker?.id) {
+      this.longPressTriggeredMarkerId = null;
+      return;
+    }
+
     console.log('[SessionPage.onViewMarker] ===== VIEW MARKER DATA START =====');
     console.log('[SessionPage.onViewMarker] Full marker object:', marker);
     console.log('[SessionPage.onViewMarker] Marker ID:', marker?.id);
@@ -1596,10 +1542,12 @@ private startUserSyncInBackground(userId: string): void {
     
     // Store the marker location data in sessionStorage for the chat-page to retrieve
     const markerLocation = marker?.officeLocation ?? marker?.location;
-    if (markerLocation?.latitude && markerLocation?.longitude) {
+    const markerLatitude = Number(markerLocation?.latitude);
+    const markerLongitude = Number(markerLocation?.longitude);
+    if (Number.isFinite(markerLatitude) && Number.isFinite(markerLongitude)) {
       sessionStorage.setItem('selectedMarkerLocation', JSON.stringify({
-        latitude: markerLocation.latitude,
-        longitude: markerLocation.longitude,
+        latitude: markerLatitude,
+        longitude: markerLongitude,
         markerData: marker
       }));
       console.log('[SessionPage.onNavigateToMarker] Stored marker location in sessionStorage');
@@ -1610,8 +1558,15 @@ private startUserSyncInBackground(userId: string): void {
     this.router.navigate(['/chat-page'], { 
       queryParams: { 
         tab: 'location',
-        markerLat: markerLocation?.latitude,
-        markerLng: markerLocation?.longitude
+        markerLat: markerLatitude,
+        markerLng: markerLongitude,
+        markerLabel: marker?.name || marker?.officeAddress || marker?.address || ''
+      },
+      state: {
+        activeTab: 'location',
+        markerLat: markerLatitude,
+        markerLng: markerLongitude,
+        markerLabel: marker?.name || marker?.officeAddress || marker?.address || ''
       }
     });
     console.log('[SessionPage.onNavigateToMarker] Navigating to chat-page with location tab');
@@ -1674,9 +1629,21 @@ private startUserSyncInBackground(userId: string): void {
   /**
    * Open the marker creation dialog overlay
    */
-  openMarkerCreationDialog(): void {
+  openMarkerCreationDialog(marker?: any): void {
     console.log('[OfficeMapMarkerPage.openMarkerCreationDialog] Opening marker creation dialog');
-    this.resetMarkerForm();
+
+    if (marker) {
+      this.isMarkerEditMode = true;
+      this.editingMarkerId = marker.id || null;
+      this.selectedMarkerForEdit = marker;
+      this.populateFormWithMarkerData(marker);
+    } else {
+      this.isMarkerEditMode = false;
+      this.editingMarkerId = null;
+      this.selectedMarkerForEdit = null;
+      this.resetMarkerForm();
+    }
+
     this.isMarkerCreationDialogOpen = true;
   }
 
@@ -1698,6 +1665,9 @@ private startUserSyncInBackground(userId: string): void {
   closeMarkerCreationDialog(): void {
     console.log('[OfficeMapMarkerPage.closeMarkerCreationDialog] Closing marker creation dialog');
     this.isMarkerCreationDialogOpen = false;
+    this.isMarkerEditMode = false;
+    this.editingMarkerId = null;
+    this.selectedMarkerForEdit = null;
     this.resetMarkerForm();
   }
 
@@ -1716,7 +1686,53 @@ private startUserSyncInBackground(userId: string): void {
   }
 
   /**
-   * Persist a new office marker to Firestore.
+   * Handle long-press on marker card to enable edit mode
+   */
+  onMarkerCardLongPress(marker: any, event: any): void {
+    event.preventDefault();
+    event.stopPropagation?.();
+    console.log('[OfficeMapMarkerPage.onMarkerCardLongPress] Long press detected on marker:', marker.id);
+    this.longPressTriggeredMarkerId = marker?.id || null;
+    this.openMarkerCreationDialog(marker);
+
+    window.setTimeout(() => {
+      this.longPressTriggeredMarkerId = null;
+    }, 350);
+  }
+
+  /**
+   * Populate the marker form with existing marker data for editing
+   */
+  private populateFormWithMarkerData(marker: any): void {
+    this.markerFormData = {
+      name: marker.name || '',
+      availableTime: marker.availableTime || '',
+      unavailableTime: marker.unavailableTime || '',
+      contactInfo: marker.contactInfo || '',
+      location: marker.officeLocation || marker.location || { latitude: 0, longitude: 0 },
+      address: marker.address || marker.officeAddress || ''
+    };
+  }
+
+  /**
+   * Update an existing office marker in Firestore
+   */
+  private async updateMarkerInFirestore(markerId: string, updatedData: any): Promise<void> {
+    try {
+      const { collection, doc, getFirestore, updateDoc } = await import('firebase/firestore');
+      const firestore = getFirestore();
+      const markerDocRef = doc(collection(firestore, 'userOfficeLocationMarker'), markerId);
+
+      await updateDoc(markerDocRef, updatedData);
+      console.log('[OfficeMapMarkerPage.updateMarkerInFirestore] Marker updated successfully:', markerId);
+    } catch (error) {
+      console.error('[OfficeMapMarkerPage.updateMarkerInFirestore] Failed to update marker:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Persist a new office marker to Firestore or update an existing one.
    */
   async confirmAddOffice(event?: Event): Promise<void> {
     event?.preventDefault();
@@ -1728,13 +1744,13 @@ private startUserSyncInBackground(userId: string): void {
     const unavailableTime = this.markerFormData.unavailableTime.trim();
 
     if (!name || !address || !contactInfo || !availableTime || !unavailableTime) {
-      console.warn('[OfficeMapMarkerPage.confirmAddOffice] Marker creation blocked: required fields are missing.');
+      console.warn('[OfficeMapMarkerPage.confirmAddOffice] Marker save blocked: required fields are missing.');
       return;
     }
 
     const userId = this.userID || this.auth3.getCurrentUser()?.uid || null;
     if (!userId) {
-      console.warn('[OfficeMapMarkerPage.confirmAddOffice] Marker creation blocked: no user ID available.');
+      console.warn('[OfficeMapMarkerPage.confirmAddOffice] Marker save blocked: no user ID available.');
       return;
     }
 
@@ -1751,30 +1767,41 @@ private startUserSyncInBackground(userId: string): void {
       contactInfo,
       availableTime,
       unavailableTime,
-      // include profile fields (prefer live component props, fall back to stored profile)
       firstName: this.firstName || storedProfile?.firstName || storedProfile?.givenName || '',
       lastName: this.lastName || storedProfile?.lastName || storedProfile?.familyName || '',
       email: this.email || storedProfile?.email || '',
       location: officeLocation,
       officeLocation,
-      created: new Date().toISOString(),
-      createdAt: new Date().toISOString(),
+      created: this.selectedMarkerForEdit?.created || this.selectedMarkerForEdit?.createdAt || new Date().toISOString(),
+      createdAt: this.selectedMarkerForEdit?.createdAt || this.selectedMarkerForEdit?.created || new Date().toISOString(),
     };
 
     console.log("office location Payload", payload);
 
     try {
-      const { collection, doc, getFirestore, setDoc } = await import('firebase/firestore');
-      const firestore = getFirestore();
-      const markerCollectionRef = collection(firestore, 'userOfficeLocationMarker');
-      const markerDocRef = doc(markerCollectionRef);
+      if (this.isMarkerEditMode && this.editingMarkerId) {
+        // Update existing marker
+        const updatePayload = {
+          ...payload,
+          updated: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          markerId: this.editingMarkerId,
+        };
+        await this.updateMarkerInFirestore(this.editingMarkerId, updatePayload);
+        console.log('[OfficeMapMarkerPage.confirmAddOffice] Office location marker updated:', this.editingMarkerId);
+      } else {
+        // Create new marker
+        const { collection, doc, getFirestore, setDoc } = await import('firebase/firestore');
+        const firestore = getFirestore();
+        const markerCollectionRef = collection(firestore, 'userOfficeLocationMarker');
+        const markerDocRef = doc(markerCollectionRef);
 
-      await setDoc(markerDocRef, {
-        ...payload,
-        markerId: markerDocRef.id,
-      });
-
-      console.log('[OfficeMapMarkerPage.confirmAddOffice] Office location marker saved:', markerDocRef.id);
+        await setDoc(markerDocRef, {
+          ...payload,
+          markerId: markerDocRef.id,
+        });
+        console.log('[OfficeMapMarkerPage.confirmAddOffice] Office location marker created:', markerDocRef.id);
+      }
       this.closeMarkerCreationDialog();
       await this.loadOfficeLocationMarkers();
     } catch (error) {
@@ -1784,6 +1811,37 @@ private startUserSyncInBackground(userId: string): void {
 
   submitMarkerForm(): void {
     void this.confirmAddOffice();
+  }
+
+  /**
+   * Handle the start of a potential long-press on marker card
+   */
+  markerLongPressStart(event: any, marker: any): void {
+    if (event.button !== 0 && !event.touches) return; // Only left mouse button or touch
+    
+    this.longPressTimeout = setTimeout(() => {
+      this.onMarkerCardLongPress(marker, event);
+    }, this.LONG_PRESS_DURATION);
+  }
+
+  /**
+   * Handle the end of a potential long-press on marker card
+   */
+  markerLongPressEnd(event: any, marker: any): void {
+    if (this.longPressTimeout) {
+      clearTimeout(this.longPressTimeout);
+      this.longPressTimeout = null;
+    }
+  }
+
+  /**
+   * Cancel a long-press operation (e.g., mouse leaves the element)
+   */
+  markerLongPressCancel(): void {
+    if (this.longPressTimeout) {
+      clearTimeout(this.longPressTimeout);
+      this.longPressTimeout = null;
+    }
   }
   
 }

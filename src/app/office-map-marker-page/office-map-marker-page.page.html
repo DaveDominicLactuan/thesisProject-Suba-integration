@@ -94,13 +94,26 @@
   <div *ngIf="isMarkerCreationDialogOpen" class="marker-creation-overlay" (click)="closeMarkerCreationDialog()">
     <div class="marker-creation-dialog" (click)="$event.stopPropagation()">
       <div class="marker-creation-header">
-        <h2>Create New Marker</h2>
+        <h2>{{ isMarkerEditMode ? 'Edit Marker' : 'Create New Marker' }}</h2>
         <button class="close-btn" (click)="closeMarkerCreationDialog()">
           <ion-icon name="close-outline"></ion-icon>
         </button>
       </div>
 
       <div class="marker-creation-content">
+        <div *ngIf="isMarkerEditMode && selectedMarkerForEdit" class="edit-marker-summary">
+          <div class="edit-marker-summary-label">Editing selected marker</div>
+          <!-- <div class="edit-marker-summary-name">{{ selectedMarkerForEdit.name || 'Office Location' }}</div>
+          <div class="edit-marker-summary-meta">
+            <span>{{ selectedMarkerForEdit.address || selectedMarkerForEdit.officeAddress || 'Address not set' }}</span>
+            <span *ngIf="selectedMarkerForEdit.officeLocation || selectedMarkerForEdit.location">·</span>
+            <span *ngIf="selectedMarkerForEdit.officeLocation || selectedMarkerForEdit.location">
+              {{ (selectedMarkerForEdit.officeLocation?.latitude || selectedMarkerForEdit.location?.latitude) || '-' }},
+              {{ (selectedMarkerForEdit.officeLocation?.longitude || selectedMarkerForEdit.location?.longitude) || '-' }}
+            </span>
+          </div>
+        </div> -->
+
         <!-- Account Details Section -->
         <div class="form-section">
           <div class="section-header">
@@ -163,57 +176,31 @@
         </button>
         <button class="submit-btn" (click)="confirmAddOffice($event)">
           <ion-icon name="checkmark-outline"></ion-icon>
-          <span>Create Marker</span>
+          <span>{{ isMarkerEditMode ? 'Update Marker' : 'Create Marker' }}</span>
         </button>
-      </div>
-    </div>
-  </div>
-
-  <!-- Sort overlay -->
-  <div *ngIf="isSortOverlayOpen" class="sort-overlay" (click)="closeSortOverlay()">
-    <div class="sort-menu" (click)="$event.stopPropagation()">
-      <div class="sort-header">
-        <h3>Sort Sessions</h3>
-        <button class="close-sort-btn" (click)="closeSortOverlay()">
-          <ion-icon name="close-outline"></ion-icon>
-        </button>
-      </div>
-      <div class="sort-options">
-        <div class="sort-section">
-          <h4>By Time</h4>
-          <button class="sort-option" (click)="sortSessions('time-newest')" [class.active]="currentSort === 'time-newest'">
-            <ion-icon name="time-outline"></ion-icon>
-            <span>Newest First</span>
-          </button>
-          <button class="sort-option" (click)="sortSessions('time-oldest')" [class.active]="currentSort === 'time-oldest'">
-            <ion-icon name="time-outline"></ion-icon>
-            <span>Oldest First</span>
-          </button>
-        </div>
-        <div class="sort-section">
-          <h4>By Images</h4>
-          <button class="sort-option" (click)="sortSessions('images-most')" [class.active]="currentSort === 'images-most'">
-            <ion-icon name="images-outline"></ion-icon>
-            <span>Most Images</span>
-          </button>
-          <button class="sort-option" (click)="sortSessions('images-least')" [class.active]="currentSort === 'images-least'">
-            <ion-icon name="images-outline"></ion-icon>
-            <span>Least Images</span>
-          </button>
-        </div>
       </div>
     </div>
   </div>
 
   <div class="markers-list">
     <ng-container *ngFor="let marker of officeLocationMarkers">
-      <div class="marker-card" (click)="onViewMarker(marker)">
+      <div class="marker-card" 
+        (click)="onViewMarker(marker)"
+        (mousedown)="markerLongPressStart($event, marker)"
+        (mouseup)="markerLongPressEnd($event, marker)"
+        (mouseleave)="markerLongPressCancel()"
+        (touchstart)="markerLongPressStart($event, marker)"
+        (touchend)="markerLongPressEnd($event, marker)"
+        (touchcancel)="markerLongPressCancel()"
+        style="position: relative; cursor: pointer;"
+        title="Tap to view, hold to edit">
         <!-- <div class="marker-badge">
           <ion-icon name="location" class="marker-icon"></ion-icon>
         </div> -->
 
         <div class="marker-content">
           <div class="marker-title">{{ marker.name || 'Office Location' }}</div>
+          <div class="marker-hint">Hold to edit</div>
 
           <div class="marker-location">
             <ion-icon name="location-outline" class="detail-icon"></ion-icon>
@@ -241,190 +228,15 @@
           </button>
         </div>
 
-        <div class="marker-time">
+        <!-- <div class="marker-time">
           {{ marker.created | date:'shortTime' }}
-        </div>
+        </div> -->
       </div>
     </ng-container>
     <div *ngIf="officeLocationMarkers.length === 0" class="no-markers">
       No office location markers yet.
     </div>
   </div>
-
-  <!-- Session Confirmation Dialog Overlay -->
-  <div *ngIf="isSessionConfirmDialogOpen" class="session-confirm-overlay" (click)="closeSessionConfirmDialog()">
-    <div class="session-confirm-dialog" (click)="$event.stopPropagation()">
-      <div class="session-confirm-header">
-        <h2>Send Session and Images?</h2>
-        <p>Would you like to send this Session and Images to this user?</p>
-      </div>
-      <div class="session-confirm-content">
-        <div *ngIf="selectedSessionForConfirm" class="session-info">
-          <div class="session-confirm-name">{{ selectedSessionForConfirm.name }}</div>
-          <div class="session-confirm-details">
-            <span>{{ selectedSessionForConfirm.imageKeys?.length || 0 }} Images</span>
-            <span>·</span>
-            <span>{{ selectedSessionForConfirm.created | date:'short' }}</span>
-          </div>
-        </div>
-      </div>
-      <div class="session-confirm-buttons">
-        <button class="confirm-btn" (click)="confirmSessionAction(selectedSessionForConfirm)">
-          Confirm
-        </button>
-        <button class="cancel-btn" (click)="closeSessionConfirmDialog()">
-          Cancel
-        </button>
-      </div>
-    </div>
-  </div>
-
-  <!-- Session Loading Progress Dialog Overlay -->
-  <div *ngIf="isSessionLoadingDialogOpen" class="session-confirm-overlay" (click)="closeSessionLoadingDialog()">
-    <div class="session-confirm-dialog" (click)="$event.stopPropagation()">
-      <div class="session-confirm-header">
-        <h2>Loading Session</h2>
-        <p>Fetching and preparing session images...</p>
-      </div>
-      <div class="session-confirm-content">
-        <div *ngIf="selectedSessionForLoading" class="session-info">
-          <div class="session-confirm-name">{{ selectedSessionForLoading.name }}</div>
-          <div class="session-confirm-details">
-            <span>{{ selectedSessionForLoading.imageKeys?.length || 0 }} Images</span>
-            <span>·</span>
-            <span>{{ selectedSessionForLoading.created | date:'short' }}</span>
-          </div>
-        </div>
-
-        <!-- Progress Section -->
-        <div class="session-loading-progress" style="margin-top: 24px;">
-          <div style="display: flex; justify-content: center; margin-bottom: 16px;">
-            <div style="
-              border: 4px solid rgba(255, 81, 47, 0.3);
-              border-top: 4px solid #ff512f;
-              border-radius: 50%;
-              width: 40px;
-              height: 40px;
-              animation: spin 1s linear infinite;
-            "></div>
-          </div>
-
-          <div style="text-align: center; color: #666; margin-bottom: 16px; font-size: 14px;">
-            {{ sessionLoadingStatusText }}
-          </div>
-
-          <div *ngIf="sessionLoadingImageCount.total > 0" style="text-align: center; color: #999; font-size: 12px; margin-bottom: 12px;">
-            {{ sessionLoadingImageCount.current }}/{{ sessionLoadingImageCount.total }} images loaded
-          </div>
-
-          <!-- Progress Bar -->
-          <div style="width: 100%; height: 8px; background: #e0e0e0; border-radius: 4px; overflow: hidden; border: 1px solid #ccc;">
-            <div [style.width.%]="sessionLoadingProgress" style="
-              height: 100%;
-              background: linear-gradient(90deg, #ff512f, #ff9800);
-              border-radius: 4px;
-              transition: width 0.3s ease;
-            "></div>
-          </div>
-
-          <div style="text-align: center; color: #666; font-size: 12px; margin-top: 8px;">
-            {{ sessionLoadingProgress }}%
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <!-- Session Delete Confirmation Dialog Overlay -->
-  <div *ngIf="isSessionDeleteConfirmDialogOpen" class="session-confirm-overlay" (click)="closeSessionDeleteConfirmDialog()">
-    <div class="session-confirm-dialog" (click)="$event.stopPropagation()">
-      <div class="session-confirm-header">
-        <h2>Delete Session?</h2>
-        <p>This will permanently delete the session, all images, and S3 data. This cannot be undone.</p>
-      </div>
-      <div class="session-confirm-content">
-        <div *ngIf="selectedSessionForDelete" class="session-info">
-          <div class="session-confirm-name">{{ selectedSessionForDelete.name }}</div>
-          <div class="session-confirm-details">
-            <span>{{ selectedSessionForDelete.imageKeys?.length || 0 }} Images</span>
-            <span>·</span>
-            <span>{{ selectedSessionForDelete.created | date:'short' }}</span>
-          </div>
-        </div>
-      </div>
-      <div class="session-confirm-buttons">
-        <button class="confirm-btn delete-confirm" (click)="confirmSessionDeletion(selectedSessionForDelete)">
-          Delete Permanently
-        </button>
-        <button class="cancel-btn" (click)="closeSessionDeleteConfirmDialog()">
-          Cancel
-        </button>
-      </div>
-    </div>
-  </div>
-
-  <!-- Session Delete Progress Dialog Overlay -->
-  <div *ngIf="isSessionDeleteProgressDialogOpen" class="session-confirm-overlay" (click)="closeSessionDeleteProgressDialog()">
-    <div class="session-confirm-dialog" (click)="$event.stopPropagation()">
-      <div class="session-confirm-header">
-        <h2>Deleting Session</h2>
-        <p>Removing session data and S3 objects...</p>
-      </div>
-      <div class="session-confirm-content">
-        <div *ngIf="selectedSessionForDeleteProgress" class="session-info">
-          <div class="session-confirm-name">{{ selectedSessionForDeleteProgress.name }}</div>
-          <div class="session-confirm-details">
-            <span>{{ selectedSessionForDeleteProgress.imageKeys?.length || 0 }} Images</span>
-            <span>·</span>
-            <span>{{ selectedSessionForDeleteProgress.created | date:'short' }}</span>
-          </div>
-        </div>
-
-        <!-- Progress Section -->
-        <div class="session-loading-progress" style="margin-top: 24px;">
-          <div style="display: flex; justify-content: center; margin-bottom: 16px;">
-            <div style="
-              border: 4px solid rgba(255, 81, 47, 0.3);
-              border-top: 4px solid #ff512f;
-              border-radius: 50%;
-              width: 40px;
-              height: 40px;
-              animation: spin 1s linear infinite;
-            "></div>
-          </div>
-
-          <div style="text-align: center; color: #666; margin-bottom: 16px; font-size: 14px;">
-            {{ sessionDeleteStatusText }}
-          </div>
-
-          <div *ngIf="sessionDeleteStageCount.total > 0" style="text-align: center; color: #999; font-size: 12px; margin-bottom: 12px;">
-            {{ sessionDeleteStageCount.current }}/{{ sessionDeleteStageCount.total }} operations completed
-          </div>
-
-          <!-- Progress Bar -->
-          <div style="width: 100%; height: 8px; background: #e0e0e0; border-radius: 4px; overflow: hidden; border: 1px solid #ccc;">
-            <div [style.width.%]="sessionDeleteProgress" style="
-              height: 100%;
-              background: linear-gradient(90deg, #ff512f, #ff9800);
-              border-radius: 4px;
-              transition: width 0.3s ease;
-            "></div>
-          </div>
-
-          <div style="text-align: center; color: #666; font-size: 12px; margin-top: 8px;">
-            {{ sessionDeleteProgress }}%
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <style>
-    @keyframes spin {
-      0% { transform: rotate(0deg); }
-      100% { transform: rotate(360deg); }
-    }
-  </style>
 
   <!-- Marker Delete Confirmation Dialog Overlay -->
   <div *ngIf="isMarkerDeleteConfirmDialogOpen" class="session-confirm-overlay" (click)="closeMarkerDeleteConfirmDialog()">

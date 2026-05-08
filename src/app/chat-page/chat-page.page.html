@@ -379,7 +379,7 @@
                 </div>
               </div>
               <button *ngIf="selectedAttachment?.type === 'session'" class="attachment-debug-btn" (click)="onAttachmentDebugClick(selectedAttachment)" type="button" title="Debug: Print session and images to console">
-                <ion-icon name="bug-outline"></ion-icon>
+                <ion-icon [name]="getAttachmentPreviewIcon(selectedAttachment)"></ion-icon>
                 Share Session
               </button>
             </div>
