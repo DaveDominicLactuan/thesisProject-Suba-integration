@@ -15,9 +15,11 @@ interface DisplayImage {
   // raw prediction and status copied from StoredImage for easy access
   rawPrediction?: { type?: string; shape?: string; severity?: string };
   prediction?: { type?: string; shape?: string; severity?: string };
+  correctedPrediction?: { type?: string; shape?: string; severity?: string };
   statusMessage?: string;
   boxes?: any[];
   hasPrediction?: boolean;
+  engineerCheckedSession?: boolean;
   storagePath?: string;
   withBoxesStoragePath?: string;
   storageUrl?: string;
@@ -383,7 +385,10 @@ private lastBackTapAt: number = 0;
     this.selectedImage = this.showWithBoxes ? img.withBoxes : img.original;
 
     //copys the image raw prediction and statusmessage into the field and updates the structured prediction/status
-    this.selectedPrediction = img.rawPrediction ?? {};
+    // If engineerCheckedSession is true, prefer correctedPrediction; otherwise use rawPrediction
+    this.selectedPrediction = (this.engineerLookedSessionChecked && img.correctedPrediction) 
+      ? img.correctedPrediction 
+      : (img.rawPrediction ?? {});
     this.selectedStatusMessage = img.statusMessage ?? '';
 
     // apply the necessary data detection fields and dropdowns
@@ -548,6 +553,10 @@ private lastBackTapAt: number = 0;
       
       //Find session and handle empty session (placeholder) or session has no images
       const sess = this.sessions.find(s => s.id === this.selectedSessionId) || null;
+      if (sess) {
+        this.notesText = sess.notes ?? '';
+        this.engineerLookedSessionChecked = !!sess.engineerCheckedSession;
+      }
       if (!sess || !Array.isArray(sess.imageKeys) || sess.imageKeys.length === 0) {
         // nothing in session; keep placeholder
         if (this.imagePaths.length === 0) {
@@ -770,8 +779,10 @@ private lastBackTapAt: number = 0;
    //Normalize a StoredImage-like object into DisplayImage used by the UI.
    //Derives detectionMessage/Result from status or prediction fields.
   buildDisplayImage(img: any): DisplayImage {
-    //Extract prediction object supports different field names for the UI
-    const prediction = img.prediction ?? img.rawPrediction ?? undefined;
+    //Extract original and corrected prediction objects for the UI
+    const originalPrediction = img.prediction ?? img.rawPrediction ?? undefined;
+    const correctedPrediction = img.correctedPrediction ?? undefined;
+    const prediction = correctedPrediction ?? originalPrediction ?? undefined;
 
     //Normalize individual prediction fields and build detectionMessage/detectionResult strings
     //this extracts the fields safely avoid undefeinded by assigning each string with an empty string fallback, 
@@ -809,6 +820,9 @@ private lastBackTapAt: number = 0;
       detectionMessage,
       detectionResult,
       rawPrediction: prediction ? { type: predType, shape: predShape, severity: predSeverity } : undefined,
+      prediction: originalPrediction ? { type: originalPrediction?.type ?? '', shape: originalPrediction?.shape ?? '', severity: originalPrediction?.severity ?? '' } : undefined,
+      correctedPrediction: correctedPrediction ? { type: correctedPrediction?.type ?? '', shape: correctedPrediction?.shape ?? '', severity: correctedPrediction?.severity ?? '' } : undefined,
+      engineerCheckedSession: !!img.engineerCheckedSession,
       statusMessage: img.statusMessage
     } as DisplayImage;
   }
@@ -853,6 +867,14 @@ private lastBackTapAt: number = 0;
   onEngineerLookedToggle(checked: boolean): void {
     this.engineerLookedSessionChecked = checked;
     console.log('[FeedbackPage] Engineer has looked the session:', checked ? 'checked' : 'unchecked');
+  }
+
+  private buildCorrectedPrediction(): { type?: string; shape?: string; severity?: string } {
+    return {
+      type: this.dropdown1 ?? '',
+      shape: this.dropdown2 ?? '',
+      severity: this.dropdown3 ?? ''
+    };
   }
 
   /**
@@ -929,7 +951,10 @@ detectCenterImage() {
   console.groupEnd();
 
   // Populate structured prediction and status for UI use
-  this.selectedPrediction = matched.rawPrediction ?? {};
+  // If engineerCheckedSession is true, prefer correctedPrediction; otherwise use rawPrediction
+  this.selectedPrediction = (this.engineerLookedSessionChecked && matched.correctedPrediction) 
+    ? matched.correctedPrediction 
+    : (matched.rawPrediction ?? {});
   this.selectedStatusMessage = matched.statusMessage ?? '';
 
   // Immediately prefer prediction values for dropdowns so the UI reflects
@@ -1150,12 +1175,15 @@ addEntry() {
 
     // Use filename as primary key, fallback to original for backward compatibility
     const key = matched.fileName || matched.filename || matched.original;
+    const originalPrediction = matched.prediction ? { ...matched.prediction } : (matched.rawPrediction ? { ...matched.rawPrediction } : undefined);
+    const correctedPrediction = this.buildCorrectedPrediction();
 
-    // Update prediction fields from dropdowns
-    matched.rawPrediction = matched.rawPrediction || {};
-    matched.rawPrediction.type = this.dropdown1;
-    matched.rawPrediction.shape = this.dropdown2;
-    matched.rawPrediction.severity = this.dropdown3;
+    // Preserve the original prediction and store the edited values separately
+    if (originalPrediction) {
+      matched.prediction = { ...originalPrediction };
+    }
+    matched.correctedPrediction = { ...correctedPrediction };
+    matched.rawPrediction = { ...correctedPrediction };
 
     // Update status/extra text
     matched.statusMessage = this.extraText || matched.statusMessage || '';
@@ -1194,16 +1222,14 @@ addEntry() {
       timestamp: new Date().toISOString()
     };
 
-    updatedStored.prediction = {
-      type: this.dropdown1,
-      shape: this.dropdown2,
-      severity: this.dropdown3
-    };
+    updatedStored.prediction = originalPrediction ?? updatedStored.prediction ?? null;
+    updatedStored.correctedPrediction = { ...correctedPrediction };
     // Keep optional rawPrediction/status fields aligned for consumers that read them
-    (updatedStored as any).rawPrediction = updatedStored.prediction;
+    (updatedStored as any).rawPrediction = updatedStored.correctedPrediction;
     updatedStored.statusMessage = matched.statusMessage;
     updatedStored.detectionMessage = matched.detectionMessage;
     updatedStored.detectionResult = matched.detectionResult;
+    updatedStored.engineerCheckedSession = this.userRole?.toLowerCase() === 'engineer' && this.engineerLookedSessionChecked;
 
     if (typeof svc.setEntryForImage === 'function') {
       svc.setEntryForImage(key, updatedStored);
@@ -1529,41 +1555,37 @@ addEntry() {
 
     const imageKey = entry.filename || entry.fileName || entry.original || '';
     const form = (imageKey && this.formDataMap[imageKey]) ? this.formDataMap[imageKey] : undefined;
+    const originalPrediction = entry.prediction ?? entry.originalPrediction ?? entry.rawPrediction ?? null;
 
     const type =
-      entry?.prediction?.type ??
-      entry?.rawPrediction?.type ??
+      entry?.correctedPrediction?.type ??
       form?.dropdown1 ??
       this.selectedPrediction?.type ??
       this.dropdown1 ??
+      originalPrediction?.type ??
       '';
 
     const shape =
-      entry?.prediction?.shape ??
-      entry?.rawPrediction?.shape ??
+      entry?.correctedPrediction?.shape ??
       form?.dropdown2 ??
       this.selectedPrediction?.shape ??
       this.dropdown2 ??
+      originalPrediction?.shape ??
       '';
 
     const severity =
-      entry?.prediction?.severity ??
-      entry?.rawPrediction?.severity ??
+      entry?.correctedPrediction?.severity ??
       form?.dropdown3 ??
       this.selectedPrediction?.severity ??
       this.dropdown3 ??
+      originalPrediction?.severity ??
       '';
 
     const hasPrediction = !!(type || shape || severity);
-    if (hasPrediction) {
-      entry.prediction = { type, shape, severity };
-      entry.rawPrediction = { type, shape, severity };
-      entry.hasPrediction = true;
-    } else {
-      entry.prediction = entry.prediction ?? null;
-      entry.rawPrediction = entry.rawPrediction ?? undefined;
-      entry.hasPrediction = false;
-    }
+    entry.prediction = originalPrediction ? { type: originalPrediction.type ?? '', shape: originalPrediction.shape ?? '', severity: originalPrediction.severity ?? '' } : (entry.prediction ?? null);
+    entry.correctedPrediction = hasPrediction ? { type, shape, severity } : (entry.correctedPrediction ?? null);
+    entry.rawPrediction = entry.correctedPrediction || entry.prediction || entry.rawPrediction || undefined;
+    entry.hasPrediction = hasPrediction || !!entry.prediction;
 
     if (!entry.detectionMessage || entry.detectionMessage.length === 0) {
       entry.detectionMessage = entry.statusMessage && entry.statusMessage.length > 0
@@ -1576,6 +1598,8 @@ addEntry() {
         ? entry.statusMessage
         : `${shape || ''}${severity ? ' â€” ' + severity : ''}`.trim();
     }
+
+    entry.engineerCheckedSession = entry.engineerCheckedSession ?? (this.userRole?.toLowerCase() === 'engineer' && this.engineerLookedSessionChecked);
 
     return entry;
   }
@@ -1604,6 +1628,8 @@ addEntry() {
       if (!entry && this.selectedImage) {
         const found = this.imagePaths.find(p => p.original === this.selectedImage || p.withBoxes === this.selectedImage);
         if (found) {
+          const correctedPrediction = this.buildCorrectedPrediction();
+          const originalPrediction = found.prediction ?? found.rawPrediction ?? undefined;
           entry = {
             original: found.original,
             withBoxes: found.withBoxes,
@@ -1613,7 +1639,10 @@ addEntry() {
             timestamp: new Date().toISOString(),
             detectionMessage: found.detectionMessage ?? '',
             filename: found.fileName,
-            rawPrediction: found.rawPrediction,
+            prediction: originalPrediction ? { ...originalPrediction } : undefined,
+            rawPrediction: correctedPrediction,
+            correctedPrediction,
+            engineerCheckedSession: this.userRole?.toLowerCase() === 'engineer' && this.engineerLookedSessionChecked,
             statusMessage: 'Saved as session'
           };
         }
@@ -1628,6 +1657,7 @@ addEntry() {
       // mark entry as saved session and persist to service
       entry = this.normalizePredictionFields(entry);
       entry.statusMessage = entry.statusMessage ?? 'Saved as session';
+      entry.engineerCheckedSession = this.userRole?.toLowerCase() === 'engineer' && this.engineerLookedSessionChecked;
       if ((this.imageStorageService as any).setEntryForImage) {
         // Use filename as key, fallback to original for backward compatibility
         const imageKey = entry.filename || entry.original;
@@ -1807,6 +1837,11 @@ addEntry() {
             } catch (e) {
               console.warn('[FeedbackPage] failed to add image to existing session', e);
             }
+            const existingSession = typeof svc.getSession === 'function' ? svc.getSession(this.selectedSessionId) : null;
+            if (existingSession) {
+              existingSession.notes = this.notesText;
+              existingSession.engineerCheckedSession = this.userRole?.toLowerCase() === 'engineer' && this.engineerLookedSessionChecked;
+            }
             if (typeof svc.updateSessionName === 'function') {
               try { svc.updateSessionName(this.selectedSessionId, val); } catch (e) { /* ignore */ }
             }
@@ -1822,6 +1857,7 @@ addEntry() {
                 try { svc.setLastCreatedSession(s.id, s.name); } catch (e) { /* ignore */ }
               }
               if (s && s.id) {
+                s.engineerCheckedSession = this.userRole?.toLowerCase() === 'engineer' && this.engineerLookedSessionChecked;
                 this.selectedSessionId = s.id;
                 savedSessionId = s.id;
               }

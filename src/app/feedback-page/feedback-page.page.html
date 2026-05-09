@@ -42,7 +42,7 @@
   </button>
 </div>
 
-    <div class="page-body">
+    <div class="page-body" [class.engineer-checked-background]="engineerLookedSessionChecked">
       <!-- Scrollable image gallery with margin-top -->
       <div class="scroll-wrapper">
         <div class="image-scroll" #scrollContainer (scroll)="onScroll($event)" [ngClass]="getScrollClasses(imagePaths.length)">

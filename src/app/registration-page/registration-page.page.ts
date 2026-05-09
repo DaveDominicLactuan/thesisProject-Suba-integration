@@ -92,6 +92,15 @@ regForm!: FormGroup; // our single form
     if (this.step > 1) this.step--;
   }
 
+  /** Jump to a specific step when step indicator is clicked/tapped. */
+  goToStep(stepNumber: number) {
+    if (this.isRegistering) return; // prevent navigation during in-progress registration
+    if (!this.selectedRole) return; // only allow step navigation after role selection
+    const n = Number(stepNumber);
+    if (!n || n < 1 || n > this.maxStep) return;
+    this.step = n;
+  }
+
 //Function to check if the password and confirmPassword are the same
  passwordMatchValidator(formGroup: FormGroup) {
     const password = formGroup.get('password')?.value;
@@ -308,6 +317,7 @@ async onRegister() {
     }
   } catch (err: any) {
     // If registration fails, extract the error message from the exception
+    console.error('[RegistrationPage] Registration failed:', err);
     this.registrationError = err?.message || 'Registration failed';
     // Show the error message in an alert dialog
     alert(this.registrationError);

@@ -1249,3 +1249,22 @@ ion-menu ion-item:hover {
     opacity: 1;
   }
 }
+
+/* Styling for sessions received from a different origin user */
+.session-item.session-foreign {
+  background: linear-gradient(135deg, #f5e6d3 0%, #EAF2FF 100%);
+}
+
+.session-item.session-foreign .session-time {
+  color: #6D7C91;
+}
+
+.session-item.session-foreign .session-images {
+  color: #5D8DEF;
+}
+
+.session-item.session-foreign .image-icon,
+.session-item.session-foreign ion-icon {
+  color: #5D8DEF;
+  stroke: #5D8DEF;
+}

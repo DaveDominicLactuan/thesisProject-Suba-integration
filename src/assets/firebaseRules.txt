@@ -167,18 +167,47 @@ service cloud.firestore {
       allow delete: if isSignedIn() && (isAdmin() || isOwnedByCurrentUser(resource.data));
     }
 
+    // ========== ENGINEER-CORRECTED IMAGES COLLECTION ==========
+    // Mirrors ownership/share behavior from /images for corrected payloads.
+    match /correctImagesByEngineer/{imageId} {
+      allow read: if isSignedIn()
+        && (
+          isAdmin()
+          || isOwnedByCurrentUser(resource.data)
+          || (
+            resource.data.sessionId != null
+            && exists(/databases/$(database)/documents/sessionsImages/$(resource.data.sessionId))
+            && isOwnedByCurrentUser(get(/databases/$(database)/documents/sessionsImages/$(resource.data.sessionId)).data)
+          )
+        );
+      allow write: if isSignedIn()
+        && (
+          isOwnedByCurrentUser(request.resource.data)
+          || isShareWritePayload(request.resource.data)
+        );
+      allow delete: if isSignedIn() && (isAdmin() || isOwnedByCurrentUser(resource.data));
+    }
+
     // ========== PENDING ACCOUNTS COLLECTION ==========
     match /pendingAccounts/{userId} {
       allow read: if true;
       // Allow unauthenticated creation of pending engineer accounts during registration
       allow create: if request.resource.data.userID is string
-        && request.resource.data.email is string
         && request.resource.data.firstName is string
         && request.resource.data.lastName is string
+        && request.resource.data.prcNumber is string
+        && request.resource.data.email is string
+        && request.resource.data.password is string
         && request.resource.data.role == 'engineer'
+        && request.resource.data.officeLocation is map
+        && request.resource.data.officeLocation.latitude is number
+        && request.resource.data.officeLocation.longitude is number
+        && request.resource.data.ifAdmin == false
         && request.resource.data.status == 'pending'
-        && request.resource.data.prcNumber is string;
-      allow update, delete: if isSignedIn() && request.auth.token.admin == true;
+        && request.resource.data.approvedAt == null
+        && request.resource.data.approvedBy == null
+        && request.resource.data.createdAt is timestamp;
+      allow update, delete: if isAdmin();
     }
 
     // ========== OFFICE LOCATIONS COLLECTION ==========
@@ -195,77 +224,30 @@ service cloud.firestore {
 
     // ========== USER OFFICE LOCATION MARKERS COLLECTION ==========
     match /userOfficeLocationMarker/{markerId} {
-      // Allow signed-in users to read/list all markers for map-wide display.
       allow get, list: if isSignedIn();
 
-      allow create: if isSignedIn()
-        && (isAdmin() || request.resource.data.userID == request.auth.uid)
-        && request.resource.data.userID is string
-        && (request.resource.data.name is string || request.resource.data.locationName is string)
-        && request.resource.data.contactInfo is string
-        && request.resource.data.availableTime is string
-        && request.resource.data.unavailableTime is string
-        && request.resource.data.email is string
-        && (
-          (
-            request.resource.data.address is string
-            && request.resource.data.officeLocation is map
-            && request.resource.data.officeLocation.latitude is number
-            && request.resource.data.officeLocation.longitude is number
-          )
-          ||
-          (
-            request.resource.data.officeAddress is string
-            && request.resource.data.officeLocation is map
-            && request.resource.data.officeLocation.latitude is number
-            && request.resource.data.officeLocation.longitude is number
-          )
-        );
+      allow create: if isAdmin();
 
-      allow update: if isSignedIn()
-        && (isAdmin() || resource.data.userID == request.auth.uid)
-        && request.resource.data.userID == resource.data.userID
-        && (request.resource.data.name is string || request.resource.data.locationName is string)
-        && request.resource.data.contactInfo is string
-        && request.resource.data.availableTime is string
-        && request.resource.data.unavailableTime is string
-        && request.resource.data.email is string
-        && (
-          (
-            request.resource.data.address is string
-            && request.resource.data.officeLocation is map
-            && request.resource.data.officeLocation.latitude is number
-            && request.resource.data.officeLocation.longitude is number
-          )
-          ||
-          (
-            request.resource.data.officeAddress is string
-            && request.resource.data.officeLocation is map
-            && request.resource.data.officeLocation.latitude is number
-            && request.resource.data.officeLocation.longitude is number
-          )
-        );
-
-      allow delete: if isSignedIn()
-        && (isAdmin() || resource.data.userID == request.auth.uid);
+      allow update, delete: if isAdmin();
     }
 
     // ========== PENDING USER OFFICE LOCATION MARKERS COLLECTION ==========
     match /pendingUserOfficeLocationMarker/{markerId} {
       allow read: if true;
       // Allow unauthenticated creation of pending engineer office location markers during registration
-      allow create: if request.resource.data.userID is string
-        && request.resource.data.userID == markerId
+      allow create: if request.resource.data.markerId is string
+        && request.resource.data.pendingAccountId is string
+        && request.resource.data.userID is string
         && request.resource.data.firstName is string
         && request.resource.data.lastName is string
-        && request.resource.data.officeAddress is string
         && request.resource.data.role == 'engineer'
         && request.resource.data.status == 'pending'
-        && (request.resource.data.location == null
-          || (request.resource.data.location is map
-            && request.resource.data.location.latitude is number
-            && request.resource.data.location.longitude is number));
-      allow update, delete: if isSignedIn() && request.auth.token.admin == true;
+        && request.resource.data.location is map
+        && request.resource.data.location.latitude is number
+        && request.resource.data.location.longitude is number
+        && request.resource.data.officeAddress is string
+        && request.resource.data.createdAt is timestamp;
+      allow update, delete: if isAdmin();
     }
 
     // ========== DENY ALL OTHER ACCESS ==========

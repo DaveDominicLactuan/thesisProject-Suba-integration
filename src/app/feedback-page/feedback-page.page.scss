@@ -53,6 +53,11 @@
   z-index: 2; /* above background image/overlay */
 }
 
+/* Engineer checked session background color */
+.page-body.engineer-checked-background {
+  background-color: #6D7C91;
+}
+
 .engineer-session-card {
   position: relative;
   z-index: 3;

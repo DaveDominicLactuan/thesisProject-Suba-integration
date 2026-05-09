@@ -47,6 +47,9 @@
   
   <!-- Header section: visible only when no role selected -->
   <div *ngIf="!selectedRole" class="header-section">
+    <button class="back-btn header-back-btn" type="button" (click)="onBack()" [disabled]="isRegistering" aria-label="Back">
+      <img src="assets/back.png" alt="Back" class="back-icon" />
+    </button>
     <h2 class="login-title">Welcome back Engineer</h2>
     <p class="login-subtitle">
       Sign up and create an account to join our growing community of engineers and users.
@@ -104,19 +107,19 @@
 
         <!-- Stepper navigation UI with progress connectors -->
         <div class="stepper">
-          <div class="step-wrapper">
+          <div class="step-wrapper" role="button" tabindex="0" (click)="goToStep(1)" (keydown.enter)="goToStep(1)" [attr.aria-current]="step===1">
             <div class="step" [class.active]="step === 1">1</div>
             <div class="step-connector" [class.active]="step > 1"></div>
           </div>
-          <div class="step-wrapper">
+          <div class="step-wrapper" role="button" tabindex="0" (click)="goToStep(2)" (keydown.enter)="goToStep(2)" [attr.aria-current]="step===2">
             <div class="step" [class.active]="step === 2">2</div>
             <div class="step-connector" [class.active]="step > 2"></div>
           </div>
-          <div class="step-wrapper">
+          <div class="step-wrapper" role="button" tabindex="0" (click)="goToStep(3)" (keydown.enter)="goToStep(3)" [attr.aria-current]="step===3">
             <div class="step" [class.active]="step === 3">3</div>
             <div class="step-connector" [class.active]="step > 3"></div>
           </div>
-          <div class="step-wrapper">
+          <div class="step-wrapper" role="button" tabindex="0" (click)="goToStep(4)" (keydown.enter)="goToStep(4)" [attr.aria-current]="step===4">
             <div class="step" [class.active]="step === 4">4</div>
           </div>
         </div>
@@ -167,7 +170,7 @@
           <div *ngIf="regForm.errors?.['mismatch'] && f['confirmPassword'].touched" class="field-error">Passwords do not match.</div>
 
           <button class="signup-btn" type="button" (click)="nextStep(); submitted=false" [disabled]="isRegistering || f['email'].invalid || f['password'].invalid || f['confirmPassword'].invalid || (f['password'].value && f['confirmPassword'].value && regForm.errors?.['mismatch'])">Next</button>
-          <button class="signup-btn" type="button" (click)="showNoticeWindow()">Back</button>
+          <!-- <button class="signup-btn" type="button" (click)="showNoticeWindow()">Back</button> -->
         </div>
 
         <!-- Step 2: User Info -->

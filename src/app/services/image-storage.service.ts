@@ -18,12 +18,14 @@ export interface StoredImage {
   timestamp: string;
   filename: string;
   prediction?: { type: string; shape: string; severity: string };
+  correctedPrediction?: { type: string; shape: string; severity: string };
   // New optional helpers for status/testing
   hasPrediction?: boolean;
   statusMessage?: string;
   detectionMessage?: string;
   sessionId?: string; // optional link to a session
   userId?: string; // optional link to a user (if multi-user support is added)
+  engineerCheckedSession?: boolean;
   fileImageName?: string; // optional original filename if available
   storagePath?: string; // Cloud Storage object path for original image
   storageUrl?: string; // Cloud Storage download URL for original image
@@ -48,6 +50,7 @@ export interface ImageSession {
   sessionId?: string; // optional link to a session (for easier querying if needed)
   // Optional freeform notes attached to the session
   notes?: string;
+  engineerCheckedSession?: boolean;
 }
 
 @Injectable({
@@ -62,6 +65,7 @@ export class ImageStorageService {
   private readonly STORAGE_KEY = 'stored_images';
   private readonly SESSIONS_KEY = 'stored_image_sessions';
   private readonly FIRESTORE_IMAGES_COLLECTION = 'images';
+  private readonly FIRESTORE_CORRECT_IMAGES_COLLECTION = 'correctImagesByEngineer';
   private readonly FIRESTORE_SESSIONS_COLLECTION = 'sessionsImages';
   private readonly FIRESTORE_DOC_MAX_BYTES = 900_000;
   private bucketName = 'my-angular-test-bucket-12345';
@@ -942,7 +946,12 @@ export class ImageStorageService {
         totalBoundingBoxes: session.totalBoundingBoxes || 0,
         userId: targetUserId,
         createdBy,
-        sessionId: this.newSessionIdForFileShare
+        ReceivedBy: targetUserId,
+        OriginUserId: currentUid,
+        sessionId: this.newSessionIdForFileShare,
+        notes: session.notes || '',
+        engineerCheckedSession: session.engineerCheckedSession,
+        
       };
 
       const sessionDocumentPath = `${this.FIRESTORE_SESSIONS_COLLECTION}/${session.id}`;
@@ -957,18 +966,21 @@ export class ImageStorageService {
 
       console.log("Batch data ", batch);
 
+      const correctImageWrites: { imageId: string; payload: any }[] = [];
+
       for (const image of imagesForSession) {
         // CRITICAL: Ensure userId is always concrete and share writes include a creator marker.
         image.userId = targetUserId;
+        const correctedPrediction = image.correctedPrediction || image.prediction || null;
         // NOTE: Commented out base64 storage to save Firestore quota - using S3 references instead
         // const safeOriginal = await this.clampDataUrlToBytes(image.original, this.FIRESTORE_DOC_MAX_BYTES);
         // const safeWithBoxes = await this.clampDataUrlToBytes(image.withBoxes, this.FIRESTORE_DOC_MAX_BYTES);
         const imageRef = doc(imagesCollection, image.filename);
-        batch.set(imageRef, {
+        const imageWritePayload = {
           timestamp: image.timestamp,
           filename: image.filename,
           userId: targetUserId,
-          createdBy: image.userId,
+          createdBy,
           sessionId: session.id,
           // NOTE: Commented out - base64 data stored in S3 instead
           // original: safeOriginal,
@@ -977,6 +989,8 @@ export class ImageStorageService {
           statusMessage: image.statusMessage || '',
           detectionMessage: image.detectionMessage || '',
           prediction: image.prediction || null,
+          correctedPrediction,
+          engineerCheckedSession: !!session.engineerCheckedSession,
           boxes: image.boxes || [],
           // S3 references for original image (full generated filename with userID:sessionId prefix)
           originalS3Key: image.storagePath || null,   // e.g., "userID:abc123sessionId:xyz789img1crack1041120261109original.jpg"
@@ -990,11 +1004,38 @@ export class ImageStorageService {
           // Backward compatibility
           withBoxesStoragePath: image.withBoxesStoragePath || null,
           withBoxesStorageUrl: image.withBoxesStorageUrl || null
-        });
+        };
+        batch.set(imageRef, imageWritePayload);
+
+        if (session.engineerCheckedSession) {
+          correctImageWrites.push({
+            imageId: image.filename,
+            payload: {
+              ...imageWritePayload,
+              correctedPrediction
+            }
+          });
+        }
       }
 
       await batch.commit();
-      console.warn('[ImageStorageService] Firestore batch commit is currently disabled. Uncomment "await batch.commit();" to persist queued writes.');
+
+      // Optional mirror-write for engineer-corrected images.
+      // Kept out of the primary batch so a denied optional collection does not fail core saves.
+      if (correctImageWrites.length > 0) {
+        try {
+          const correctImagesCollection = collection(this.firestore, this.FIRESTORE_CORRECT_IMAGES_COLLECTION);
+          const correctBatch = writeBatch(this.firestore);
+          for (const item of correctImageWrites) {
+            const correctImageRef = doc(correctImagesCollection, item.imageId);
+            correctBatch.set(correctImageRef, item.payload);
+          }
+          await correctBatch.commit();
+        } catch (correctWriteError) {
+          console.warn('[ImageStorageService] Optional engineer mirror write skipped (permissions or rule mismatch). Core save already succeeded.', correctWriteError);
+        }
+      }
+
       console.log(`✅ Session and images saved to Firestore: ${session.id}`);
     } catch (error) {
       console.error('[ImageStorageService] Error saving session/images to Firestore:', error);
@@ -1018,6 +1059,8 @@ export class ImageStorageService {
         statusMessage: image.statusMessage || '',
         detectionMessage: image.detectionMessage || '',
         prediction: image.prediction || null,
+        correctedPrediction: image.correctedPrediction || null,
+        engineerCheckedSession: !!image.engineerCheckedSession,
         boxes: image.boxes || [],
       };
 
@@ -1041,6 +1084,8 @@ export class ImageStorageService {
         created: session.created,
         totalBoundingBoxes: session.totalBoundingBoxes || 0,
         userId: session.userId || uid,
+        notes: session.notes || '',
+        engineerCheckedSession: !!session.engineerCheckedSession,
       };
       await setDoc(docRef, firestoreData);
       console.log(`✅ Session saved to user Firestore: ${uid}/${session.id}`);
