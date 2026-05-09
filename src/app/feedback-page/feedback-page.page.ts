@@ -855,6 +855,13 @@ private lastBackTapAt: number = 0;
     console.log('[FeedbackPage] Engineer has looked the session:', checked ? 'checked' : 'unchecked');
   }
 
+  /**
+   * Log the notes text to console.
+   */
+  logNotesToConsole(): void {
+    console.log('[FeedbackPage] Notes Text:', this.notesText);
+  }
+
 /**
  * Determine the image closest to the horizontal center and update UI bindings
  * (selected image, prediction/status, dropdown option lists, and formDataMap).

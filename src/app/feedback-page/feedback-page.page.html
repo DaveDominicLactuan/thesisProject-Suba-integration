@@ -157,12 +157,12 @@
           </button>
 
           <div class="notes-content" *ngIf="notesExpanded" id="notesContent">
-            <textarea [(ngModel)]="notesText" [attr.maxlength]="notesMaxLength" placeholder="Add additional notes..." class="notes-textarea"></textarea>
+            <textarea [(ngModel)]="notesText" [attr.maxlength]="notesMaxLength" placeholder="Add additional notes..." class="notes-textarea" [disabled]="userRole !== 'engineer'" [readonly]="userRole !== 'engineer'"></textarea>
             <div class="notes-counter">{{ notesText.length }}/{{ notesMaxLength }}</div>
           </div>
         </div>
 
-        <div class="engineer-session-card" role="group" aria-label="Engineer session review toggle">
+        <div *ngIf="userRole === 'engineer'" class="engineer-session-card" role="group" aria-label="Engineer session review toggle">
           <div class="engineer-session-text">Engineer has looked the session</div>
           <label class="engineer-session-toggle" for="engineerLookedSession">
             <input
@@ -180,6 +180,10 @@
               <button class="sign-in-button" (click)="viewResults()">View Results</button>
               <!-- <button class="sign-in-button" (click)="saveCurrentStoredImageAndGoHome()">Save Session</button> -->
             </div>
+
+        <div class="button-group">
+          <button class="sign-in-button" (click)="logNotesToConsole()">Log Notes to Console</button>
+        </div>
 
         <!-- <div class="button-group">
           <button class="sign-in-button debug-button" (click)="testS3Fetch()" title="Check S3 fetch status in console">🔍 Test S3 Fetch</button>
