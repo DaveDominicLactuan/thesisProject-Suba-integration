@@ -54,6 +54,7 @@ formDataMap: {
 
 imagePaths: DisplayImage[] = [];
 showWithBoxes: boolean = false;
+engineerLookedSessionChecked: boolean = false;
 private backButtonSub: any; // hardware back handler
 showSessionLoadingWindow: boolean = false;
 sessionLoadingMessage: string = 'Fetching S3 images...';
@@ -95,6 +96,10 @@ private lastBackTapAt: number = 0;
   dropdown2: string = '';
   dropdown3: string = '';
   extraText: string = '';
+  // Notes field (collapsible) shown under dropdown3
+  notesExpanded: boolean = false;
+  notesText: string = '';
+  notesMaxLength: number = 500;
   dropdownOptions: string[] = [];
   dropdownOptionsDirection: string[] = [];
   dropdownOptionsShape: string[] = [];
@@ -551,7 +556,18 @@ private lastBackTapAt: number = 0;
         return;
       }
 
+      const resolveAllImages = async (): Promise<any[]> => {
+        try {
+          if (typeof svc.getAllImagesAsync === 'function') return await svc.getAllImagesAsync();
+          if (typeof svc.getAllImages === 'function') return svc.getAllImages();
+        } catch (e) {
+          console.warn('[FeedbackPage] resolveAllImages failed', e);
+        }
+        return [];
+      };
+
      //Load each image entry for session.imageKeys using multiple service APIs
+      let allImagesCache = await resolveAllImages();
       for (const key of sess.imageKeys) {
         let entry: any = undefined;
         if (typeof svc.getEntryForImage === 'function') {
@@ -562,7 +578,53 @@ private lastBackTapAt: number = 0;
           const all = await svc.getAllEntries();
           entry = all ? all[key] : undefined;
         }
+        if (!entry && Array.isArray(allImagesCache) && allImagesCache.length > 0) {
+          // Support sessions that may store non-filename keys.
+          entry = allImagesCache.find((img: any) =>
+            img?.filename === key ||
+            img?.original === key ||
+            img?.withBoxes === key ||
+            img?.storagePath === key ||
+            img?.withBoxesStoragePath === key ||
+            img?.originalS3Key === key ||
+            img?.withBoxesS3Key === key
+          );
+        }
         if (entry) this.imagePaths.push(this.buildDisplayImage(entry));
+      }
+
+      // If no entries resolved locally, force fetch from Firestore/S3 and retry mapping.
+      if (this.imagePaths.length === 0 && this.selectedSessionId && typeof svc.fetchSessionImagesFromS3 === 'function') {
+        const uid = this.userId || sess.userId || '';
+        if (uid) {
+          await this.runSessionLoadingWindow(async () => {
+            this.sessionLoadingMessage = 'Fetching S3 images...';
+            this.sessionLoadingDetail = 'Loading session images from Firestore';
+            await svc.fetchSessionImagesFromS3(
+              this.selectedSessionId,
+              uid,
+              (current: number, total: number) => {
+                this.sessionLoadingTotal = total;
+                this.sessionLoadingCompleted = current;
+                this.sessionLoadingDetail = `Loading image ${current} of ${total}`;
+              }
+            );
+          }, Math.max(1800, (sess.imageKeys?.length || 1) * 450));
+
+          allImagesCache = await resolveAllImages();
+          for (const key of sess.imageKeys) {
+            const entry = allImagesCache.find((img: any) =>
+              img?.filename === key ||
+              img?.original === key ||
+              img?.withBoxes === key ||
+              img?.storagePath === key ||
+              img?.withBoxesStoragePath === key ||
+              img?.originalS3Key === key ||
+              img?.withBoxesS3Key === key
+            );
+            if (entry) this.imagePaths.push(this.buildDisplayImage(entry));
+          }
+        }
       }
 
       const hasS3BackedImages = this.imagePaths.some((img: DisplayImage) =>
@@ -786,6 +848,11 @@ private lastBackTapAt: number = 0;
   /** Dropdowns are read-only for users; editable for engineers. */
   get isUserReadOnly(): boolean {
     return (this.userRole || 'user').toLowerCase() === 'user';
+  }
+
+  onEngineerLookedToggle(checked: boolean): void {
+    this.engineerLookedSessionChecked = checked;
+    console.log('[FeedbackPage] Engineer has looked the session:', checked ? 'checked' : 'unchecked');
   }
 
 /**
@@ -1736,10 +1803,14 @@ addEntry() {
             if (typeof svc.updateSessionName === 'function') {
               try { svc.updateSessionName(this.selectedSessionId, val); } catch (e) { /* ignore */ }
             }
+            // update notes on existing session if supported
+            if (typeof svc.updateSessionNotes === 'function') {
+              try { svc.updateSessionNotes(this.selectedSessionId, this.notesText); } catch (e) { /* ignore */ }
+            }
             savedSessionId = this.selectedSessionId;
           } else {
             if (typeof svc.createSession === 'function') {
-              const s = svc.createSession(val, [imageKey]);
+              const s = svc.createSession(val, [imageKey], undefined, this.notesText);
               if (s && typeof svc.setLastCreatedSession === 'function') {
                 try { svc.setLastCreatedSession(s.id, s.name); } catch (e) { /* ignore */ }
               }

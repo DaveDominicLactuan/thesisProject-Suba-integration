@@ -46,6 +46,8 @@ export interface ImageSession {
   totalBoundingBoxes?: number;
   userId?: string; // optional link to a user (if multi-user support is added)
   sessionId?: string; // optional link to a session (for easier querying if needed)
+  // Optional freeform notes attached to the session
+  notes?: string;
 }
 
 @Injectable({
@@ -808,6 +810,7 @@ export class ImageStorageService {
       totalBoundingBoxes: session.totalBoundingBoxes || 0,
       userId: session.userId,
       sessionId: session.sessionId
+      ,notes: (session as any).notes
     };
 
     this.sessions.unshift(normalized);
@@ -1142,7 +1145,7 @@ export class ImageStorageService {
     this.newSessionIdForFileShare = `s-${Date.now()}`;
   }
 
-  createSession(name: string, imageKeys: string[] = [], userId?: string): ImageSession {
+  createSession(name: string, imageKeys: string[] = [], userId?: string, notes?: string): ImageSession {
     // compute total bounding boxes for provided keys
     let totalBoxes = 0;
     for (const k of imageKeys) {
@@ -1160,6 +1163,7 @@ export class ImageStorageService {
       totalBoundingBoxes: totalBoxes,
       userId: userId,
       sessionId: sessionId
+      ,notes: notes
     };
     //The new session is added to the beginning of the sessions array using unshift.
     this.sessions.unshift(s);
@@ -1236,6 +1240,15 @@ export class ImageStorageService {
     // persists the updated sessions array to storage.
     this.persistSessions();
     // returns true to indicate that the update was successful.
+    return true;
+  }
+
+  /** Update a session's freeform notes and persist changes */
+  updateSessionNotes(sessionId: string, notes: string): boolean {
+    const s = this.sessions.find(x => x.id === sessionId);
+    if (!s) return false;
+    s.notes = notes;
+    this.persistSessions();
     return true;
   }
 

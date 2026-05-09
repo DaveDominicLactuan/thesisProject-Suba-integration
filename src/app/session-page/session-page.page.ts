@@ -660,6 +660,28 @@ private startUserSyncInBackground(userId: string): void {
       this.sessionLoadingStatusText = 'Preparing session...';
       this.sessionLoadingImageCount = { current: 0, total: 0 };
 
+      // Ensure session images are fetched from Firestore/S3 before navigation
+      // so FeedbackPage has hydrated entries to display.
+      const sessionId = session?.id || '';
+      const uid = this.userID || this.auth3.getCurrentUser()?.uid || session?.userId || '';
+      if (sessionId && uid && typeof (this.imageStorage as any).fetchSessionImagesFromS3 === 'function') {
+        this.sessionLoadingStatusText = 'Fetching session images from S3...';
+        this.sessionLoadingImageCount = { current: 0, total: Math.max(session?.imageKeys?.length || 0, 1) };
+        try {
+          await (this.imageStorage as any).fetchSessionImagesFromS3(
+            sessionId,
+            uid,
+            (current: number, total: number) => {
+              this.sessionLoadingImageCount = { current, total };
+              this.sessionLoadingProgress = total > 0 ? Math.round((current / total) * 100) : 0;
+              this.sessionLoadingStatusText = `Loading session images... ${current}/${total}`;
+            }
+          );
+        } catch (fetchErr) {
+          console.warn('[SessionPage] fetchSessionImagesFromS3 failed before navigation; continuing', fetchErr);
+        }
+      }
+
       // Select the first image for feedback-page
       if (session && session.imageKeys && session.imageKeys.length > 0) {
         const key = session.imageKeys[0];

@@ -91,7 +91,7 @@
       </div>
 
       <!-- Form metadata section -->
-      <div class="login-form">
+      <div class="login-form" [class.notes-open]="notesExpanded">
         <!-- Wrapper keeps the title in the same visual position; delete button is placed to its left -->
         <div class="image-title-wrapper">
           <button class="delete-left-btn" type="button" (click)="deleteSelectedImage()" title="Delete selected image">
@@ -128,14 +128,62 @@
           </select>
         </div>
 
+        <!-- Notes (optional) collapsible field -->
+        <div class="form-group notes-panel" [class.expanded]="notesExpanded">
+          <button
+            type="button"
+            class="notes-header"
+            (click)="notesExpanded = !notesExpanded"
+            [attr.aria-expanded]="notesExpanded"
+            aria-controls="notesContent"
+          >
+            <div class="notes-left">
+              <div class="notes-icon" aria-hidden="true">
+                <!-- simple note icon SVG matching design -->
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <rect x="3" y="4" width="14" height="16" rx="2" stroke="#FF6F2E" stroke-width="1.6" fill="none" />
+                  <path d="M7 8H15" stroke="#FF6F2E" stroke-width="1.4" stroke-linecap="round" />
+                  <path d="M7 12H13" stroke="#FF6F2E" stroke-width="1.4" stroke-linecap="round" />
+                </svg>
+              </div>
+              <div class="notes-title">Notes (optional)</div>
+            </div>
+            <div class="notes-arrow" [class.open]="notesExpanded" aria-hidden="true">
+              <!-- chevron -->
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M6 9L12 15L18 9" stroke="#8A3A0A" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+              </svg>
+            </div>
+          </button>
+
+          <div class="notes-content" *ngIf="notesExpanded" id="notesContent">
+            <textarea [(ngModel)]="notesText" [attr.maxlength]="notesMaxLength" placeholder="Add additional notes..." class="notes-textarea"></textarea>
+            <div class="notes-counter">{{ notesText.length }}/{{ notesMaxLength }}</div>
+          </div>
+        </div>
+
+        <div class="engineer-session-card" role="group" aria-label="Engineer session review toggle">
+          <div class="engineer-session-text">Engineer has looked the session</div>
+          <label class="engineer-session-toggle" for="engineerLookedSession">
+            <input
+              id="engineerLookedSession"
+              type="checkbox"
+              [(ngModel)]="engineerLookedSessionChecked"
+              (ngModelChange)="onEngineerLookedToggle($event)"
+            />
+          </label>
+        </div>
+
+        
+
         <div class="button-group">
               <button class="sign-in-button" (click)="viewResults()">View Results</button>
               <!-- <button class="sign-in-button" (click)="saveCurrentStoredImageAndGoHome()">Save Session</button> -->
             </div>
 
-        <div class="button-group">
+        <!-- <div class="button-group">
           <button class="sign-in-button debug-button" (click)="testS3Fetch()" title="Check S3 fetch status in console">🔍 Test S3 Fetch</button>
-        </div>
+        </div> -->
 
       </div>
     </div>

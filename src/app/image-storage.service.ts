@@ -132,6 +132,7 @@ export class ImageStorageService {
       const sessionData = {
         name: s.name,
         imageKeys: s.imageKeys,
+        notes: (s as any).notes ?? null,
         createdAt: serverTimestamp(),
         localId: s.id,
         createdBy: createdBy || null,
