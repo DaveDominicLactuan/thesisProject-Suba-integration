@@ -129,6 +129,12 @@ export class ResultsDashboardPage implements OnInit {
         this.stats.totalImages = imgs.length;
         return;
       }
+
+      console.warn('[ResultsDashboard.loadData] Session not found for sessionId:', this.sessionId);
+      this.availableSessionImages = [];
+      this.selectedImageKeys = [];
+      this.stats = { type: {}, severity: {}, shape: {}, totalCracks: 0, totalImages: 0 };
+      return;
     }
 
     // No session specified or session not found -> aggregate across all images
@@ -161,8 +167,8 @@ export class ResultsDashboardPage implements OnInit {
 
   // Return a stable key for an image (filename as the only primary key)
   getImageKey(img: StoredImage): string {
-    // Use filename as the only key; return empty string if not present
-    return img.filename || '';
+    // Use the most stable available key so session filtering matches stored image references.
+    return img.filename || img.original || img.withBoxes || img.storagePath || img.originalS3Key || img.withBoxesS3Key || '';
   }
 
 

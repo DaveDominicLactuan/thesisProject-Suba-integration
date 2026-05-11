@@ -37,8 +37,12 @@
         <span>Map</span>
       </li>
        <li class="menu-item" (click)="goMarkerPage()">
-        <img src="assets/bottomBarMarker.png" alt="Map" class="menu-item-icon" />
-        <span>Map</span>
+        <img src="assets/officeLocation.png" alt="Map" class="menu-item-icon" />
+        <span>Office Locations</span>
+      </li>
+      <li class="menu-item" (click)="goSessionPage()">
+        <img src="assets/updatedSession.png" alt="Map" class="menu-item-icon" />
+        <span>Sessions</span>
       </li>
     </div>
  
@@ -121,9 +125,14 @@
         </div>
         <div class="session-right">
           <div class="session-time">{{ s.created | date:'shortTime' }}</div>
-          <button class="delete-btn" (click)="deleteSession(s, $event)">
-            <img src="assets/trashIcon.png" alt="Delete" style="width: 28px; height: 28px; object-fit: contain;" />
-          </button>
+          <div class="session-actions">
+            <div class="engineer-check-badge" *ngIf="s.engineerCheckedSession === true">
+              <img src="assets/engineerCheck.png" alt="Engineer Checked" />
+            </div>
+            <button class="delete-btn" (click)="deleteSession(s, $event)">
+              <img src="assets/trashIcon.png" alt="Delete" style="width: 28px; height: 28px; object-fit: contain;" />
+            </button>
+          </div>
         </div>
       </div>
     </ng-container>

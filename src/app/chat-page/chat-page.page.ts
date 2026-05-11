@@ -1661,7 +1661,7 @@ export class ChatPagePage implements OnInit, OnDestroy {
   // this.isCopying = true;
   try {
     // 2. Execute the internal S3 Copy command
-    const result = await this.imageStorage.copyFile(sourceKey2, destinationKey);
+    const result = await this.imageStorage.copyFile(sourceKey2, destinationKey2);
     // const result = { success: false }; // Mock result for demonstration
     console.log('[ChatPage.confirmAttachmentShareCopy] copyFile result (withBoxes):', {
       index: i + 1,
@@ -1676,16 +1676,18 @@ export class ChatPagePage implements OnInit, OnDestroy {
       const bucketBaseUrl = 'https://my-angular-test-bucket-12345.s3.ap-southeast-2.amazonaws.com/';
       
       const newImageMetadata = {
-        originalS3Key: destinationKey,
-        originalS3Url: `${bucketBaseUrl}${destinationKey}`,
-        storagePath: destinationKey,
-        storageUrl: `${bucketBaseUrl}${destinationKey}`
+        withBoxesS3Key: destinationKey,
+        withBoxesS3Url: `${bucketBaseUrl}${destinationKey}`,
+        withBoxesStoragePath: destinationKey,
+        withBoxesStorageUrl: `${bucketBaseUrl}${destinationKey}`
       };
 
-       imgObj.withBoxesS3Key = newImageMetadata.originalS3Key,
-       imgObj.withBoxesS3Url = newImageMetadata.storageUrl,
-       imgObj.withBoxesStoragePath = newImageMetadata.storagePath,
-       imgObj.withBoxesStorageUrl = newImageMetadata.storageUrl,
+       imgObj.withBoxesS3Key = newImageMetadata.withBoxesS3Key,
+       imgObj.withBoxesS3Url = newImageMetadata.withBoxesS3Url,
+       imgObj.withBoxesStoragePath = newImageMetadata.withBoxesStoragePath,
+       imgObj.withBoxesStorageUrl = newImageMetadata.withBoxesStorageUrl,
+
+       console.log("newImageMetadata", newImageMetadata, "imgObj", imgObj);
 
        //  imgObj.withBoxes = newImageMetadata.originalS3Url,
 
@@ -2448,6 +2450,8 @@ export class ChatPagePage implements OnInit, OnDestroy {
   private userProfileCache: Map<string, any> = new Map();
   isSearching = false;
   searchQuery = '';
+  private searchConversationResultsBackup: any[] = [];
+  private engineersBackup: any[] = [];
   // active bottom navigation tab: 'person' | 'people' | 'location' | 'settings'
   activeTab: 'person' | 'people' | 'location' | 'settings' | 'profile' = 'people';
   private map?: L.Map | null = null;
@@ -2970,6 +2974,7 @@ ngOnInit(): void {
     const cachedEngineers = this.userPrefetchCache.getCachedEngineers(cachedUid);
     if (cachedEngineers.length > 0) {
       this.engineers = [...cachedEngineers];
+      this.engineersBackup = [...cachedEngineers];
     }
 
     this.userPrefetchCache.warmUserDataInBackground(cachedUid, 'chat-page-ngOnInit').finally(() => {
@@ -3829,16 +3834,86 @@ onMsgBubbleTap(message: Message): void {
     }
   }
 
-  onSearchInput(ev: any) {
-    this.searchQuery = ev.target.value;
+  onSearchInput(value: string) {
+    this.searchQuery = (value || '').toString().toLowerCase().trim();
     this.isSearching = this.searchQuery.length > 0;
-    // Optionally filter searchConversationResults here if you want dynamic filtering
-    // For now, keep static placeholder results as in the pasted image
+    
+    // Initialize backup arrays on first search if not already done
+    if (this.searchConversationResultsBackup.length === 0 && this.searchConversationResults.length > 0) {
+      this.searchConversationResultsBackup = [...this.searchConversationResults];
+    }
+    if (this.engineersBackup.length === 0 && this.engineers.length > 0) {
+      this.engineersBackup = [...this.engineers];
+    }
+    
+    // Automatically filter results as user types
+    if (this.searchQuery.length > 0) {
+      // Prefer filtering from backup snapshots when available, otherwise filter current arrays
+      const searchSourceResults = (this.searchConversationResultsBackup.length > 0) ? this.searchConversationResultsBackup : this.searchConversationResults;
+      const searchSourceEngineers = (this.engineersBackup.length > 0) ? this.engineersBackup : this.engineers;
+
+      this.searchConversationResults = (searchSourceResults || []).filter(result => this.matchesSearchQuery(result));
+      this.engineers = (searchSourceEngineers || []).filter(engineer => this.matchesSearchQuery(engineer));
+    } else {
+      // Restore full lists when search is cleared
+      this.searchConversationResults = [...this.searchConversationResultsBackup];
+      this.engineers = [...this.engineersBackup];
+    }
+  }
+
+  private matchesSearchQuery(item: any): boolean {
+    const query = this.searchQuery;
+    const firstName = (item.firstName || '').toLowerCase();
+    const lastName = (item.lastName || '').toLowerCase();
+    const fullName = `${firstName} ${lastName}`.toLowerCase();
+    const email = (item.email || '').toLowerCase();
+    const name = (item.name || '').toLowerCase();
+    const role = (item.role || '').toLowerCase();
+    
+    return (
+      firstName.includes(query) ||
+      lastName.includes(query) ||
+      fullName.includes(query) ||
+      email.includes(query) ||
+      name.includes(query) ||
+      role.includes(query)
+    );
+  }
+
+  /**
+   * Combined, deduplicated list used for search results display.
+   * Prioritizes `engineers` then `searchConversationResults`, deduping by id/email/name.
+   */
+  get searchOptions(): any[] {
+    const combined: any[] = [];
+    const seen = new Set<string>();
+    const pushIfNew = (it: any) => {
+      if (!it) return;
+      const key = (it.id || it.email || it.name || '').toString();
+      if (!key) return;
+      if (!seen.has(key)) {
+        seen.add(key);
+        combined.push(it);
+      }
+    };
+
+    // include engineers first (if any), then fallback/placeholder results
+    (this.engineers || []).forEach(pushIfNew);
+    (this.searchConversationResults || []).forEach(pushIfNew);
+
+    return combined;
   }
 
   clearSearch() {
     this.searchQuery = '';
     this.isSearching = false;
+    // Restore full lists from backups
+    if (this.searchConversationResultsBackup.length > 0) {
+      this.searchConversationResults = [...this.searchConversationResultsBackup];
+    }
+    if (this.engineersBackup.length > 0) {
+      this.engineers = [...this.engineersBackup];
+    }
   }
 
   closeSearch() {
@@ -3854,27 +3929,37 @@ onMsgBubbleTap(message: Message): void {
       const cachedEngineers = this.userPrefetchCache.getCachedEngineers(cacheUid);
       if (cachedEngineers.length > 0) {
         this.engineers = [...cachedEngineers];
+        this.engineersBackup = [...cachedEngineers];
       }
     }
 
     try {
       const usersCol = collection(this.firestore, 'users');
-      const q = query(usersCol, where('role', '==', 'engineer'));
-      const snap = await getDocs(q);
+      const snap = await getDocs(query(usersCol));
       const arr: any[] = [];
       snap.forEach(doc => {
         const data = { id: (doc as any).id, ...(doc.data() as any) };
         arr.push(data);
       });
       this.engineers = arr;
+      this.engineersBackup = arr;
+      // If a search is currently active, apply the search filter to the freshly fetched engineers
+      if (this.searchQuery && this.searchQuery.length > 0) {
+        try {
+          this.engineers = this.engineersBackup.filter(engineer => this.matchesSearchQuery(engineer));
+        } catch (e) {
+          console.warn('[ChatPage] Error filtering users after fetch with active search:', e);
+        }
+      }
       if (cacheUid) {
         this.userPrefetchCache.storeEngineers(cacheUid, arr);
         this.refreshCacheWarmStatus(cacheUid);
       }
-      console.log('[ChatPage] Engineers fetched from Firestore:', this.engineers);
+      console.log('[ChatPage] Users fetched from Firestore for search:', this.engineers);
     } catch (err) {
-      console.error('[ChatPage] Error fetching engineers:', err);
+      console.error('[ChatPage] Error fetching users for search:', err);
       this.engineers = [];
+      this.engineersBackup = [];
     }
   }
 

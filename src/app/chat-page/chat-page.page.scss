@@ -233,6 +233,17 @@
 	text-overflow: ellipsis;
 }
 
+/* Email text in search results should match message styling */
+.search-conv-message .email-text {
+	font-size: 0.95rem;
+	color: #888;
+	margin-left: 6px;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	font-weight: 500;
+}
+
 .no-results {
 	text-align: center;
 	color: #999;

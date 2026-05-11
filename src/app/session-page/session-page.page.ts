@@ -313,6 +313,7 @@ private startUserSyncInBackground(userId: string): void {
         const imageCount = keys.reduce((acc: number, k: string) => acc + (allImages.findIndex(ai => ai.filename === k) !== -1 ? 1 : 0), 0);
         return { ...sess, imageCount };
       });
+      this.applySessionSort(this.currentSort);
       console.log('[SessionPage.loadSessions] Displaying', this.sessions.length, 'sessions for user', currentUserID);
       // if Image Storage Service recorded a last created session or last used/created session,
       //  show its name at top of the summary list
@@ -1417,43 +1418,66 @@ private startUserSyncInBackground(userId: string): void {
     this.isSortOverlayOpen = false;
   }
 
+  private getSessionCreatedTime(session: any): number {
+    const created = session?.created;
+
+    if (!created) {
+      return 0;
+    }
+
+    if (created instanceof Date) {
+      return created.getTime();
+    }
+
+    if (typeof created === 'number') {
+      return created;
+    }
+
+    if (typeof created?.toDate === 'function') {
+      try {
+        return created.toDate().getTime();
+      } catch (e) {
+        return 0;
+      }
+    }
+
+    if (typeof created?.seconds === 'number') {
+      const nanos = typeof created?.nanoseconds === 'number' ? created.nanoseconds : 0;
+      return (created.seconds * 1000) + Math.floor(nanos / 1_000_000);
+    }
+
+    const parsed = Date.parse(String(created));
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+
+  private applySessionSort(sortType: string): void {
+    const sessions = Array.isArray(this.sessions) ? [...this.sessions] : [];
+
+    switch (sortType) {
+      case 'time-newest':
+        sessions.sort((a, b) => this.getSessionCreatedTime(b) - this.getSessionCreatedTime(a));
+        break;
+      case 'time-oldest':
+        sessions.sort((a, b) => this.getSessionCreatedTime(a) - this.getSessionCreatedTime(b));
+        break;
+      case 'images-most':
+        sessions.sort((a, b) => (b.imageCount || b.imageKeys?.length || 0) - (a.imageCount || a.imageKeys?.length || 0));
+        break;
+      case 'images-least':
+        sessions.sort((a, b) => (a.imageCount || a.imageKeys?.length || 0) - (b.imageCount || b.imageKeys?.length || 0));
+        break;
+      default:
+        sessions.sort((a, b) => this.getSessionCreatedTime(b) - this.getSessionCreatedTime(a));
+        break;
+    }
+
+    this.sessions = sessions;
+  }
+
   /** Sort sessions based on selected criteria */
   sortSessions(sortType: string) {
     this.currentSort = sortType;
-    
-    switch (sortType) {
-      case 'time-newest':
-        this.sessions.sort((a, b) => {
-          const dateA = new Date(a.created).getTime();
-          const dateB = new Date(b.created).getTime();
-          return dateB - dateA; // newest first
-        });
-        break;
-      
-      case 'time-oldest':
-        this.sessions.sort((a, b) => {
-          const dateA = new Date(a.created).getTime();
-          const dateB = new Date(b.created).getTime();
-          return dateA - dateB; // oldest first
-        });
-        break;
-      
-      case 'images-most':
-        this.sessions.sort((a, b) => {
-          const countA = a.imageKeys?.length || 0;
-          const countB = b.imageKeys?.length || 0;
-          return countB - countA; // most images first
-        });
-        break;
-      
-      case 'images-least':
-        this.sessions.sort((a, b) => {
-          const countA = a.imageKeys?.length || 0;
-          const countB = b.imageKeys?.length || 0;
-          return countA - countB; // least images first
-        });
-        break;
-    }
+    this.applySessionSort(sortType);
     
     // Close overlay after sorting
     this.closeSortOverlay();

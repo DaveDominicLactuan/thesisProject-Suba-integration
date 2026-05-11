@@ -1231,6 +1231,16 @@ addEntry() {
     updatedStored.detectionResult = matched.detectionResult;
     updatedStored.engineerCheckedSession = this.userRole?.toLowerCase() === 'engineer' && this.engineerLookedSessionChecked;
 
+    // ✅ Preserve S3 key fields from matched DisplayImage to ensure they're not lost
+    if (matched.originalS3Key) updatedStored.originalS3Key = matched.originalS3Key;
+    if (matched.originalS3Url) updatedStored.originalS3Url = matched.originalS3Url;
+    if (matched.withBoxesS3Key) updatedStored.withBoxesS3Key = matched.withBoxesS3Key;
+    if (matched.withBoxesS3Url) updatedStored.withBoxesS3Url = matched.withBoxesS3Url;
+    if (matched.storagePath) updatedStored.storagePath = matched.storagePath;
+    if (matched.storageUrl) updatedStored.storageUrl = matched.storageUrl;
+    if (matched.withBoxesStoragePath) updatedStored.withBoxesStoragePath = matched.withBoxesStoragePath;
+    if (matched.withBoxesStorageUrl) updatedStored.withBoxesStorageUrl = matched.withBoxesStorageUrl;
+
     if (typeof svc.setEntryForImage === 'function') {
       svc.setEntryForImage(key, updatedStored);
     }
@@ -1348,11 +1358,6 @@ addEntry() {
   /** Navigate back to Home Page, fallback to history.back on failure. */
   async goBack() {
     try {
-      const sessionId = this.routeSessionId || this.selectedSessionId || null;
-      if (sessionId && (this.imageStorageService as any).saveSessionWithImagesToFirestore) {
-        try { await (this.imageStorageService as any).saveSessionWithImagesToFirestore(sessionId); } catch (e) { /* ignore */ }
-      }
-
       // Try to navigate back in app history (preferred) or app level back navigation if from camera , upload or home
       try { this.navCtrl.back(); return; } catch (e) { /* ignore and fallback */ }
 
@@ -1454,7 +1459,7 @@ addEntry() {
   /** Navigate to results dashboard page, preserving sessionId when present. */
   viewResults() {
     // Navigate to results page with current sessionId if available
-    const sessionId = this.routeSessionId || null;
+    const sessionId = this.selectedSessionId || this.routeSessionId || null;
 
     //Navigate with session id
     if (sessionId) {
@@ -1604,6 +1609,53 @@ addEntry() {
     return entry;
   }
 
+  /**
+   * Guard rail: Ensure original and withBoxes values are set to their S3 key counterparts.
+   * This prevents stale or incorrect paths from being saved to Firestore.
+   * Called right before Firestore save to validate all session images have S3 keys properly configured.
+   * 
+   * @param sessionImages - Array of StoredImage objects to validate and patch
+   * @returns Updated array with original/withBoxes replaced by S3 keys where available
+   */
+  private applyS3KeyGuardRail(sessionImages: any[]): any[] {
+    if (!sessionImages || sessionImages.length === 0) {
+      console.warn('[FeedbackPage] Guard rail: No session images to validate');
+      return sessionImages;
+    }
+
+    const patchedImages = sessionImages.map((img: any, index: number) => {
+      const imgName = img.filename || `Image ${index + 1}`;
+      
+      // Check if S3 keys exist; if so, ensure original/withBoxes point to them
+      if (img.storagePath || img.originalS3Key) {
+        const originalS3Key = img.storagePath || img.originalS3Key;
+        if (originalS3Key && img.original !== originalS3Key) {
+          console.log(
+            `[FeedbackPage] Guard Rail - Original [${imgName}]: "${img.original}" â†' S3 key "${originalS3Key}"`
+          );
+          img.original = originalS3Key;
+        }
+      }
+
+      if (img.withBoxesStoragePath || img.withBoxesS3Key) {
+        const withBoxesS3Key = img.withBoxesStoragePath || img.withBoxesS3Key;
+        if (withBoxesS3Key && img.withBoxes !== withBoxesS3Key) {
+          console.log(
+            `[FeedbackPage] Guard Rail - WithBoxes [${imgName}]: "${img.withBoxes}" â†' S3 key "${withBoxesS3Key}"`
+          );
+          img.withBoxes = withBoxesS3Key;
+        }
+      }
+
+      return img;
+    });
+
+    console.log(
+      `[FeedbackPage] Guard rail validation complete for ${patchedImages.length} image(s)`
+    );
+    return patchedImages;
+  }
+
 /**
    * Save the currently-selected StoredImage (or the service current image) as a session,
    * update the storage entry, show a confirmation popup and navigate to home.
@@ -1643,7 +1695,16 @@ addEntry() {
             rawPrediction: correctedPrediction,
             correctedPrediction,
             engineerCheckedSession: this.userRole?.toLowerCase() === 'engineer' && this.engineerLookedSessionChecked,
-            statusMessage: 'Saved as session'
+            statusMessage: 'Saved as session',
+            // ✅ CRITICAL: Preserve S3 key fields so they're not lost when saving
+            originalS3Key: found.originalS3Key,
+            originalS3Url: found.originalS3Url,
+            withBoxesS3Key: found.withBoxesS3Key,
+            withBoxesS3Url: found.withBoxesS3Url,
+            storagePath: found.storagePath,
+            storageUrl: found.storageUrl,
+            withBoxesStoragePath: found.withBoxesStoragePath,
+            withBoxesStorageUrl: found.withBoxesStorageUrl
           };
         }
       }
@@ -1975,6 +2036,10 @@ addEntry() {
               updateProgress(85, 'Saving Session: 85%');
             }
           }
+
+          // **GUARD RAIL**: Apply S3 key validation before Firestore save
+          // Ensure original and withBoxes are set to S3 keys to prevent stale data
+          const validatedSessionImages = this.applyS3KeyGuardRail(sessionImages);
 
           // Firestore save - includes S3 references from updated entry
           let firestoreSaved = false;

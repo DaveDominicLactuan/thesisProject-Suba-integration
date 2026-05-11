@@ -1843,5 +1843,18 @@ private startUserSyncInBackground(userId: string): void {
       this.longPressTimeout = null;
     }
   }
+
+  gochatPageLocation() {
+    this.removeBackButtonHandler();
+    this.router.navigate(['/chat-page'], { state: { activeTab: 'location' } });
+    console.log('chat page (location)');
+  }
+
+   /** Navigate to chat page and open the 'location' tab. */
+  goMarkerPage() {
+    this.removeBackButtonHandler();
+    this.router.navigate(['/office-map-marker-page']);
+    console.log('chat page (location)');
+  }
   
 }

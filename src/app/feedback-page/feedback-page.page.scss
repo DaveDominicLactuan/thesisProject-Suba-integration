@@ -53,10 +53,7 @@
   z-index: 2; /* above background image/overlay */
 }
 
-/* Engineer checked session background color */
-.page-body.engineer-checked-background {
-  background-color: #6D7C91;
-}
+
 
 .engineer-session-card {
   position: relative;
@@ -538,7 +535,7 @@
   z-index: 5;
   max-width: 100%;
   width: 800px;
-  height: 580px;
+  height: 520px;
   transition: height 0.22s ease;
   background-color: #fff;
   border-radius: 15px;
@@ -557,6 +554,15 @@
 }
 
 .login-form.notes-open {
+  height: 690px;
+
+}
+
+.login-form.engineer-role {
+  height: 580px;
+}
+
+.login-form.engineer-role.notes-open {
   height: 770px;
 }
 
@@ -1111,6 +1117,8 @@
     linear-gradient(#fff, #fff) padding-box,
     linear-gradient(to right, #ff512f, #f09819) border-box;
 }
+
+
 
 .back-button-container {
   position: fixed;

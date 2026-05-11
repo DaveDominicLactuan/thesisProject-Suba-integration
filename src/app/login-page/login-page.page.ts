@@ -51,10 +51,10 @@ signupForm: FormGroup;
     try {
       //tries login with email and password
       console.log('[LoginPage.login] ===== LOGIN FLOW START =====');
-      console.log('[LoginPage.login] Email:', this.email);
+      console.log('[LoginPage.login] Email:', (this.email || '').trim());
       console.log('[LoginPage.login] Auth currentUser BEFORE login:', this.auth3.getCurrentUser()?.uid || 'null');
-      await this.auth3.login(this.email, this.password);
-      console.log('[LoginPage] Auth login succeeded for', this.email);
+      await this.auth3.login((this.email || '').trim(), this.password);
+      console.log('[LoginPage] Auth login succeeded for', (this.email || '').trim());
       console.log('[LoginPage.login] Auth currentUser IMMEDIATELY after login (before wait):', this.auth3.getCurrentUser()?.uid || 'null');
       const authedUser = await this.auth3.waitForAuthUser(15000);
       console.log('[LoginPage] Auth currentUser after login', authedUser?.uid || null);
@@ -105,7 +105,8 @@ signupForm: FormGroup;
 
 
     } catch (err: any) {
-      this.error = err.message || 'Login failed';
+      this.error = err?.message || 'Login failed';
+      console.error('[LoginPage.login] Login failed:', err);
     } finally {
       this.isLoggingIn = false;
     }

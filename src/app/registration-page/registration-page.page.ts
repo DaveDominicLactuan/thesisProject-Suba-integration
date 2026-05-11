@@ -397,29 +397,37 @@ toggleConfirmPasswordVisibility() {
     console.log('Navigating to Sign Up page');
   }
 
+  private navigateToLandingPage(): void {
+    try {
+      this.router.navigateByUrl('/landing-page');
+    } catch (e) {
+      this.navCtrl.back();
+    }
+  }
+
   //function to go back to landing page
   /**
-   * Back behavior: if a role was chosen, deselect it; otherwise navigate
-   * to landing (fallback to navCtrl.back()).
+   * Back behavior: move to the previous step when possible; from step 1 or
+   * the role-selection screen, leave the registration flow and return to landing.
    */
   onBack() {
-  if (this.isRegistering) {
-    return;
-  }
+    if (this.isRegistering) {
+      return;
+    }
 
-  // If a role is selected, deselect it. Otherwise navigate back to landing page.
-  if (this.selectedRole) {
+    if (!this.selectedRole) {
+      this.navigateToLandingPage();
+      return;
+    }
+
+    if (this.step > 1) {
+      this.step--;
+      return;
+    }
+
     this.selectedRole = null;
-    return;
+    this.navigateToLandingPage();
   }
-
-  // No role selected: navigate back to landing page
-  try {
-    this.router.navigateByUrl('/landing-page');
-  } catch (e) {
-    this.navCtrl.back();
-  }
-}
 
   /**
    * Dynamically create and append a notice window to the document body.

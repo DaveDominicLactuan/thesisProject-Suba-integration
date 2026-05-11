@@ -57,7 +57,6 @@
   color: #000;
 }
 
-
 .logo {
   width: 130px;
   height: 130px;
@@ -67,7 +66,6 @@
   left: 50%;
   transform: translateX(-50%);
 }
-
 /* back button (copied from registration page for consistent styling) */
 .back-btn {
   position: absolute;
@@ -139,6 +137,36 @@ margin: 20px auto 30px auto;
 .input-item .toggle {
   cursor: pointer;
   color: #888;
+}
+
+.password-toggle-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  flex-shrink: 0;
+  border: none;
+  background: transparent;
+  color: #666;
+  border-radius: 50%;
+  cursor: pointer;
+  transition: color 0.2s ease, background-color 0.2s ease;
+}
+
+.password-toggle-btn i {
+  font-size: 18px;
+  line-height: 1;
+}
+
+.password-toggle-btn:hover {
+  color: #ff512f;
+  background: rgba(255, 81, 47, 0.08);
+}
+
+.password-toggle-btn:active {
+  color: #f09819;
+  background: rgba(240, 152, 25, 0.12);
 }
 
 .input-item label {

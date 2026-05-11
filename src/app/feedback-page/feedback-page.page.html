@@ -91,7 +91,7 @@
       </div>
 
       <!-- Form metadata section -->
-      <div class="login-form" [class.notes-open]="notesExpanded">
+      <div class="login-form" [class.notes-open]="notesExpanded" [class.engineer-checked-session]="engineerLookedSessionChecked" [class.engineer-role]="userRole === 'engineer'">
         <!-- Wrapper keeps the title in the same visual position; delete button is placed to its left -->
         <div class="image-title-wrapper">
           <button class="delete-left-btn" type="button" (click)="deleteSelectedImage()" title="Delete selected image">
@@ -181,9 +181,9 @@
               <!-- <button class="sign-in-button" (click)="saveCurrentStoredImageAndGoHome()">Save Session</button> -->
             </div>
 
-        <div class="button-group">
+        <!-- <div class="button-group">
           <button class="sign-in-button" (click)="logNotesToConsole()">Log Notes to Console</button>
-        </div>
+        </div> -->
 
         <!-- <div class="button-group">
           <button class="sign-in-button debug-button" (click)="testS3Fetch()" title="Check S3 fetch status in console">🔍 Test S3 Fetch</button>

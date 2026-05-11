@@ -24,10 +24,34 @@ export class Auth3Service {
   constructor(private auth: Auth, private firestore: Firestore, private userPrefetchCache: UserPrefetchCacheService) {}
 
 async login(email: string, password: string) {
-  if (!email) {
+  const normalizedEmail = (email || '').trim();
+  const normalizedPassword = (password || '').trim();
+
+  if (!normalizedEmail) {
     throw new Error('Email is required');
   }
-  return await signInWithEmailAndPassword(this.auth, email, password);
+  if (!normalizedPassword) {
+    throw new Error('Password is required');
+  }
+
+  try {
+    return await signInWithEmailAndPassword(this.auth, normalizedEmail, normalizedPassword);
+  } catch (err: any) {
+    const code = err?.code || '';
+    if (code === 'auth/invalid-credential' || code === 'auth/wrong-password' || code === 'auth/user-not-found') {
+      throw new Error('Invalid email or password. Please check your credentials and try again.');
+    }
+    if (code === 'auth/too-many-requests') {
+      throw new Error('Too many failed login attempts. Please wait and try again later.');
+    }
+    if (code === 'auth/invalid-email') {
+      throw new Error('The email address is invalid.');
+    }
+    if (code === 'auth/user-disabled') {
+      throw new Error('This account has been disabled.');
+    }
+    throw new Error(err?.message || 'Login failed');
+  }
 }
 
 async register(

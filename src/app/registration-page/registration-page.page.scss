@@ -12,6 +12,17 @@
   padding: 8px 0;
   border-bottom: 1px solid #eee;
   font-size: 1rem;
+  color: #333;
+}
+
+.confirm-row span {
+  color: #333;
+  font-weight: 500;
+}
+
+.confirm-row span:last-child {
+  color: #555;
+  font-weight: 600;
 }
 .confirm-row:last-child {
   border-bottom: none;
@@ -558,6 +569,12 @@ form {
   opacity: 0;
   transition: opacity 0.3s ease;
   pointer-events: none;
+}
+
+.login-form.no-role-selected .header-back-btn {
+  opacity: 1;
+  pointer-events: auto;
+  z-index: 4;
 }
 
 .login-form.role-selected .back-btn {

@@ -267,8 +267,43 @@ export class ImageStorageService {
 
   /** Helper: Convert data URL to Uint8Array */
   private dataUrlToUint8Array(dataUrl: string): Uint8Array {
-    const arr = dataUrl.split(',');
-    const bstr = atob(arr[1]);
+    if (!dataUrl || typeof dataUrl !== 'string') {
+      throw new Error('Invalid image payload: expected a base64 data URL string');
+    }
+
+    const trimmed = dataUrl.trim();
+    let base64 = '';
+
+    if (trimmed.startsWith('data:')) {
+      const commaIndex = trimmed.indexOf(',');
+      if (commaIndex === -1) {
+        throw new Error('Invalid data URL format: missing comma separator');
+      }
+      base64 = trimmed.slice(commaIndex + 1);
+    } else {
+      // Backward compatibility: allow raw base64 payloads without the data:* prefix.
+      base64 = trimmed;
+    }
+
+    // Normalize URL-safe and whitespace-affected base64 before decode.
+    base64 = base64.replace(/\s/g, '').replace(/-/g, '+').replace(/_/g, '/');
+
+    const padLength = base64.length % 4;
+    if (padLength > 0) {
+      base64 = base64.padEnd(base64.length + (4 - padLength), '=');
+    }
+
+    if (!/^[A-Za-z0-9+/]*={0,2}$/.test(base64)) {
+      throw new Error('Invalid base64 payload: contains unsupported characters');
+    }
+
+    let bstr = '';
+    try {
+      bstr = atob(base64);
+    } catch (e: any) {
+      throw new Error(`Invalid base64 payload: ${e?.message || 'decode failed'}`);
+    }
+
     const n = bstr.length;
     const u8arr = new Uint8Array(n);
     for (let i = 0; i < n; i++) {
@@ -527,9 +562,28 @@ export class ImageStorageService {
               storagePath: firestoreImage.storagePath,
               storageUrl: firestoreImage.storageUrl,
               withBoxesStoragePath: firestoreImage.withBoxesStoragePath,
-              withBoxesStorageUrl: firestoreImage.withBoxesStorageUrl
+              withBoxesStorageUrl: firestoreImage.withBoxesStorageUrl,
+              // ✅ FIX: Also retrieve the explicit S3 key fields that were saved to Firestore
+              originalS3Key: firestoreImage.originalS3Key || firestoreImage.storagePath || null,
+              originalS3Url: firestoreImage.originalS3Url || firestoreImage.storageUrl || null,
+              withBoxesS3Key: firestoreImage.withBoxesS3Key || firestoreImage.withBoxesStoragePath || null,
+              withBoxesS3Url: firestoreImage.withBoxesS3Url || firestoreImage.withBoxesStorageUrl || null
             };
             this.images.push(localImage);
+          } else {
+            // ✅ FIX: If image exists locally, also update the S3 key fields if they're missing
+            if (!localImage.originalS3Key && firestoreImage.originalS3Key) {
+              localImage.originalS3Key = firestoreImage.originalS3Key;
+            }
+            if (!localImage.originalS3Url && firestoreImage.originalS3Url) {
+              localImage.originalS3Url = firestoreImage.originalS3Url;
+            }
+            if (!localImage.withBoxesS3Key && firestoreImage.withBoxesS3Key) {
+              localImage.withBoxesS3Key = firestoreImage.withBoxesS3Key;
+            }
+            if (!localImage.withBoxesS3Url && firestoreImage.withBoxesS3Url) {
+              localImage.withBoxesS3Url = firestoreImage.withBoxesS3Url;
+            }
           }
 
           // Fetch original image from S3 if storagePath is available
@@ -901,6 +955,8 @@ export class ImageStorageService {
       return;
     }
 
+    
+
     const imagesForSession: StoredImage[] = [];
     for (const key of session.imageKeys || []) {
       const img = this.images.find(i => i.filename === key || i.original === key || (i.withBoxes && i.withBoxes === key));
@@ -917,6 +973,8 @@ export class ImageStorageService {
       // CRITICAL: Ensure the payload always has a concrete owner/user value.
       const targetUserId = receiverId || currentUid;
       const createdBy = currentUid;
+
+      console.log("inside saveSessionWithImageTOFirestore, value of receiverId", receiverId, "The targetUserID", targetUserId, "and receiverUserId", );
 
       session.userId = targetUserId;
 
@@ -937,6 +995,8 @@ export class ImageStorageService {
       await deleteBatch.commit();
 
       const batch = writeBatch(this.firestore);
+      // Snapshot engineerCheckedSession to avoid race/mutation between iterations
+      const engineerCheckedSnapshot = !!session.engineerCheckedSession;
       const sessionRef = doc(sessionsCollection, session.id);
       const sessionWritePayload = {
         id: session.id,
@@ -944,13 +1004,13 @@ export class ImageStorageService {
         imageKeys: session.imageKeys || [],
         created: session.created,
         totalBoundingBoxes: session.totalBoundingBoxes || 0,
-        userId: targetUserId,
+        userId: receiverId || currentUid,
         createdBy,
-        ReceivedBy: targetUserId,
+        ReceivedBy: receiverId || currentUid,
         OriginUserId: currentUid,
-        sessionId: this.newSessionIdForFileShare,
+        sessionId: this.newSessionIdForFileShare || null,
         notes: session.notes || '',
-        engineerCheckedSession: session.engineerCheckedSession,
+          engineerCheckedSession: engineerCheckedSnapshot,
         
       };
 
@@ -970,7 +1030,7 @@ export class ImageStorageService {
 
       for (const image of imagesForSession) {
         // CRITICAL: Ensure userId is always concrete and share writes include a creator marker.
-        image.userId = targetUserId;
+        image.userId = receiverId || currentUid;
         const correctedPrediction = image.correctedPrediction || image.prediction || null;
         // NOTE: Commented out base64 storage to save Firestore quota - using S3 references instead
         // const safeOriginal = await this.clampDataUrlToBytes(image.original, this.FIRESTORE_DOC_MAX_BYTES);
@@ -979,8 +1039,10 @@ export class ImageStorageService {
         const imageWritePayload = {
           timestamp: image.timestamp,
           filename: image.filename,
-          userId: targetUserId,
+          userId: receiverId || currentUid,
           createdBy,
+          ReceivedBy: receiverId || currentUid,
+          OriginUserId: currentUid,
           sessionId: session.id,
           // NOTE: Commented out - base64 data stored in S3 instead
           // original: safeOriginal,
@@ -1007,7 +1069,7 @@ export class ImageStorageService {
         };
         batch.set(imageRef, imageWritePayload);
 
-        if (session.engineerCheckedSession) {
+        if (engineerCheckedSnapshot) {
           correctImageWrites.push({
             imageId: image.filename,
             payload: {

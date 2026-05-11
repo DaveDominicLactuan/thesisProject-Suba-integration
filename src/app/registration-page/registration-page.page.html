@@ -195,7 +195,7 @@
             <div *ngIf="f['engineeringID'].invalid && (f['engineeringID'].touched || submitted)" class="field-error">PRC Number is required for Engineer role.</div>
           </div>
           <button class="signup-btn" type="button" (click)="nextStep()" [disabled]="isRegistering || f['firstName'].invalid || f['lastName'].invalid || (selectedRole === 'engineer' && f['engineeringID'].invalid)">Next</button>
-          <button class="signup-btn" type="button" (click)="prevStep()" [disabled]="isRegistering">Back</button>
+          <button class="signup-btn" type="button" (click)="onBack()" [disabled]="isRegistering">Back</button>
         </div>
 
         <!-- Step 3: Contact Info -->
@@ -241,7 +241,7 @@
           </div>
           
            <button class="signup-btn" type="button" (click)="nextStep()" [disabled]="isRegistering || f['phoneNumber']?.invalid || f['location']?.invalid || f['officeLatitude']?.invalid || f['officeLongitude']?.invalid">Next</button>
-          <button class="signup-btn" type="button" (click)="prevStep()" [disabled]="isRegistering">Back</button>
+          <button class="signup-btn" type="button" (click)="onBack()" [disabled]="isRegistering">Back</button>
         </div>
 
         <!-- Step 4: Confirm Details -->
@@ -263,7 +263,7 @@
               <ion-spinner *ngIf="isRegistering" name="crescent"></ion-spinner>
               <span>{{ isRegistering ? 'Creating account...' : 'Confirm & Sign Up' }}</span>
             </button>
-            <button class="signup-btn" type="button" (click)="prevStep()" [disabled]="isRegistering">Back</button>
+            <button class="signup-btn" type="button" (click)="onBack()" [disabled]="isRegistering">Back</button>
           </div>
         </div>
       </div>

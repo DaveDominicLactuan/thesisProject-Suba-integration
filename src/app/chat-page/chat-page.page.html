@@ -34,8 +34,12 @@
         <span>Map</span>
       </li>
        <li class="menu-item" (click)="goMarkerPage()">
-        <img src="assets/bottomBarMarker.png" alt="Map" class="menu-item-icon" />
-        <span>Map</span>
+        <img src="assets/officeLocation.png" alt="Map" class="menu-item-icon" />
+        <span>Office Locations</span>
+      </li>
+      <li class="menu-item" (click)="goSessionPage()">
+        <img src="assets/updatedSession.png" alt="Map" class="menu-item-icon" />
+        <span>Sessions</span>
       </li>
     </div>
  
@@ -104,9 +108,9 @@
       <input
         type="text"
         placeholder="Search here..."
-        [value]="searchQuery"
+        [(ngModel)]="searchQuery"
         (focus)="onSearchFocus()"
-        (input)="onSearchInput($event)"
+        (ngModelChange)="onSearchInput($event)"
       />
       <ion-icon
         *ngIf="searchQuery"
@@ -119,9 +123,9 @@
       <input
         type="text"
         placeholder="Search here..."
-        [value]="searchQuery"
+        [(ngModel)]="searchQuery"
         (focus)="onSearchFocus()"
-        (input)="onSearchInput($event)"
+        (ngModelChange)="onSearchInput($event)"
       />
       <ion-icon
         *ngIf="searchQuery"
@@ -188,8 +192,8 @@
         <input
           type="text"
           placeholder="Search here..."
-          [value]="searchQuery"
-          (input)="onSearchInput($event)"
+          [(ngModel)]="searchQuery"
+          (ngModelChange)="onSearchInput($event)"
         />
         <ion-icon
           *ngIf="searchQuery"
@@ -202,7 +206,7 @@
       </div>
         <div class="search-conv-list">
         <!-- show real engineers from Firestore when available, otherwise show placeholder results -->
-        <div class="search-conv-item" *ngFor="let result of (engineers.length ? engineers : searchConversationResults)" (click)="selectEngineer(result)">
+        <div class="search-conv-item" *ngFor="let result of searchOptions" (click)="selectEngineer(result)">
           <div class="search-conv-avatar">
             <img *ngIf="result.photoURL || result.avatar" [src]="result.photoURL || result.avatar" />
             <div *ngIf="!(result.photoURL || result.avatar)" class="search-conv-initials">{{ result.initials || (result.firstName ? (result.firstName[0]+(result.lastName?result.lastName[0] : '')) : (result.name ? result.name[0] : 'U')) }}</div>
@@ -212,7 +216,10 @@
               <span class="search-conv-name">{{ result.firstName ? (result.firstName + ' ' + (result.lastName||'')) : (result.name || result.email) }}</span>
               <span class="search-conv-time">{{ result.time || '' }}</span>
             </div>
-            <div class="search-conv-message">{{ result.lastMessage || result.subtitle || result.role || 'user' }}</div>
+            <div class="search-conv-message">
+              <span class="role-text">{{ result.lastMessage || result.subtitle || result.role || 'user' }}</span>
+              <span class="email-text" *ngIf="result.email"> • {{ result.email }}</span>
+            </div>
           </div>
         </div>
         <div *ngIf="searchConversationResults.length === 0" class="no-results">No results found.</div>

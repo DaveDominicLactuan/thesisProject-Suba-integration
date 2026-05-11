@@ -60,9 +60,12 @@
         placeholder="Password"
         [(ngModel)]="password"
         name="password" />
-      <span class="icon toggle" (click)="togglePasswordVisibility()">
-        <i [class]="showPassword ? 'fa fa-eye-slash' : 'fa fa-eye'"></i>
-      </span>
+      <button
+        type="button"
+        class="password-toggle-btn"
+        (click)="togglePasswordVisibility()"
+        aria-label="Toggle password visibility">
+<ion-icon [name]="showPassword ? 'eye-off-outline' : 'eye-outline'"></ion-icon>      </button>
     </div>
   </div>
 
