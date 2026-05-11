@@ -69,15 +69,7 @@ export class CrackDetectionService {
     try {
       await this.init();
 
-      const channels = 3;
-      const pixels = inputTensor.length / channels;
-      const side = Math.round(Math.sqrt(pixels));
-
-      if (!Number.isInteger(pixels) || side * side * channels !== inputTensor.length) {
-        throw new Error(`Invalid input tensor length ${inputTensor.length}; expected a flat CHW tensor with 3 channels and square spatial dimensions.`);
-      }
-
-      const tensor = new ort.Tensor('float32', inputTensor, [1, 3, side, side]);
+      const tensor = new ort.Tensor('float32', inputTensor, [1, 3, 128, 128]);
       const feeds: Record<string, any> = { input: tensor };
 
       const results = await this.session.run(feeds);
@@ -157,7 +149,7 @@ export class CrackDetectionService {
    * or a 2D nested array (number[][]) where inner arrays are rows.
    * Returns bounding boxes in {x,y,w,h} format filtered by minArea (pixels).
    */
-  maskToBBoxes(mask: Float32Array | Uint8Array | number[] | number[][], width?: number, height?: number, threshold = 0.5, minArea = 10): BoundingBox[] {
+  maskToBBoxes(mask: Float32Array | Uint8Array | number[] | number[][], width?: number, height?: number, threshold = 0.35, minArea = 120): BoundingBox[] {
     // Normalize input to a flat Uint8 binary mask of 0/1 values
     let w = width as number;
     let h = height as number;
@@ -201,6 +193,30 @@ export class CrackDetectionService {
         flat[i] = (val >= threshold) ? 1 : 0;
       }
     }
+
+    // --- SIMPLE DILATION TO CONNECT FRAGMENTS ---
+    const dilated = new Uint8Array(flat);
+
+    for (let y = 1; y < h - 1; y++) {
+      for (let x = 1; x < w - 1; x++) {
+
+        const idx = y * w + x;
+
+        if (flat[idx]) {
+
+          for (let dy = -1; dy <= 1; dy++) {
+            for (let dx = -1; dx <= 1; dx++) {
+
+              const nidx = (y + dy) * w + (x + dx);
+              dilated[nidx] = 1;
+
+            }
+          }
+        }
+      }
+    }
+
+    flat = dilated;
 
     const visited = new Uint8Array(w * h);
     const boxes: BoundingBox[] = [];
@@ -246,6 +262,72 @@ export class CrackDetectionService {
         if (area >= minArea) {
           boxes.push({ x: minX, y: minY, w: maxX - minX + 1, h: maxY - minY + 1 });
         }
+      }
+    }
+
+    return this.mergeNearbyBoxes(boxes);
+  }
+
+  private mergeNearbyBoxes(
+    boxes: BoundingBox[],
+    distanceThreshold = 25
+  ): BoundingBox[] {
+
+    let merged = true;
+
+    while (merged) {
+
+      merged = false;
+
+      for (let i = 0; i < boxes.length; i++) {
+
+        for (let j = i + 1; j < boxes.length; j++) {
+
+          const a = boxes[i];
+          const b = boxes[j];
+
+          const ax2 = a.x + a.w;
+          const ay2 = a.y + a.h;
+
+          const bx2 = b.x + b.w;
+          const by2 = b.y + b.h;
+
+          const dx = Math.max(
+            0,
+            Math.max(a.x - bx2, b.x - ax2)
+          );
+
+          const dy = Math.max(
+            0,
+            Math.max(a.y - by2, b.y - ay2)
+          );
+
+          const dist = Math.sqrt(dx * dx + dy * dy);
+
+          if (dist <= distanceThreshold) {
+
+            const nx1 = Math.min(a.x, b.x);
+            const ny1 = Math.min(a.y, b.y);
+
+            const nx2 = Math.max(ax2, bx2);
+            const ny2 = Math.max(ay2, by2);
+
+            boxes[i] = {
+              x: nx1,
+              y: ny1,
+              w: nx2 - nx1,
+              h: ny2 - ny1
+            };
+
+            boxes.splice(j, 1);
+
+            merged = true;
+
+            break;
+          }
+        }
+
+        if (merged) break;
       }
     }
 

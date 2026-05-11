@@ -412,7 +412,7 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
         console.warn('Preprocess failed in processDataUrl', err);
       }
       // Prepare storage entry or build StoredImage entry
-      const maxBytes = 25_000_000;
+      const maxBytes = 900_000;
       const safeOriginal = await this.shrinkDataUrlToBytes(dataUrl, maxBytes, 4000);
       const timestamp = new Date().toISOString();
       const generatedFilename = this.buildSessionFilename(!!prediction, timestamp, filename);
@@ -430,28 +430,14 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
 
       // If the model returned bounding boxes, create a "withBoxes" image and attach boxes
       try {
-        // helper to compute a single box covering all predicted boxes
-        const computeAggregatedBox = (boxes: any[]) => {
-          if (!Array.isArray(boxes) || boxes.length === 0) return null;
-          let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-          boxes.forEach((b: any) => {
-            const bx = Number(b.x) || 0;
-            const by = Number(b.y) || 0;
-            const bw = Number(b.w) || 0;
-            const bh = Number(b.h) || 0;
-            minX = Math.min(minX, bx);
-            minY = Math.min(minY, by);
-            maxX = Math.max(maxX, bx + bw);
-            maxY = Math.max(maxY, by + bh);
-          });
-          return { x: minX, y: minY, w: Math.max(0, maxX - minX), h: Math.max(0, maxY - minY) };
-        };
-
         if (prediction && Array.isArray(prediction.boxes) && prediction.boxes.length > 0) {
           const rawBoxes = prediction.boxes;
-          // compute aggregated (max-extents) box and fallback to original boxes if aggregation fails
-          const agg = computeAggregatedBox(rawBoxes);
-          const boxesToDraw = agg ? [agg] : rawBoxes.map((b: any) => ({ x: b.x, y: b.y, w: b.w, h: b.h }));
+          const boxesToDraw = rawBoxes.map((b: any) => ({
+            x: b.x,
+            y: b.y,
+            w: b.w,
+            h: b.h
+          }));
 
           const maskW = prediction.maskWidth || prediction.maskW || 128;
           const maskH = prediction.maskHeight || prediction.maskH || 128;
@@ -461,7 +447,7 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
             const safeWithBoxes = await this.shrinkDataUrlToBytes(withBoxesDataUrl, maxBytes, 4000);
             (entry as any).withBoxes = safeWithBoxes;
             (entry as any).boxes = boxesToDraw;
-            (entry as any).detectionMessage = `Rendered ${boxesToDraw.length} aggregated/simplified box(es) from ${rawBoxes.length} prediction box(es)`;
+            (entry as any).detectionMessage = `Rendered ${boxesToDraw.length} detected crack box(es) from ${rawBoxes.length} prediction box(es)`;
             this.totalBoundingBoxesCreated += boxesToDraw.length;
           } catch (renderErr) {
             console.warn('[UploadImagePage] drawBoxesOnImage failed', renderErr);
@@ -606,8 +592,6 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
           ctx.strokeRect(x, y, w, h);
         });
 
-        // Increment total bounding box counter and log
-        this.totalBoundingBoxesCreated += boxes.length;
         console.log(`📦 Bounding boxes drawn: ${boxes.length} | 📊 Total cumulative boxes: ${this.totalBoundingBoxesCreated}`);
 
         resolve(canvas.toDataURL('image/png'));
@@ -643,24 +627,23 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
     img.src = dataUrl;
     await new Promise(resolve => (img.onload = resolve));
 
-    const size = 224;
     const canvas = document.createElement('canvas');
-    canvas.width = size;
-    canvas.height = size;
+    canvas.width = 128;
+    canvas.height = 128;
     const ctx = canvas.getContext('2d')!;
-    ctx.drawImage(img, 0, 0, size, size);
+    ctx.drawImage(img, 0, 0, 128, 128);
 
-    const imageData = ctx.getImageData(0, 0, size, size);
-    const data = new Float32Array(1 * 3 * size * size);
+    const imageData = ctx.getImageData(0, 0, 128, 128);
+    const data = new Float32Array(1 * 3 * 128 * 128);
 
-    for (let i = 0; i < size * size; i++) {
+    for (let i = 0; i < 128 * 128; i++) {
       const r = imageData.data[i * 4 + 0] / 255.0;
       const g = imageData.data[i * 4 + 1] / 255.0;
       const b = imageData.data[i * 4 + 2] / 255.0;
       // CHW order
       data[i] = r;
-      data[size * size + i] = g;
-      data[2 * size * size + i] = b;
+      data[128 * 128 + i] = g;
+      data[2 * 128 * 128 + i] = b;
     }
 
     return data;
