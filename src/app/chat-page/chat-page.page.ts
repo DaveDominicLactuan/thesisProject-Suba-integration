@@ -407,7 +407,19 @@ export class ChatPagePage implements OnInit, OnDestroy {
         }
       }
 
-      this.conversationAttachments = attachments;
+      this.conversationAttachments = [...attachments].sort((a, b) => {
+        const aIsSession = a?.attachmentType === 'session' || a?.type === 'session';
+        const bIsSession = b?.attachmentType === 'session' || b?.type === 'session';
+
+        // Only reorder session items: newest to oldest based on created/timestamp.
+        if (aIsSession && bIsSession) {
+          const aMillis = new Date(a?.created || a?.timestamp || 0).getTime() || 0;
+          const bMillis = new Date(b?.created || b?.timestamp || 0).getTime() || 0;
+          return bMillis - aMillis;
+        }
+
+        return 0;
+      });
     } catch (error) {
       console.error('[ChatPage.loadConversationAttachments] Error loading attachments:', error);
       this.conversationAttachments = [];
@@ -2872,43 +2884,8 @@ export class ChatPagePage implements OnInit, OnDestroy {
     });
   }
 
-  // Placeholder search conversation results (simulate as in pasted image)
-  searchConversationResults = [
-    {
-      id: 'u1',
-      name: 'Alison Gilchrist',
-      lastMessage: '@andrewJ do you like this imgur picture?',
-      time: '2:14 PM',
-      avatar: null,
-      initials: 'AG',
-      isOnline: true
-    },
-    {
-      id: 'u2',
-      name: 'Ben Holt',
-      lastMessage: 'File: Imgur_proposal.pdf',
-      time: 'Yesterday',
-      avatar: null,
-      initials: 'BH',
-      isOnline: false
-    },
-    {
-      id: 'u3',
-      name: 'Imgur memes',
-      lastMessage: 'https://imgur.com/t/funny/ncI25Tb',
-      time: '12/22/20',
-      avatar: null,
-      initials: 'IM',
-      isOnline: false
-    }
-  ];
-
-  // Old mock search results (for other search views)
-  mockSearchResults = [
-    { id: 'u1', name: 'Demola Andreas', subtitle: 'Online', avatar: 'assets/engIcon.png' },
-    { id: 'u2', name: 'Fitted – Tech & Design', subtitle: 'Group chat', avatar: null, initials: 'FTD' },
-    { id: 'u3', name: 'Thecla', subtitle: 'Last seen today', avatar: 'assets/engIcon.png' }
-  ];
+  // Conversation search results (loaded dynamically)
+  searchConversationResults: any[] = [];
 
   // dynamic list of users with role 'engineer' from Firestore
   engineers: any[] = [];
@@ -3880,6 +3857,36 @@ onMsgBubbleTap(message: Message): void {
     );
   }
 
+  private isCurrentUserSearchResult(item: any): boolean {
+    if (!item || typeof item !== 'object') {
+      return false;
+    }
+
+    const currentUid = (
+      this.auth3.getCurrentUser()?.uid ||
+      this.userID ||
+      this.resolveCachedUid() ||
+      ''
+    ).toString().trim();
+
+    if (!currentUid) {
+      return false;
+    }
+
+    const candidateIds = [
+      item.id,
+      item.uid,
+      item.userID,
+      item.userId,
+      item.currentUserId
+    ]
+      .filter((value) => value !== undefined && value !== null)
+      .map((value) => value.toString().trim())
+      .filter((value) => value.length > 0);
+
+    return candidateIds.includes(currentUid);
+  }
+
   /**
    * Combined, deduplicated list used for search results display.
    * Prioritizes `engineers` then `searchConversationResults`, deduping by id/email/name.
@@ -3889,6 +3896,7 @@ onMsgBubbleTap(message: Message): void {
     const seen = new Set<string>();
     const pushIfNew = (it: any) => {
       if (!it) return;
+      if (this.isCurrentUserSearchResult(it)) return;
       const key = (it.id || it.email || it.name || '').toString();
       if (!key) return;
       if (!seen.has(key)) {
@@ -3941,8 +3949,9 @@ onMsgBubbleTap(message: Message): void {
         const data = { id: (doc as any).id, ...(doc.data() as any) };
         arr.push(data);
       });
-      this.engineers = arr;
-      this.engineersBackup = arr;
+      const filteredArr = arr.filter((user) => !this.isCurrentUserSearchResult(user));
+      this.engineers = filteredArr;
+      this.engineersBackup = filteredArr;
       // If a search is currently active, apply the search filter to the freshly fetched engineers
       if (this.searchQuery && this.searchQuery.length > 0) {
         try {
@@ -3952,7 +3961,7 @@ onMsgBubbleTap(message: Message): void {
         }
       }
       if (cacheUid) {
-        this.userPrefetchCache.storeEngineers(cacheUid, arr);
+        this.userPrefetchCache.storeEngineers(cacheUid, filteredArr);
         this.refreshCacheWarmStatus(cacheUid);
       }
       console.log('[ChatPage] Users fetched from Firestore for search:', this.engineers);
