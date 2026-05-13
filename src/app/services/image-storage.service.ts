@@ -17,8 +17,8 @@ export interface StoredImage {
   faceData?: any[];
   timestamp: string;
   filename: string;
-  prediction?: { type: string; shape: string; severity: string };
-  correctedPrediction?: { type: string; shape: string; severity: string };
+  prediction?: { type: string; shape: string; severity: string; boxes?: any[] };
+  correctedPrediction?: { type: string; shape: string; severity: string; boxes?: any[] };
   // New optional helpers for status/testing
   hasPrediction?: boolean;
   statusMessage?: string;
@@ -947,8 +947,12 @@ export class ImageStorageService {
     return `${filename.slice(0, dotIdx)}_boxes${filename.slice(dotIdx)}`;
   }
 
-  /** Persist a single session and its images to Firestore using filename as image doc ID */
-  async saveSessionWithImagesToFirestore(sessionId: string, receiverId?: string): Promise<void> {
+  /** Persist a single session and its images to Firestore using filename as image doc ID 
+   * @param sessionId Session ID to save
+   * @param receiverId Optional receiver user ID for sharing
+   * @param excludeWithBoxes If true, withBoxes fields (withBoxesS3Key, withBoxesS3Url, etc.) are excluded from Firestore payload
+   */
+  async saveSessionWithImagesToFirestore(sessionId: string, receiverId?: string, excludeWithBoxes: boolean = false): Promise<void> {
     const session = this.sessions.find(s => s.id === sessionId);
     if (!session) {
       console.warn('[ImageStorageService] saveSessionWithImagesToFirestore: session not found', sessionId);
@@ -1031,12 +1035,19 @@ export class ImageStorageService {
       for (const image of imagesForSession) {
         // CRITICAL: Ensure userId is always concrete and share writes include a creator marker.
         image.userId = receiverId || currentUid;
-        const correctedPrediction = image.correctedPrediction || image.prediction || null;
+        const preservedBoxes = Array.isArray(image.boxes) ? [...image.boxes] : [];
+        const correctedPredictionSource = image.correctedPrediction || image.prediction || null;
+        const predictionPayload = image.prediction
+          ? { ...image.prediction, boxes: preservedBoxes }
+          : null;
+        const correctedPrediction = correctedPredictionSource
+          ? { ...correctedPredictionSource, boxes: preservedBoxes }
+          : null;
         // NOTE: Commented out base64 storage to save Firestore quota - using S3 references instead
         // const safeOriginal = await this.clampDataUrlToBytes(image.original, this.FIRESTORE_DOC_MAX_BYTES);
         // const safeWithBoxes = await this.clampDataUrlToBytes(image.withBoxes, this.FIRESTORE_DOC_MAX_BYTES);
         const imageRef = doc(imagesCollection, image.filename);
-        const imageWritePayload = {
+        const imageWritePayload: any = {
           timestamp: image.timestamp,
           filename: image.filename,
           userId: receiverId || currentUid,
@@ -1050,23 +1061,44 @@ export class ImageStorageService {
           hasPrediction: image.hasPrediction || false,
           statusMessage: image.statusMessage || '',
           detectionMessage: image.detectionMessage || '',
-          prediction: image.prediction || null,
+          prediction: predictionPayload,
           correctedPrediction,
           engineerCheckedSession: !!session.engineerCheckedSession,
-          boxes: image.boxes || [],
+          boxes: preservedBoxes,
           // S3 references for original image (full generated filename with userID:sessionId prefix)
           originalS3Key: image.storagePath || null,   // e.g., "userID:abc123sessionId:xyz789img1crack1041120261109original.jpg"
           originalS3Url: image.storageUrl || null,    // HTTPS URL to original image
           // Backward compatibility
           storagePath: image.storagePath || null,
-          storageUrl: image.storageUrl || null,
-          // S3 references for withBoxes image (full generated filename with userID:sessionId prefix)
-          withBoxesS3Key: image.withBoxesStoragePath || null,   // e.g., "userID:abc123sessionId:xyz789img1crack1041120261109withBoxes.jpg"
-          withBoxesS3Url: image.withBoxesStorageUrl || null,    // HTTPS URL to withBoxes image
-          // Backward compatibility
-          withBoxesStoragePath: image.withBoxesStoragePath || null,
-          withBoxesStorageUrl: image.withBoxesStorageUrl || null
+          storageUrl: image.storageUrl || null
         };
+
+        console.group('[ImageStorageService] 🖼️ Session Image Object Being Saved');
+        console.log('Image filename:', image.filename);
+        console.log('Stored image object:', image);
+        console.log('Firestore image payload:', imageWritePayload);
+        console.table({
+          filename: image.filename || '(unnamed)',
+          boxCount: Array.isArray(image.boxes) ? image.boxes.length : 0,
+          predictionBoxCount: Array.isArray(image.prediction?.boxes) ? image.prediction.boxes.length : 0,
+          correctedPredictionBoxCount: Array.isArray(image.correctedPrediction?.boxes) ? image.correctedPrediction.boxes.length : 0,
+          hasPrediction: !!image.prediction,
+          hasCorrectedPrediction: !!image.correctedPrediction,
+          hasS3Original: !!image.originalS3Key,
+          hasS3WithBoxes: !!image.withBoxesS3Key
+        });
+        console.groupEnd();
+
+        // Conditionally exclude withBoxes fields if requested (e.g., for offline scenarios)
+        if (!excludeWithBoxes) {
+          // S3 references for withBoxes image (full generated filename with userID:sessionId prefix)
+          imageWritePayload.withBoxesS3Key = image.withBoxesStoragePath || null;   // e.g., "userID:abc123sessionId:xyz789img1crack1041120261109withBoxes.jpg"
+          imageWritePayload.withBoxesS3Url = image.withBoxesStorageUrl || null;    // HTTPS URL to withBoxes image
+          // Backward compatibility
+          imageWritePayload.withBoxesStoragePath = image.withBoxesStoragePath || null;
+          imageWritePayload.withBoxesStorageUrl = image.withBoxesStorageUrl || null;
+        }
+
         batch.set(imageRef, imageWritePayload);
 
         if (engineerCheckedSnapshot) {

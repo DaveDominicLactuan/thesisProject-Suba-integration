@@ -24,7 +24,8 @@ export interface StoredImage {
   filename?: string; // ✅ Add this
   statusMessage?: string;
   hasPrediction?: boolean;
-  prediction?: { type: string; shape: string; severity?: string };
+  prediction?: { type: string; shape: string; severity?: string; boxes?: any[] };
+  correctedPrediction?: { type: string; shape: string; severity?: string; boxes?: any[] };
   // S3 upload keys for session copying
   originalS3Key?: string;
   withBoxesS3Key?: string;
@@ -203,12 +204,16 @@ export class ImageStorageService {
           filename: entry.filename,
           timestamp: entry.timestamp,
           detectionMessage: entry.detectionMessage,
+          boxes: Array.isArray(entry.boxes) ? entry.boxes : [],
           prediction: entry.prediction ?? null,
+          correctedPrediction: entry.correctedPrediction ?? null,
           originalS3Key: entry.originalS3Key,
           withBoxesS3Key: entry.withBoxesS3Key,
           createdAt: serverTimestamp(),
           createdBy: createdBy || null
         };
+
+        console.log(`[ImageStorageService] 🖼️ Session image object to save:`, imageData);
         
         console.log(`[ImageStorageService] 📝 Saving image document to Firestore:`, {
           docPath: `images/${safeId}`,

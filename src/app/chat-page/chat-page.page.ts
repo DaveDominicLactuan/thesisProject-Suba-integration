@@ -4690,6 +4690,26 @@ onMsgBubbleTap(message: Message): void {
     };
   }
 
+  private sortMapSheetEntriesByDistance(entries: any[]): any[] {
+    if (!Array.isArray(entries)) return [];
+
+    return [...entries].sort((left, right) => {
+      const leftDistance = Number(left?.distanceFromCenterMeters);
+      const rightDistance = Number(right?.distanceFromCenterMeters);
+
+      const leftIsValid = Number.isFinite(leftDistance) && leftDistance >= 0;
+      const rightIsValid = Number.isFinite(rightDistance) && rightDistance >= 0;
+
+      if (leftIsValid && rightIsValid) {
+        return leftDistance - rightDistance;
+      }
+
+      if (leftIsValid) return -1;
+      if (rightIsValid) return 1;
+      return 0;
+    });
+  }
+
   private async aggregateMarkersForMapSheet(centerLatitude: number, centerLongitude: number): Promise<any[]> {
     await this.fetchOfficeLocationMarkerData();
 
@@ -4721,7 +4741,8 @@ onMsgBubbleTap(message: Message): void {
     this.aggregatedRadiusMarkerData = enrichedMarkers;
     this.lastRadiusAggregationBounds = bounds;
 
-    return enrichedMarkers.map((marker) => this.mergeMarkerAndUserForMapSheet(marker, marker.associatedUser, marker.resolvedUserId));
+    const mergedMarkers = enrichedMarkers.map((marker) => this.mergeMarkerAndUserForMapSheet(marker, marker.associatedUser, marker.resolvedUserId));
+    return this.sortMapSheetEntriesByDistance(mergedMarkers);
   }
 
   /**

@@ -20,7 +20,7 @@
   </div>
 
 
-  <!-- � Process Window Modal -->
+  <!-- Process Window Modal -->
   <div *ngIf="isProcessWindowOpen" class="process-window-backdrop" (click)="closeProcessWindow()">
     <div class="process-window-modal" (click)="$event.stopPropagation()">
       <div class="process-window-header">
@@ -48,8 +48,8 @@
     </div>
   </div>
 
-  <!-- �🔝 Top Bar -->
-    <div class="top-bar">
+  <!-- Top Bar -->
+  <div class="top-bar">
       <!-- <button class="top-btn left" (click)="goToHomePage()">←</button> -->
       <!-- <div class="top-center">
         <button class="top-btn" (click)="toggleFlash()"></button>
@@ -125,7 +125,7 @@
              [src]="img.original"
              class="thumbnail"
              [class.selected]="img.original === selectedThumbSrc"
-             (click)="onStoredThumbClick(img)"
+             (click)="$event.stopPropagation(); onStoredThumbClick(img)"
              [title]="img.filename || img.timestamp"
         />
       </div>
