@@ -999,6 +999,7 @@ export class ImageStorageService {
       await deleteBatch.commit();
 
       const batch = writeBatch(this.firestore);
+      console.log("EnginnerCheckSession", session.engineerCheckedSession, "and EngineerCheckedSnapshot", !!session.engineerCheckedSession);
       // Snapshot engineerCheckedSession to avoid race/mutation between iterations
       const engineerCheckedSnapshot = !!session.engineerCheckedSession;
       const sessionRef = doc(sessionsCollection, session.id);

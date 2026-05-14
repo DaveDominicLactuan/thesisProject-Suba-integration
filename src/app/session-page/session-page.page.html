@@ -114,31 +114,42 @@
   </div>
 
   <div class="sessions-list">
-    <ng-container *ngFor="let s of sessions">
-      <div *ngIf="s.userId === userID" class="session-item" [class.session-foreign]="s.ReceivedBy && s.OriginUserId && s.ReceivedBy !== s.OriginUserId" (click)="onSessionItemClick(s, $event)">
-        <div class="session-left">
-          <div class="session-name">{{ s.name }}</div>
-          <div class="session-images">
-            <ion-icon name="image" class="image-icon"></ion-icon>
-            <span>{{ s.imageKeys?.length || 0 }} Images</span>
-          </div>
-        </div>
-        <div class="session-right">
-          <div class="session-time">{{ s.created | date:'shortTime' }}</div>
-          <div class="session-actions">
-            <div class="engineer-check-badge" *ngIf="s.engineerCheckedSession === true">
-              <img src="assets/engineerCheck.png" alt="Engineer Checked" />
+    <!-- Loading spinner -->
+    <div *ngIf="isSessionsLoading" class="sessions-loading-container">
+      <div class="sessions-loading-spinner">
+        <div class="spinner"></div>
+        <div class="loading-text">Loading sessions...</div>
+      </div>
+    </div>
+
+    <!-- Sessions list content -->
+    <ng-container *ngIf="!isSessionsLoading">
+      <ng-container *ngFor="let s of sessions">
+        <div *ngIf="s.userId === userID" class="session-item" [class.session-foreign]="s.ReceivedBy && s.OriginUserId && s.ReceivedBy !== s.OriginUserId" (click)="onSessionItemClick(s, $event)">
+          <div class="session-left">
+            <div class="session-name">{{ s.name }}</div>
+            <div class="session-images">
+              <ion-icon name="image" class="image-icon"></ion-icon>
+              <span>{{ s.imageKeys?.length || 0 }} Images</span>
             </div>
-            <button class="delete-btn" (click)="deleteSession(s, $event)">
-              <img src="assets/trashIcon.png" alt="Delete" style="width: 28px; height: 28px; object-fit: contain;" />
-            </button>
+          </div>
+          <div class="session-right">
+            <div class="session-time">{{ s.created | date:'shortTime' }}</div>
+            <div class="session-actions">
+              <div class="engineer-check-badge" *ngIf="s.engineerCheckedSession === true">
+                <img src="assets/engineerCheck.png" alt="Engineer Checked" />
+              </div>
+              <button class="delete-btn" (click)="deleteSession(s, $event)">
+                <img src="assets/trashIcon.png" alt="Delete" style="width: 28px; height: 28px; object-fit: contain;" />
+              </button>
+            </div>
           </div>
         </div>
+      </ng-container>
+      <div *ngIf="!hasUserSessions()" class="no-sessions">
+        No sessions yet. Start a new session to get started.
       </div>
     </ng-container>
-    <div *ngIf="!hasUserSessions()" class="no-sessions">
-      No sessions yet. Start a new session to get started.
-    </div>
   </div>
 
   <!-- Session Confirmation Dialog Overlay -->

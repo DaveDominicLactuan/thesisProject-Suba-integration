@@ -54,6 +54,9 @@ export class SessionPagePage implements OnInit, OnDestroy {
   sessionDeleteStatusText: string = 'Preparing deletion...';
   sessionDeleteStageCount: { current: number; total: number } = { current: 0, total: 0 };
 
+  // --- Sessions List Loading State ---
+  isSessionsLoading: boolean = false;
+
   // --- Session ID Tracking for Local Storage ---
   private readonly MAX_SESSION_IDS = 5;
   private sessionIdTrackingKey = 'sessionIdTracking';
@@ -198,6 +201,7 @@ private startUserSyncInBackground(userId: string): void {
 
   /** Load sessions from Firestore first (to get all user sessions), then local storage. Compute image counts and filter by current user's ID. */
   async loadSessions(): Promise<void> {
+    this.isSessionsLoading = true;
     try {
       // ========== USER ID RESOLUTION ==========
       // Get current user ID from Firebase auth, localStorage, or sessionStorage
@@ -333,6 +337,8 @@ private startUserSyncInBackground(userId: string): void {
     } catch (e) {
       console.warn('Failed to load sessions', e);
       this.sessions = [];
+    } finally {
+      this.isSessionsLoading = false;
     }
   }
 
