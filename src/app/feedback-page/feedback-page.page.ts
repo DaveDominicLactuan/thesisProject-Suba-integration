@@ -525,6 +525,7 @@ private lastImageTitleDebugAt: number = 0;
       if (currentSession) {
         this.sessions = [currentSession];
         this.selectedSessionId = currentSession.id;
+        this.applySessionFormState(currentSession);
         console.log('[FeedbackPage] Loaded current session only:', currentSession);
       } else {
         this.sessions = [];
@@ -558,8 +559,7 @@ private lastImageTitleDebugAt: number = 0;
       //Find session and handle empty session (placeholder) or session has no images
       const sess = this.sessions.find(s => s.id === this.selectedSessionId) || null;
       if (sess) {
-        this.notesText = sess.notes ?? '';
-        this.engineerLookedSessionChecked = !!sess.engineerCheckedSession;
+        this.applySessionFormState(sess);
       }
       if (!sess || !Array.isArray(sess.imageKeys) || sess.imageKeys.length === 0) {
         // nothing in session; keep placeholder
@@ -952,6 +952,16 @@ private lastImageTitleDebugAt: number = 0;
       'single-thumb': count === 1,
       'double-thumb': count === 2,
     };
+  }
+
+  /** Copy session-level notes and review status into the form state. */
+  private applySessionFormState(session: any): void {
+    if (!session) {
+      return;
+    }
+
+    this.notesText = session.notesText ?? session.notes ?? '';
+    this.engineerLookedSessionChecked = !!session.engineerCheckedSession;
   }
 
   /** Dropdowns are read-only for users; editable for engineers. */

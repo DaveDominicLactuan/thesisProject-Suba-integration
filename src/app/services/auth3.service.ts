@@ -1,5 +1,6 @@
 import { Injectable } from '@angular/core';
 import { Auth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut } from '@angular/fire/auth';
+import { fetchSignInMethodsForEmail } from 'firebase/auth';
 import { Firestore, setDoc, serverTimestamp, doc, getDoc, collection, query, where, getDocs } from '@angular/fire/firestore';
 import { onAuthStateChanged, User } from 'firebase/auth';
 import { UserPrefetchCacheService } from './user-prefetch-cache.service';
@@ -35,22 +36,40 @@ async login(email: string, password: string) {
   }
 
   try {
+    // Check which sign-in methods are available for this email to provide clearer errors
+    try {
+      const methods = await fetchSignInMethodsForEmail(this.auth, normalizedEmail);
+      if (methods && methods.length > 0 && !methods.includes('password')) {
+        const userErr = new Error(`auth/no-password-provider: This account uses a different sign-in provider (${methods.join(', ')}). Use the appropriate provider to sign in.`);
+        (userErr as any).code = 'auth/no-password-provider';
+        throw userErr;
+      }
+    } catch (checkErr) {
+      // Non-fatal: if the helper call fails, proceed to attempt sign-in and rely on the underlying error
+      console.warn('[Auth3Service.login] fetchSignInMethodsForEmail failed (continuing):', checkErr);
+    }
+
     return await signInWithEmailAndPassword(this.auth, normalizedEmail, normalizedPassword);
   } catch (err: any) {
     const code = err?.code || '';
+    const msg = err?.message || String(err);
+    console.error('[Auth3Service.login] Firebase signInWithEmailAndPassword failed', { code, msg, email: normalizedEmail });
+
+    // Map known Firebase codes to user-friendly messages but include original code for debugging
+    let outMsg = msg;
     if (code === 'auth/invalid-credential' || code === 'auth/wrong-password' || code === 'auth/user-not-found') {
-      throw new Error('Invalid email or password. Please check your credentials and try again.');
+      outMsg = `Invalid email or password. Please check your credentials and try again.`;
+    } else if (code === 'auth/too-many-requests') {
+      outMsg = `Too many failed login attempts. Please wait and try again later.`;
+    } else if (code === 'auth/invalid-email') {
+      outMsg = `The email address is invalid.`;
+    } else if (code === 'auth/user-disabled') {
+      outMsg = `This account has been disabled.`;
     }
-    if (code === 'auth/too-many-requests') {
-      throw new Error('Too many failed login attempts. Please wait and try again later.');
-    }
-    if (code === 'auth/invalid-email') {
-      throw new Error('The email address is invalid.');
-    }
-    if (code === 'auth/user-disabled') {
-      throw new Error('This account has been disabled.');
-    }
-    throw new Error(err?.message || 'Login failed');
+
+    const userErr = new Error(`auth/${code || 'unknown'}: ${outMsg}`);
+    (userErr as any).code = code || `auth/${code || 'unknown'}`;
+    throw userErr;
   }
 }
 

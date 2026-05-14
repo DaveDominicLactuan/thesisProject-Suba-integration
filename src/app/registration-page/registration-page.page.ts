@@ -152,6 +152,22 @@ async onRegister() {
   console.log("Engineering ID:", engineeringID);
   console.log('Office Latitude:', officeLatitude);
   console.log('Office Longitude:', officeLongitude);
+
+  const registrationCredentials = {
+    email: email ?? '',
+    password: password ? '[REDACTED]' : '',
+    confirmPassword: confirmPassword ? '[REDACTED]' : '',
+    firstName: firstName ?? '',
+    lastName: lastName ?? '',
+    engineeringID: engineeringID ?? '',
+    phoneNumber: phoneNumber ?? '',
+    location: location ?? '',
+    officeLatitude: officeLatitude ?? null,
+    officeLongitude: officeLongitude ?? null,
+    role: this.selectedRole ?? ''
+  };
+
+  console.log('[RegistrationPage] Registration credentials/payload:', registrationCredentials);
   
   // Check if the user has selected a role (Engineer or User)
   // If not, set error message and exit early
@@ -213,6 +229,8 @@ async onRegister() {
         approvedBy: null
       };
 
+      console.log('[RegistrationPage] Engineer registration payload to be written:', pendingPayload);
+
       const pendingOfficeLocationPayload = {
         markerId: pendingUid,
         pendingAccountId: pendingUid,
@@ -256,6 +274,15 @@ async onRegister() {
       console.log('[RegistrationPage] Processing user registration with Firebase Auth');
       
       // Call the auth service to register a new user with provided credentials
+      console.log('[RegistrationPage] User registration payload before Auth3Service.register:', {
+        email: email ?? '',
+        password: password ? '[REDACTED]' : '',
+        firstName: firstName ?? '',
+        lastName: lastName ?? '',
+        engineeringID: engineeringID ?? '',
+        role: this.selectedRole ?? 'user',
+        isAdmin: false
+      });
       const userCredential = await this.auth3.register(
         email ?? '',           // Email address
         password ?? '',        // Password

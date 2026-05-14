@@ -105,8 +105,12 @@ signupForm: FormGroup;
 
 
     } catch (err: any) {
-      this.error = err?.message || 'Login failed';
-      console.error('[LoginPage.login] Login failed:', err);
+      const code = err?.code || (err?.message && err?.message.split(':')?.[0]) || '';
+      const message = err?.message || String(err);
+      this.error = message;
+      console.error('[LoginPage.login] Login failed:', { code, message, err });
+      // Show a simple alert for immediate feedback during debugging
+      try { alert(`Login failed: ${message}`); } catch {}
     } finally {
       this.isLoggingIn = false;
     }
