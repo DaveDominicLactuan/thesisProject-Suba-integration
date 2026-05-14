@@ -645,6 +645,11 @@ private startUserSyncInBackground(userId: string): void {
   // Show confirmation dialog when session is clicked
   onSessionItemClick(session: any, event?: Event): void {
     if (event) event.stopPropagation();
+    try {
+      console.log('[SessionPage.onSessionItemClick] Full session object:', JSON.parse(JSON.stringify(session)));
+    } catch {
+      console.log('[SessionPage.onSessionItemClick] Full session object (raw):', session);
+    }
     console.log('[SessionPage] Session click detected. Starting load process for session:', session.id);
     this.loadAndNavigateToSession(session);
   }

@@ -2179,12 +2179,13 @@ $attachment-sheet-transition: transform 0.28s cubic-bezier(0.4, 0, 0.2, 1);
 	gap: 6px;
 	padding: 12px 8px;
 	max-width: 85%;
-	border: 1px solid #ececec;
+	border: 3px solid #ff9500;
 	border-radius: 12px;
 	background: #fff;
 	text-align: center;
 	cursor: pointer;
 	transition: background 0.16s ease, transform 0.12s ease;
+	position: relative;
 
 	&:hover {
 		background: #fafafa;
@@ -2209,6 +2210,51 @@ $attachment-sheet-transition: transform 0.28s cubic-bezier(0.4, 0, 0.2, 1);
 .attachment-item-icon {
 	font-size: 1.8rem;
 	color: #fff;
+}
+
+.attachment-item-check-badge {
+	position: absolute;
+	top: 5px;
+	right: 5px;
+	width: 32px;
+	height: 32px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	background: #fff;
+	border-radius: 50%;
+}
+
+.attachment-check-icon {
+	font-size: 24px;
+	color: #22c55e;
+}
+
+.attachment-check-img-icon {
+	width: 100%;
+	height: 100%;
+	object-fit: cover;
+	border-radius: 50%;
+}
+
+.attachment-item-check-img {
+	position: absolute;
+	top: -8px;
+	left: -8px;
+	width: 32px;
+	height: 32px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	background: #fff;
+	border-radius: 50%;
+	overflow: hidden;
+}
+
+.attachment-item-check-img img {
+	width: 100%;
+	height: 100%;
+	object-fit: cover;
 }
 
 .attachment-item-title {

@@ -377,7 +377,9 @@ export class ChatPagePage implements OnInit, OnDestroy {
                   userId: session.userId,
                   totalBoundingBoxes: session.totalBoundingBoxes || 0,
                   timestamp: session.created || new Date().toISOString(),
-                  attachmentType: 'session'
+                  attachmentType: 'session',
+                  // Preserve the engineer-checked flag so attachments carry the session state
+                  engineerCheckedSession: !!session.engineerCheckedSession
                 });
               }
             }
@@ -430,7 +432,10 @@ export class ChatPagePage implements OnInit, OnDestroy {
     event?.stopPropagation();
     this.selectedAttachment = attachment;
     this.attachmentSheetViewMode = 'detail';
-    console.log('[ChatPage.attachmentSheet] Attachment selected', attachment);
+    console.log('[ChatPage.selectAttachment] Full session object:', attachment);
+    console.log('[ChatPage.selectAttachment] Session ID:', attachment?.id);
+    console.log('[ChatPage.selectAttachment] Session Type:', attachment?.type);
+    console.log('[ChatPage.selectAttachment] Engineer Checked:', attachment?.engineerCheckedSession);
     // Optionally trigger debug printing for sessions
     if (attachment?.type === 'session') {
       this.debugPrintAttachmentData(attachment);
@@ -1382,6 +1387,8 @@ export class ChatPagePage implements OnInit, OnDestroy {
       return;
     }
 
+    console.log("start of confirmAttachmentShareCopy with the session", selectedSession, "Engineer Checked Session:", selectedSession.engineerCheckedSession);
+
     const currentUserId = this.auth3.getCurrentUser()?.uid || this.userID;
     if (!currentUserId) {
       console.error('[ChatPage.confirmAttachmentShareCopy] Cannot determine current user ID');
@@ -1413,6 +1420,8 @@ export class ChatPagePage implements OnInit, OnDestroy {
     copiedSession.userId = recipientUserId;
     copiedSession.created = new Date().toISOString();
     copiedSession.imageKeys = [];
+    // Preserve engineer-checked flag from the source session
+    copiedSession.engineerCheckedSession = !!selectedSession.engineerCheckedSession;
 
     try {
       this.isAttachmentCopyInProgress = true;
@@ -1857,6 +1866,10 @@ export class ChatPagePage implements OnInit, OnDestroy {
       }
 
       this.updateCopyProgress(70, 'Uploading copied session to Firestore...');
+
+      console.log("Copied Session", copiedSession, "Copied Session EngineerChecked", copiedSession.engineerCheckedSession);
+    
+      console.log("Selected Session", selectedSession, "Selected Session EngineerChecked", selectedSession.engineerCheckedSession);
 
       await service.saveSessionWithImagesToFirestore(copiedSession.id, recipientUserId);
 

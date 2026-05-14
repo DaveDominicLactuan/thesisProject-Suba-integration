@@ -867,8 +867,9 @@ export class ImageStorageService {
       created: session.created || new Date().toISOString(),
       totalBoundingBoxes: session.totalBoundingBoxes || 0,
       userId: session.userId,
-      sessionId: session.sessionId
-      ,notes: (session as any).notes
+      sessionId: session.sessionId,
+      notes: (session as any).notes,
+      engineerCheckedSession: !!session.engineerCheckedSession
     };
 
     this.sessions.unshift(normalized);
@@ -958,6 +959,8 @@ export class ImageStorageService {
       console.warn('[ImageStorageService] saveSessionWithImagesToFirestore: session not found', sessionId);
       return;
     }
+
+    console.log("session object", session);
 
     
 
@@ -1302,8 +1305,9 @@ export class ImageStorageService {
       created: new Date().toISOString(), 
       totalBoundingBoxes: totalBoxes,
       userId: userId,
-      sessionId: sessionId
-      ,notes: notes
+      sessionId: sessionId,
+      notes: notes,
+      engineerCheckedSession: false
     };
     //The new session is added to the beginning of the sessions array using unshift.
     this.sessions.unshift(s);

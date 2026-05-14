@@ -339,6 +339,12 @@
               class="attachment-item"
               *ngFor="let attachment of conversationAttachments"
               (click)="selectAttachment(attachment, $event)">
+              <div class="attachment-item-check-badge" *ngIf="attachment.engineerCheckedSession">
+                <img src="assets/engineerCheck.png" alt="Checked" class="attachment-check-img-icon" />
+              </div>
+              <!-- <div class="attachment-item-check-img">
+                <img src="assets/engIcon.png" alt="Check" />
+              </div> -->
               <div class="attachment-item-preview">
                 <ion-icon [name]="getAttachmentPreviewIcon(attachment)" class="attachment-item-icon"></ion-icon>
               </div>
