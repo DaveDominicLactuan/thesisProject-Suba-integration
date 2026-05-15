@@ -1,4 +1,4 @@
-import { Component, OnInit, OnDestroy } from '@angular/core';
+import { Component, OnInit, OnDestroy, NgZone, ChangeDetectorRef } from '@angular/core';
 import { Router } from '@angular/router';
 import { FormBuilder, FormGroup, Validators } from '@angular/forms';
 import { AuthService } from '../services/auth.service';
@@ -82,7 +82,17 @@ export class OfficeMapMarkerPagePage implements OnInit, OnDestroy {
   selectedMarkerForDelete: any = null;
 
   /** Inject auth, router, and image storage services for navigation and data. */
-  constructor(private formBuilder: FormBuilder, private router: Router, private authService: AuthService, private navCtrl: NavController, private auth3: Auth3Service, private imageStorage: ImageStorageService, private platform: Platform) {
+  constructor(
+    private formBuilder: FormBuilder,
+    private router: Router,
+    private authService: AuthService,
+    private navCtrl: NavController,
+    private auth3: Auth3Service,
+    private imageStorage: ImageStorageService,
+    private platform: Platform,
+    private zone: NgZone,
+    private cd: ChangeDetectorRef
+  ) {
 
   }
 
@@ -1480,18 +1490,26 @@ private startUserSyncInBackground(userId: string): void {
       }
 
       console.log('[SessionPage.loadOfficeLocationMarkers] Loading markers for user:', uid);
-      
-      const { collection, query, where, getDocs } = await import('firebase/firestore');
+
+      const { collection, getDocs } = await import('firebase/firestore');
       const { getFirestore } = await import('firebase/firestore');
-      
+
       const firestore = getFirestore();
       const markerCollectionRef = collection(firestore, 'userOfficeLocationMarker');
-      const q = query(markerCollectionRef, where('userID', '==', uid));
-      const markerSnapshot = await getDocs(q);
-      
+
+      // Fetch all markers and filter client-side to avoid missing variations in field names
+      const markerSnapshot = await getDocs(markerCollectionRef);
+      console.log('[SessionPage.loadOfficeLocationMarkers] Fetched raw marker docs count:', markerSnapshot.size);
+
       const markers: any[] = [];
       markerSnapshot.forEach((doc) => {
         const data: any = doc.data();
+        // Accept multiple possible user id field names (userID, userId, ownerId)
+        const ownerId = data.userID ?? data.userId ?? data.ownerId ?? data.user ?? null;
+        if (ownerId !== uid) {
+          return; // skip markers not owned by current user
+        }
+
         const officeLocation = data.officeLocation ?? data.location ?? null;
         markers.push({
           id: doc.id,
@@ -1502,9 +1520,15 @@ private startUserSyncInBackground(userId: string): void {
           location: officeLocation
         });
       });
-      
-      this.officeLocationMarkers = markers;
-      console.log('[SessionPage.loadOfficeLocationMarkers] Loaded', markers.length, 'markers for user:', uid);
+
+      // Assign inside Angular zone to ensure change detection runs
+      this.zone.run(() => {
+        this.officeLocationMarkers = markers;
+        try { this.cd.detectChanges(); } catch (e) { /* ignore if not necessary */ }
+      });
+
+      console.log('[SessionPage.loadOfficeLocationMarkers] Filtered markers for user:', uid, 'count:', markers.length);
+      console.log('[SessionPage.loadOfficeLocationMarkers] Markers payload:', JSON.parse(JSON.stringify(markers)));
     } catch (error) {
       console.error('[SessionPage.loadOfficeLocationMarkers] Error loading markers:', error);
     }
