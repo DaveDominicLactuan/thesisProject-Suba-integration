@@ -698,3 +698,129 @@
   object-fit: contain;
   display: block; /* avoid baseline gaps */
 }
+
+/* New layout styles for Results board and image cards */
+.results-header .results-title {
+  font-size: 24px;
+  margin: 0;
+  font-weight: 800;
+  color: #0b1220;
+}
+.results-header .results-sub {
+  font-size: 13px;
+  color: #3b3b48;
+  margin-top: 6px;
+}
+
+.overall-results-board {
+  display: none; /* replaced by the container below */
+}
+.overall-results-board .board-item {
+  background: #fff;
+  border-radius: 10px;
+  padding: 12px;
+  text-align: center;
+  box-shadow: 0 6px 18px rgba(0,0,0,0.08);
+  border: 1px solid rgba(240,152,25,0.15);
+}
+.board-label { font-weight: 700; color: #333; margin-bottom: 6px; }
+.board-value { font-size: 20px; font-weight: 800; color: #111; }
+.board-caption { font-size: 12px; color: #777; margin-top: 6px; }
+
+.image-card-list { margin: 12px 16px 40px 16px; display: flex; flex-direction: column; gap: 12px; }
+.session-image-card {
+  display: flex;
+  gap: 12px;
+  background: #fff;
+  border-radius: 10px;
+  padding: 12px;
+  align-items: center;
+  border: 2px solid rgba(255,81,47,0.12);
+}
+.session-image-card .image-left img {
+  width: 140px;
+  height: 112px;
+  object-fit: cover;
+  border-radius: 8px;
+  background: #e9e9ee;
+}
+.image-left { flex: 0 0 140px; }
+.image-right { flex: 1; display: flex; flex-direction: column; }
+.img-row { display:flex; justify-content:space-between; align-items:center; }
+.img-title { font-weight: 800; color: #111; }
+.img-meta { font-size: 12px; color: #666; }
+
+.prediction-row { display:flex; gap: 10px; margin-top: 12px; }
+.pred-col { flex:1; text-align:center; }
+.pred-header { font-weight:700; color:#333; font-size:13px; margin-bottom:8px; }
+.pred-icon { width:44px; height:44px; border-radius:8px; background:#f0fff6; display:flex; align-items:center; justify-content:center; margin:0 auto 8px; border:2px solid #bfeec8; }
+.pred-value { font-weight:700; color:#0b1220; }
+
+/* New overall container with left icon + stats, matches screenshot layout */
+.overall-board-container {
+  display: flex;
+  // gap: px;
+  position: relative;
+  left: -20px;
+  width: 325px;
+  margin: 18px 16px;
+  background: #fff;
+  border-radius: 12px;
+  padding: 14px 14px 14px 1px;
+  align-items: center;
+  border: 2px solid rgba(240,152,25,0.35);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.06);
+}
+.overall-board-container .board-left { flex: 0 0 88px; display:flex; align-items:center; justify-content:center; }
+.overall-board-container .board-icon svg { display:block; }
+.overall-board-container .board-stats { display: grid; grid-template-columns: repeat(1fr); width:100%; }
+.overall-board-container .board-item { background: transparent; box-shadow:none; border:none; padding:6px 8px; text-align:center; }
+.overall-board-container .board-item .board-label { font-size:12px; color:#555; }
+.overall-board-container .board-item .board-value { font-size:18px; color:#111; font-weight:800; }
+.overall-board-container .board-item .board-caption { color:#777; font-size:12px; }
+
+/* image badge (small dark square with number) */
+.image-left { position: relative; }
+.img-badge {
+  position: absolute;
+  left: 8px;
+  bottom: 8px;
+  background: rgba(36,41,46,0.9);
+  color: #fff;
+  padding: 6px 8px;
+  border-radius: 8px;
+  font-weight:700;
+  font-size:12px;
+}
+
+/* prediction icon: green rounded square with thin border */
+.pred-icon {
+  width:46px; height:46px; border-radius:10px; background: #fff; display:flex; align-items:center; justify-content:center; margin:0 auto 8px; border:2px solid #28c76f; color:#28c76f; font-weight:800;
+}
+
+/* divider between prediction columns */
+.pred-col--with-divider { border-right: 1px solid rgba(0,0,0,0.08); padding-right: 14px; }
+.pred-col--with-divider + .pred-col { padding-left: 14px; }
+
+/* circular background for left-board icon */
+.board-icon-circle { width:64px; height:64px; border-radius:50%; background:#f3f5f7; display:flex; align-items:center; justify-content:center; box-shadow: inset 0 0 0 6px rgba(255,255,255,0.6); }
+
+/* image badge layout */
+.img-badge { display:flex; align-items:center; gap:6px; }
+.img-badge svg { opacity:0.9; }
+.img-badge .badge-num { font-weight:700; font-size:12px; color:#fff; }
+
+/* Export full width button */
+.export-btn-full { width: calc(100% - 32px); max-width: 520px; display:flex; gap:8px; align-items:center; justify-content:center; background: #fff; color:#111; border: 2px solid rgba(240,152,25,0.45); padding:12px 18px; border-radius: 12px; font-weight:800; box-shadow: 0 6px 18px rgba(0,0,0,0.06); }
+.export-btn-full .export-icon { font-size:18px; margin-right:6px; }
+.export-btn-full .export-text { font-size:15px; }
+
+@media (max-width: 600px) {
+  .overall-board-container .board-stats { grid-template-columns: repeat(2, 1fr); }
+}
+
+@media (max-width: 600px) {
+  .overall-results-board { grid-template-columns: repeat(2, 1fr); }
+  .image-left { flex: 0 0 90px; }
+  .session-image-card .image-left img { width: 90px; height: 72px; }
+}

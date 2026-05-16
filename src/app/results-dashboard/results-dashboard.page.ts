@@ -441,6 +441,43 @@ export class ResultsDashboardPage implements OnInit {
     return `${graphTypeText} - ${dataTypeText}`;
   }
 
+  // Totals used by the overall-results-board
+  get totalShapes(): number {
+    return Object.values(this.stats.shape || {}).reduce((a, b) => a + b, 0);
+  }
+
+  get totalTypes(): number {
+    return Object.values(this.stats.type || {}).reduce((a, b) => a + b, 0);
+  }
+
+  get totalSeverities(): number {
+    return Object.values(this.stats.severity || {}).reduce((a, b) => a + b, 0);
+  }
+
+  // Helpers for template rendering of image cards
+  getImageSrc(img: StoredImage): string {
+    return (img as any).dataUrl || (img as any).storagePath || (img as any).withBoxes || (img as any).original || 'assets/placeholder.png';
+  }
+
+  getImageLabel(img: StoredImage): string {
+    return img.filename || img.original || this.getImageKey(img) || `Image`;
+  }
+
+  getImageDate(img: StoredImage): string {
+    return (img as any).date || (img as any).createdAt || (img as any).timestamp || 'Unknown Date';
+  }
+
+  getBoxCount(img: StoredImage): number {
+    if (Array.isArray((img as any).boxes)) return (img as any).boxes.length;
+    if (Array.isArray((img as any).rawPrediction)) return (img as any).rawPrediction.length;
+    return 0;
+  }
+
+  getImagePredictionValue(img: StoredImage, key: 'type' | 'shape' | 'severity'): string {
+    const p = (img as any).prediction || (Array.isArray((img as any).rawPrediction) && (img as any).rawPrediction[0]) || null;
+    return p && p[key] ? p[key] : 'N/A';
+  }
+
 
   //used for export the current session to PDF
   //uses the sessionId to pass to the PDF page
