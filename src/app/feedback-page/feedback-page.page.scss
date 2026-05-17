@@ -858,7 +858,7 @@
     align-items: center;
     justify-content: space-between;
     gap: 14px;
-    min-height: 66px;
+    min-height: 46px;
     padding: 10px 8px;
     border: none;
     border-radius: 14px;
@@ -1021,6 +1021,41 @@
   flex-direction: column;
 }
 
+.select-wrap {
+  position: relative;
+  display: flex;
+    align-items: center;
+    border: 1px solid transparent;
+    border-radius: 10px;
+    min-height: 39px;
+    padding: 5px 10px;
+    margin-bottom: 10px;
+    background: linear-gradient(#fffdfd, #fffdfd) padding-box, linear-gradient(to right, #ff512f, #f09819) border-box;
+    font-size: 14px;
+    color: #000;
+}
+
+.select-wrap-value {
+  width: 100%;
+  font-size: 14px;
+  color: #000;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.select-wrap .red-select-indicator {
+  position: absolute;
+  top: 50%;
+  right: 12px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #d60000;
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
 .form-group label {
   font-size: 14px;
   font-weight: 600;
@@ -1084,6 +1119,47 @@
   -moz-appearance: none;
 }
 
+/* Hide dropdown arrow for read-only users */
+.input-item select.hide-dropdown-arrow {
+  appearance: none !important;
+  -webkit-appearance: none !important;
+  -moz-appearance: none !important;
+  background-image: none !important;
+  background: transparent !important;
+  cursor: not-allowed;
+  pointer-events: auto;
+  padding-right: 10px;
+}
+
+.input-item select.hide-dropdown-arrow::-ms-expand {
+  display: none;
+}
+
+.input-item select.hide-dropdown-arrow::after {
+  display: none;
+}
+
+/* Hide ion-select arrow using Shadow Parts when a `no-arrow` class is applied */
+ion-select.no-arrow::part(icon) {
+  display: none;
+}
+
+/* Also support native selects by applying `.no-arrow` */
+.input-item select.no-arrow,
+.select-wrap select.no-arrow {
+  /* Standard native HTML <select> appearance reset */
+  -webkit-appearance: none;  /* Safari and Chrome */
+  -moz-appearance: none;     /* Firefox */
+  appearance: none;          /* Standard */
+  
+  /* Remove default styling */
+  background-image: none !important;
+  background: transparent !important;
+  padding-right: 10px;
+  
+  /* Ensure no dropdown arrow is visible */
+  cursor: pointer;
+}
 
 .username-item {
   position: relative;

@@ -200,6 +200,76 @@ export class PdfPageTest03Page {
       }
     }
 
+    /**
+     * pdfMake requires a real image source; empty strings are invalid.
+     * Use the provided fallback whenever the source is missing or blank.
+     */
+    private normalizePdfImageSource(source: any, fallback: string): string {
+      if (typeof source === 'string' && source.trim().length > 0) {
+        return source;
+      }
+
+      return fallback;
+    }
+
+    /**
+     * Extract original image from image object with multiple property variations
+     */
+    private extractOriginalImage(img: any): string | null {
+      if (!img) return null;
+
+      // Try various property names for original/plain image
+      const candidates = [
+        img?.original,
+        img?.originalImage,
+        img?.originalImg,
+        img?.plain,
+        img?.plainImage,
+        img?.image,
+        img?.img
+      ];
+
+      for (const candidate of candidates) {
+        if (typeof candidate === 'string' && candidate.trim().length > 0) {
+          console.log('[PDF] Found original image:', candidate.substring(0, 50) + '...');
+          return candidate;
+        }
+      }
+
+      console.warn('[PDF] No original image found. Tried properties:', Object.keys(img).slice(0, 10).join(', '));
+      return null;
+    }
+
+    /**
+     * Extract boxed/with-boxes image from image object with multiple property variations
+     */
+    private extractBoxedImage(img: any): string | null {
+      if (!img) return null;
+
+      // Try various property names for boxed/with-boxes image
+      const candidates = [
+        img?.withBoxes,
+        img?.withBoxesImage,
+        img?.withBoxesImg,
+        img?.boxed,
+        img?.boxedImage,
+        img?.boxedImg,
+        img?.boxImage,
+        img?.detectionImage,
+        img?.annotatedImage
+      ];
+
+      for (const candidate of candidates) {
+        if (typeof candidate === 'string' && candidate.trim().length > 0) {
+          console.log('[PDF] Found boxed image:', candidate.substring(0, 50) + '...');
+          return candidate;
+        }
+      }
+
+      console.warn('[PDF] No boxed image found. Tried properties:', Object.keys(img).slice(0, 10).join(', '));
+      return null;
+    }
+
     // store incoming session id if any
     sessionId: string | null = null;
   
@@ -251,11 +321,16 @@ export class PdfPageTest03Page {
                 italics: true
               });
     
-              const originalImg = img?.original ?? img?.plain ?? imgPlainFallback;
-              const withBoxesImg = img?.withBoxes ?? img?.boxed ?? imgBoxFallback;
+              // Extract images with comprehensive property checking
+              const extractedOriginal = this.extractOriginalImage(img);
+              const extractedBoxed = this.extractBoxedImage(img);
+              
+              const originalImg = extractedOriginal ? this.normalizePdfImageSource(extractedOriginal, imgPlainFallback) : imgPlainFallback;
+              const withBoxesImg = extractedBoxed ? this.normalizePdfImageSource(extractedBoxed, imgBoxFallback) : imgBoxFallback;
     
               // Log the result of extracting images for debugging/verification
-              this.logImageProcessingResult(i, !!originalImg, !!withBoxesImg, type, shape, severity);
+              console.log(`[PDF] Image ${i} extraction - original: ${extractedOriginal ? 'found' : 'FALLBACK'}, boxed: ${extractedBoxed ? 'found' : 'FALLBACK'}`);
+              this.logImageProcessingResult(i, !!extractedOriginal, !!extractedBoxed, type, shape, severity);
 
               // Calculate dynamic height based on image dimensions
               const imgHeight = this.calculateDynamicImageHeight(img);
@@ -681,6 +756,11 @@ export class PdfPageTest03Page {
           this.sessionImages.forEach((img: any, idx: number) => {
             try {
               console.log(` [${idx}]`, img);
+              // Log available properties to help diagnose missing images
+              if (img && typeof img === 'object') {
+                const props = Object.keys(img).join(', ');
+                console.log(` [${idx}] properties:`, props);
+              }
             } catch (e) {
               console.log(` [${idx}] <unserializable>`);
             }

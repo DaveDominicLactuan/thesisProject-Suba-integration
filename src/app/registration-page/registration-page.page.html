@@ -36,7 +36,9 @@
     'step-1-active': !!selectedRole && step === 1,
     'step-2-active': !!selectedRole && step === 2,
     'step-3-active': !!selectedRole && step === 3,
-    'step-4-active': !!selectedRole && step === 4
+    'step-4-active': !!selectedRole && step === 4,
+    'engineer': selectedRole === 'engineer',
+    'user': selectedRole === 'user'
   }"
 >
 
@@ -206,13 +208,14 @@
           </div>
           <div *ngIf="f['phoneNumber']?.invalid && (f['phoneNumber']?.touched || submitted)" class="field-error">Phone number is required.</div>
 
-          <div class="form-field" [class.invalid]="f['location']?.invalid && (f['location']?.touched || submitted)">
-            <ion-icon name="location-outline"></ion-icon>
-            <input type="text" placeholder="Location (City, Province)" formControlName="location" />
-          </div>
-          <div *ngIf="f['location']?.invalid && (f['location']?.touched || submitted)" class="field-error">Location is required.</div>
+          <div *ngIf="selectedRole === 'engineer'">
+            <div class="form-field" [class.invalid]="f['location']?.invalid && (f['location']?.touched || submitted)">
+              <ion-icon name="location-outline"></ion-icon>
+              <input type="text" placeholder="Location (City, Province)" formControlName="location" />
+            </div>
+            <div *ngIf="f['location']?.invalid && (f['location']?.touched || submitted)" class="field-error">Location is required.</div>
 
-          <div class="location-preview-section">
+            <div class="location-preview-section">
             <div class="location-preview-copy">
               <h4>Location Preview</h4>
               <p>
@@ -235,12 +238,13 @@
               ></app-registration-leaflet-map>
             </div>
 
-            <div *ngIf="(f['officeLatitude']?.invalid || f['officeLongitude']?.invalid) && (f['officeLatitude']?.touched || submitted)" class="field-error">
-              Please confirm your office location from the map.
+              <div *ngIf="(f['officeLatitude']?.invalid || f['officeLongitude']?.invalid) && (f['officeLatitude']?.touched || submitted)" class="field-error">
+                Please confirm your office location from the map.
+              </div>
             </div>
           </div>
-          
-           <button class="signup-btn" type="button" (click)="nextStep()" [disabled]="isRegistering || f['phoneNumber']?.invalid || f['location']?.invalid || f['officeLatitude']?.invalid || f['officeLongitude']?.invalid">Next</button>
+
+          <button class="signup-btn" type="button" (click)="nextStep()" [disabled]="isRegistering || f['phoneNumber']?.invalid || (selectedRole === 'engineer' && (f['location']?.invalid || f['officeLatitude']?.invalid || f['officeLongitude']?.invalid))">Next</button>
           <button class="signup-btn" type="button" (click)="onBack()" [disabled]="isRegistering">Back</button>
         </div>
 
@@ -253,7 +257,7 @@
             <div class="confirm-row" *ngIf="selectedRole === 'engineer'"><span>PRC Number:</span> <span>{{ regForm.value.engineeringID }}</span></div>
             <div class="confirm-row"><span>Email:</span> <span>{{ regForm.value.email }}</span></div>
             <div class="confirm-row"><span>Phone Number:</span> <span>{{ regForm.value.phoneNumber }}</span></div>
-            <div class="confirm-row"><span>Location:</span> <span>{{ regForm.value.location }}</span></div>
+            <div class="confirm-row" *ngIf="selectedRole === 'engineer'"><span>Location:</span> <span>{{ regForm.value.location }}</span></div>
             <!-- <div class="confirm-row"><span>Office Coordinates:</span> <span>{{ regForm.value.officeLatitude | number: '1.6-6' }}, {{ regForm.value.officeLongitude | number: '1.6-6' }}</span></div> -->
             <div class="confirm-row"><span>Password:</span> <span>••••••••</span></div>
             <div class="confirm-row"><span>Role:</span> <span>{{ selectedRole | titlecase }}</span></div>

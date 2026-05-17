@@ -36,7 +36,7 @@
         <img src="assets/MapIcon.png" alt="Map" class="menu-item-icon" />
         <span>Map</span>
       </li>
-       <li class="menu-item" (click)="goMarkerPage()">
+      <li *ngIf="userRole !== 'user'" class="menu-item" (click)="goMarkerPage()">
         <img src="assets/officeLocation.png" alt="Map" class="menu-item-icon" />
         <span>Office Locations</span>
       </li>

@@ -24,58 +24,117 @@
       </div>
     </div> -->
 
-    <!-- Tiles Row -->
-    <div class="tiles" style="margin-top: 85px;">
-      <div class="tile blue">
-        <div class="tile-value">{{ stats.totalCracks }}</div>
-        <div class="tile-label">Total Cracks:</div>
-      </div>
-      <div class="tile red">
-        <div class="tile-value">{{ stats.totalImages }}</div>
-        <div class="tile-label">Total Images</div>
+
+
+    <!-- Overall results board -->
+    <div class="overall-board-container">
+      <div class="board-stats">
+        <!-- Top row: Icon + Images Processed & Failed -->
+        <div class="board-row-top">
+          <div class="board-left">
+            <div class="board-icon" aria-hidden="true">
+              <div class="board-icon-circle">
+              <!-- simple image stack SVG icon -->
+              <svg width="48" height="48" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <rect x="3" y="6" width="14" height="12" rx="2" stroke="#f09819" stroke-width="1.6" fill="#fff" />
+                <path d="M7 10l2 2 3-3 5 5" stroke="#f09819" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+              </div>
+            </div>
+          </div>
+          <div class="board-item">
+            <div class="board-label">Images Processed</div>
+            <div class="board-value">{{ stats.totalImages }}</div>
+            <div class="board-caption">Total</div>
+          </div>
+          <div class="board-item">
+            <div class="board-label">Failed Images Processed</div>
+            <div class="board-value">{{ stats.totalImages }}</div>
+            <div class="board-caption">Total</div>
+          </div>
+        </div>
+        <!-- Bottom row: Shape, Type, Severity -->
+        <div class="board-row-bottom">
+          <div class="board-item">
+            <div class="board-label">Shape</div>
+            <div class="board-value orange">{{ totalShapes }}</div>
+            <div class="board-caption">Total</div>
+          </div>
+          <div class="board-item">
+            <div class="board-label">Type</div>
+            <div class="board-value orange">{{ totalTypes }}</div>
+            <div class="board-caption">Total</div>
+          </div>
+          <div class="board-item">
+            <div class="board-label">Severity</div>
+            <div class="board-value orange">{{ totalSeverities }}</div>
+            <div class="board-caption">Total</div>
+          </div>
+        </div>
       </div>
     </div>
-
-
 
     <!-- Graph selector + display area -->
     <div class="sessions-section">
       <!-- Open Graph Overlay Button -->
-      <div style="display: flex; justify-content: flex-end; margin-right: 16px; margin-bottom: 16px;">
+      <!-- <div style="display: flex; justify-content: flex-end; margin-right: 16px; margin-bottom: 16px;">
         <button class="export-btn" (click)="openGraphOverlay()" style="padding: 10px 20px; font-size: 14px;">
           Open Graph Options ▲
         </button>
+      </div> -->
+
+      <!-- Tabs for Shape / Type / Severity - pill container to match design -->
+      <div class="graph-tabs-shell">
+        <div class="tabs-pill" role="tablist" aria-label="Graph categories">
+          <button class="tab-btn" [class.active]="selectedGraphType === 'shape'" (click)="selectGraphType('shape')" role="tab">
+            <span class="tab-inner">
+              <svg class="tab-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="12" cy="12" r="8" stroke="currentColor" stroke-width="2" fill="none"/><path d="M12 4V12H18" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              <span class="tab-text">Shape</span>
+            </span>
+          </button>
+
+          <button class="tab-btn" [class.active]="selectedGraphType === 'type'" (click)="selectGraphType('type')" role="tab">
+            <span class="tab-inner">
+              <svg class="tab-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="4" y="4" width="16" height="3" stroke="currentColor" stroke-width="1.5" fill="none"/><rect x="4" y="9" width="16" height="3" stroke="currentColor" stroke-width="1.5" fill="none"/><rect x="4" y="14" width="16" height="3" stroke="currentColor" stroke-width="1.5" fill="none"/></svg>
+              <span class="tab-text">Type</span>
+            </span>
+          </button>
+
+          <button class="tab-btn" [class.active]="selectedGraphType === 'severity'" (click)="selectGraphType('severity')" role="tab">
+            <span class="tab-inner">
+              <svg class="tab-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 2L2 20H22L12 2Z" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linejoin="round"/><circle cx="12" cy="15" r="1" fill="currentColor"/><line x1="12" y1="10" x2="12" y2="13" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+              <span class="tab-text">Severity</span>
+            </span>
+          </button>
+        </div>
       </div>
 
-      <!-- Graph Display -->
+      <!-- Graph Display: Pie Chart + Legend -->
       <div class="graph-display" *ngIf="!showGraphOverlay">
-        <!-- Bar Graph -->
-        <div class="graph-card" *ngIf="selectedChartType === 'bar'">
-          <div class="graph-card-title">Bar Graph - {{ getGraphTitle() }} Distribution</div>
-          <div class="bars">
-            <div class="bar" *ngFor="let item of getSelectedData() | keyvalue">
-              <div class="bar-label">{{ item.key }}</div>
-              <div class="bar-track">
-                <div class="bar-fill" [style.width]="((item.value / getMax(getSelectedData())) * 100) + '%'">
+        <div class="graph-card">
+          <div class="pie-layout">
+            <div class="pie-card">
+              <div class="pie-title">Distribution by {{ getGraphTitle() }}</div>
+              <div class="pie-chart" [ngStyle]="{'background': getPieGradient()}">
+                <div class="pie-hole">{{ stats.totalImages }}</div>
+              </div>
+            </div>
+
+            <div class="legend-card">
+              <div class="legend-list">
+                <div class="legend-item" *ngFor="let s of pieData">
+                  <div class="legend-left">
+                    <span class="legend-dot" [style.background]="s.color"></span>
+                    <div class="legend-label">{{ s.key }}</div>
+                  </div>
+                  <div class="legend-right">
+                    <div class="legend-value">{{ s.value }}</div>
+                    <div class="legend-percent">{{ s.percent }}%</div>
+                  </div>
                 </div>
               </div>
-              <div class="bar-value">{{ item.value }}</div>
+              <!-- <div class="legend-foot" style="color:var(--ion-color-medium);">{{ getGraphSubtitle() }}</div> -->
             </div>
-          </div>
-        </div>
-        <!-- Pie Graph -->
-        <div class="graph-card subtle" *ngIf="selectedChartType === 'pie'">
-          <div class="graph-card-title">Pie Graph - {{ getGraphTitle() }} Distribution</div>
-          <div class="pie-grid">
-            <div class="mini-card" *ngFor="let item of getSelectedData() | keyvalue">
-              <div class="mini-title">{{ item.key }}</div>
-              <div class="mini-donut" [ngStyle]="{'--percent': Math.round((item.value / getMax(getSelectedData())) * 100)}">
-                <div class="mini-center">{{ item.value }}</div>
-              </div>
-            </div>
-          </div>
-          <div class="graph-subtitle" style="text-align:center; margin-top:12px; color:var(--ion-color-medium);">
-            {{ getGraphSubtitle() }}
           </div>
         </div>
       </div>
@@ -166,9 +225,15 @@
   </ion-content>
 </div>
 
-<!-- Back button at the top left corner -->
- <div class="back-button-container">
+<!-- Export button at the top right corner -->
+<div class="export-button-container">
+  <button class="export-top-btn" type="button" (click)="ExportPDF()">
+    <img src="assets/exportIcon.png" alt="Export" class="export-top-icon" />
+  </button>
+</div>
+
+     <div class="back-button-container">
       <button class="back-btn" type="button" (click)="onBack()">
-        <img src="assets/back.png" alt="Back" class="back-icon" />
+        <img src="assets/shareIconBlack.png" alt="Back" class="back-icon" />
       </button>
     </div>

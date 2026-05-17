@@ -1477,7 +1477,14 @@ export class ImageStorageService {
 
   /** Return a StoredImage entry by its filename (primary key) */
   getEntryForImage(imageKey: string): StoredImage | undefined {
-    return this.images.find(i => i.filename === imageKey);
+    return this.images.find(i =>
+      i.filename === imageKey ||
+      i.original === imageKey ||
+      (i.withBoxes && i.withBoxes === imageKey) ||
+      i.storagePath === imageKey ||
+      i.originalS3Key === imageKey ||
+      i.withBoxesS3Key === imageKey
+    );
   }
 
   /** Helper method to get stable image key - always returns filename */

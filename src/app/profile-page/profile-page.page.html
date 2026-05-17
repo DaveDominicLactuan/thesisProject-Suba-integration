@@ -32,13 +32,17 @@
         <img src="assets/ChatIconNew.png" alt="Chat" class="menu-item-icon" />
         <span>Chat</span>      
       </li>
-      <li class="menu-item" (click)="gochatPageLocation()">
+    <li class="menu-item" (click)="gochatPageLocation()">
         <img src="assets/MapIcon.png" alt="Map" class="menu-item-icon" />
         <span>Map</span>
       </li>
-       <li class="menu-item" (click)="goMarkerPage()">
-        <img src="assets/bottomBarMarker.png" alt="Map" class="menu-item-icon" />
-        <span>Map</span>
+       <li *ngIf="userRole !== 'user'"class="menu-item" (click)="goMarkerPage()">
+        <img src="assets/officeLocation.png" alt="Map" class="menu-item-icon" />
+        <span>Office Locations</span>
+      </li>
+      <li class="menu-item" (click)="goSessionPage()">
+        <img src="assets/updatedSession.png" alt="Map" class="menu-item-icon" />
+        <span>Sessions</span>
       </li>
     </div>
  

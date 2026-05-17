@@ -548,8 +548,12 @@ form {
   top: 10%;
 }
 
-.login-form.step-3-active {
+.login-form.step-3-active.engineer {
   top: 23%;
+}
+
+.login-form.step-3-active.user {
+  top: 3%;
 }
 
 .login-form.step-4-active {
@@ -984,8 +988,12 @@ form {
     top: 13%;
   }
 
-  .login-form.step-3-active {
+  .login-form.step-3-active.engineer {
     top: 23%;
+  }
+
+  .login-form.step-3-active.user {
+    top: 3%;
   }
 
   .login-form.step-4-active {

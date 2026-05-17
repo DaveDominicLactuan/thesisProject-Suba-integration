@@ -17,6 +17,13 @@ interface AggregateStats {
   totalImages: number;
 }
 
+type PredictionLike = {
+  type?: string;
+  shape?: string;
+  severity?: string;
+  boxes?: any[];
+} | null | undefined;
+
 @Component({
   selector: 'app-results-dashboard',
   templateUrl: './results-dashboard.page.html',
@@ -231,6 +238,16 @@ export class ResultsDashboardPage implements OnInit {
     //iterate through each img raw prediction and increment / update the type, 
     //severity, shape counts
     images.forEach((img) => {
+      const corrected = (img as any).correctedPrediction as PredictionLike;
+      if (corrected) {
+        const boxCount = Array.isArray(corrected.boxes) && corrected.boxes.length > 0 ? corrected.boxes.length : 1;
+        totalCracks += boxCount;
+        if (corrected.type) type[corrected.type] = (type[corrected.type] || 0) + boxCount;
+        if (corrected.severity) severity[corrected.severity] = (severity[corrected.severity] || 0) + boxCount;
+        if (corrected.shape) shape[corrected.shape] = (shape[corrected.shape] || 0) + boxCount;
+        return;
+      }
+
       // Prefer `rawPrediction` array if present: each entry counts as one detection
       const raw = (img as any).rawPrediction;
       if (Array.isArray(raw) && raw.length > 0) {
@@ -441,17 +458,109 @@ export class ResultsDashboardPage implements OnInit {
     return `${graphTypeText} - ${dataTypeText}`;
   }
 
+  // Colors used for pie slices
+  private pieColors: string[] = ['#ff6b2d', '#ff9f43', '#ffbf7a', '#ffd9b8', '#ffeedd', '#ffd0a6'];
+
+  // Computed pie data (key, value, percent, color) for template rendering
+  get pieData(): Array<{ key: string; value: number; percent: number; color: string }> {
+    const src = this.getSelectedData() || {};
+    const entries = Object.entries(src);
+    const total = entries.reduce((s, [, v]) => s + (typeof v === 'number' ? v : 0), 0) || 0;
+    if (entries.length === 0) return [];
+    let i = 0;
+    return entries
+      .map(([k, v]) => ({ key: k, value: v as number, percent: total ? Math.round(((v as number) / total) * 100) : 0, color: this.pieColors[i++ % this.pieColors.length] }))
+      .sort((a, b) => b.value - a.value);
+  }
+
+  // Returns a CSS conic-gradient string representing the pie slices for the current selection
+  getPieGradient(): string {
+    const data = this.pieData;
+    if (!data || data.length === 0) return 'linear-gradient(#eee,#eee)';
+    let cum = 0;
+    const parts: string[] = [];
+    data.forEach((d) => {
+      const start = cum;
+      const end = cum + d.percent;
+      parts.push(`${d.color} ${start}% ${end}%`);
+      cum = end;
+    });
+    // If rounding left some remainder, fill remaining with muted color
+    if (cum < 100) parts.push(`#eee ${cum}% 100%`);
+    return `conic-gradient(${parts.join(', ')})`;
+  }
+
 
   //used for export the current session to PDF
   //uses the sessionId to pass to the PDF page
   ExportPDF() {
     const queryParams: any = {};
     if (this.sessionId) queryParams.sessionId = this.sessionId;
-    this.router.navigate(['/pdf-page-test03'], { queryParams });
+    const selectedImages = this.availableSessionImages.filter((img) =>
+      this.selectedImageKeys.includes(this.getImageKey(img))
+    );
+
+    this.router.navigate(['/pdf-page-test03'], {
+      queryParams,
+      state: {
+        sessionId: this.sessionId,
+        images: selectedImages.length > 0 ? selectedImages : this.availableSessionImages,
+      },
+    });
   }
 
   onBack() {
     this.goBack();
+  }
+
+  // Totals used by the overall-results-board
+  get totalShapes(): number {
+    return Object.values(this.stats.shape || {}).reduce((a, b) => a + b, 0);
+  }
+
+  get totalTypes(): number {
+    return Object.values(this.stats.type || {}).reduce((a, b) => a + b, 0);
+  }
+
+  get totalSeverities(): number {
+    return Object.values(this.stats.severity || {}).reduce((a, b) => a + b, 0);
+  }
+
+  // Helpers for template rendering of image cards
+  getImageSrc(img: StoredImage): string {
+    return (img as any).dataUrl || (img as any).storagePath || (img as any).withBoxes || (img as any).original || 'assets/placeholder.png';
+  }
+
+  getImageLabel(img: StoredImage): string {
+    return img.filename || img.original || this.getImageKey(img) || `Image`;
+  }
+
+  getImageDate(img: StoredImage): string {
+    return (img as any).date || (img as any).createdAt || (img as any).timestamp || 'Unknown Date';
+  }
+
+  getBoxCount(img: StoredImage): number {
+    const corrected = (img as any).correctedPrediction as PredictionLike;
+    if (corrected && Array.isArray(corrected.boxes)) {
+      return corrected.boxes.length;
+    }
+    if (Array.isArray((img as any).boxes)) {
+      return (img as any).boxes.length;
+    }
+    return (img as any).rawPrediction && Array.isArray((img as any).rawPrediction) ? (img as any).rawPrediction.length : 0;
+  }
+
+  getImagePredictionValue(img: StoredImage, key: 'type' | 'shape' | 'severity'): string {
+    const corrected = (img as any).correctedPrediction as PredictionLike;
+    if (corrected && corrected[key]) {
+      return corrected[key] || 'Unknown';
+    }
+    const raw = (img as any).rawPrediction;
+    if (Array.isArray(raw) && raw.length > 0) {
+      const firstPrediction = raw[0];
+      return firstPrediction[key] || 'Unknown';
+    }
+    return 'Unknown';
   }
 
   

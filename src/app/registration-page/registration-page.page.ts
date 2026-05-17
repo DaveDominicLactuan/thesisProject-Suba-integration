@@ -69,14 +69,14 @@ regForm!: FormGroup; // our single form
     this.regForm = this.fb.group({
       firstName: ['', Validators.required],
       lastName: ['', Validators.required],
-      engineeringID: ['', this.selectedRole === 'engineer' ? Validators.required : []], // PRC required for engineer
+      engineeringID: ['', []], // PRC will be required only when 'engineer' role selected
       email: ['', [Validators.required, Validators.email]],
       password: ['', [Validators.required, Validators.minLength(6)]],
       confirmPassword: ['', Validators.required],
       phoneNumber: ['', Validators.required],
-      location: ['', Validators.required],
-      officeLatitude: [null, Validators.required],
-      officeLongitude: [null, Validators.required]
+      location: [''], // optional by default; required only for engineer
+      officeLatitude: [null], // optional by default; required only for engineer
+      officeLongitude: [null] // optional by default; required only for engineer
     }, {
       validators: this.passwordMatchValidator
     });
@@ -161,9 +161,6 @@ async onRegister() {
     lastName: lastName ?? '',
     engineeringID: engineeringID ?? '',
     phoneNumber: phoneNumber ?? '',
-    location: location ?? '',
-    officeLatitude: officeLatitude ?? null,
-    officeLongitude: officeLongitude ?? null,
     role: this.selectedRole ?? ''
   };
 
@@ -298,32 +295,11 @@ async onRegister() {
       console.log('[RegistrationPage] Auth registration succeeded for', email, 'uid=', createdUid);
 
       // Auth3Service.register() already writes the user profile to Firestore users collection
-      try {
-        const uid = userCredential?.user?.uid;
-        if (uid) {
-          console.log(`[RegistrationPage] Firestore user profile written via Auth3Service for uid: ${uid}`);
-
-          // Save office location for users
-          try {
-            await this.auth3.saveOfficeLocation(uid, {
-              email: email ?? '',
-              firstName: firstName ?? '',
-              lastName: lastName ?? '',
-              phoneNumber: phoneNumber ?? '',
-              officeAddress: location ?? '',
-              latitude: officeLatitude ?? 0,
-              longitude: officeLongitude ?? 0,
-              role: this.selectedRole ?? 'user',
-            });
-            console.log(`[RegistrationPage] Office location saved for uid: ${uid}`);
-          } catch (locationErr) {
-            console.warn('[RegistrationPage] Failed to save office location:', locationErr);
-          }
-        } else {
-          console.warn('[RegistrationPage] could not determine uid after register; profile not written');
-        }
-      } catch (fireErr) {
-        console.warn('[RegistrationPage] Firestore write failed:', fireErr);
+      const uid = userCredential?.user?.uid;
+      if (uid) {
+        console.log(`[RegistrationPage] Firestore user profile written via Auth3Service for uid: ${uid}`);
+      } else {
+        console.warn('[RegistrationPage] could not determine uid after register; profile not written');
       }
 
       // Set success message and navigate
@@ -403,6 +379,37 @@ selectRole(role: string) {
 
   this.selectedRole = role;
   console.log('Selected Role:', role);
+
+  // Update validators and enabled/disabled state depending on role
+  const engCtrl = this.regForm.get('engineeringID');
+  const locCtrl = this.regForm.get('location');
+  const latCtrl = this.regForm.get('officeLatitude');
+  const lonCtrl = this.regForm.get('officeLongitude');
+
+  if (role === 'engineer') {
+    engCtrl?.setValidators([Validators.required]);
+    locCtrl?.setValidators([Validators.required]);
+    latCtrl?.setValidators([Validators.required]);
+    lonCtrl?.setValidators([Validators.required]);
+    engCtrl?.enable(); locCtrl?.enable(); latCtrl?.enable(); lonCtrl?.enable();
+  } else {
+    // user role: location fields not required and cleared/disabled
+    engCtrl?.clearValidators();
+    locCtrl?.clearValidators();
+    latCtrl?.clearValidators();
+    lonCtrl?.clearValidators();
+    engCtrl?.setValue('');
+    locCtrl?.setValue('');
+    latCtrl?.setValue(null);
+    lonCtrl?.setValue(null);
+    engCtrl?.enable(); // keep PRC input available if user changes mind
+    locCtrl?.disable(); latCtrl?.disable(); lonCtrl?.disable();
+  }
+
+  engCtrl?.updateValueAndValidity();
+  locCtrl?.updateValueAndValidity();
+  latCtrl?.updateValueAndValidity();
+  lonCtrl?.updateValueAndValidity();
 }
 
 //function to toggle password visibility

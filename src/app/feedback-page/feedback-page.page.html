@@ -109,23 +109,38 @@
 
         <div class="form-group">
           <label for="dropdown1">Type of Crack</label>
-          <select id="dropdown1" [(ngModel)]="dropdown1" (ngModelChange)="updateSelectedImageFromDropdowns()" class="input-item" [disabled]="isUserReadOnly">
-            <option *ngFor="let option of dropdownOptionsDirection" [value]="option">{{ option }}</option>
-          </select>
+          <div *ngIf="userRole === 'user'; else dropdown1Editor" class="select-wrap">
+            <span class="select-wrap-value">{{ dropdown1 || 'Type' }}</span>
+          </div>
+          <ng-template #dropdown1Editor>
+            <select id="dropdown1" [(ngModel)]="dropdown1" (ngModelChange)="updateSelectedImageFromDropdowns()" class="input-item" [disabled]="isUserReadOnly" [class.hide-dropdown-arrow]="userRole !== 'engineer'" [class.no-arrow]="userRole === 'user'">
+              <option *ngFor="let option of dropdownOptionsDirection" [value]="option">{{ option }}</option>
+            </select>
+          </ng-template>
         </div>
 
         <div class="form-group">
           <label for="dropdown2">Shape</label>
-          <select id="dropdown2" [(ngModel)]="dropdown2" (ngModelChange)="updateSelectedImageFromDropdowns()" class="input-item" [disabled]="isUserReadOnly">
-            <option *ngFor="let option of dropdownOptionsShape" [value]="option">{{ option }}</option>
-          </select>
+          <div *ngIf="userRole === 'user'; else dropdown2Editor" class="select-wrap">
+            <span class="select-wrap-value">{{ dropdown2 || 'Shape' }}</span>
+          </div>
+          <ng-template #dropdown2Editor>
+            <select id="dropdown2" [(ngModel)]="dropdown2" (ngModelChange)="updateSelectedImageFromDropdowns()" class="input-item" [disabled]="isUserReadOnly" [class.hide-dropdown-arrow]="userRole !== 'engineer'" [class.no-arrow]="userRole === 'user'" [attr.toggle-icon]="userRole === 'user' ? ' ' : null">
+              <option *ngFor="let option of dropdownOptionsShape" [value]="option">{{ option }}</option>
+            </select>
+          </ng-template>
         </div>
 
         <div class="form-group">
           <label for="dropdown3">Severity of Crack</label>
-          <select id="dropdown3" [(ngModel)]="dropdown3" (ngModelChange)="updateSelectedImageFromDropdowns()" class="input-item" [disabled]="isUserReadOnly">
-            <option *ngFor="let option of dropdownOptionsSeverity" [value]="option">{{ option }}</option>
-          </select>
+          <div *ngIf="userRole === 'user'; else dropdown3Editor" class="select-wrap">
+            <span class="select-wrap-value">{{ dropdown3 || 'Severity' }}</span>
+          </div>
+          <ng-template #dropdown3Editor>
+            <select id="dropdown3" [(ngModel)]="dropdown3" (ngModelChange)="updateSelectedImageFromDropdowns()" class="input-item" [disabled]="isUserReadOnly" [class.hide-dropdown-arrow]="userRole !== 'engineer'" [class.no-arrow]="userRole === 'user'">
+              <option *ngFor="let option of dropdownOptionsSeverity" [value]="option">{{ option }}</option>
+            </select>
+          </ng-template>
         </div>
 
         <!-- Notes (optional) collapsible field -->
