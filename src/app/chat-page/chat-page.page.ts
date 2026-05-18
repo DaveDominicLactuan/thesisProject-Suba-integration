@@ -3532,6 +3532,8 @@ private async initialize(): Promise<void> {
     this.lastName = profile?.lastName || this.lastName;
     this.email = profile?.email || this.email;
     this.userID = this.auth3.getCurrentUser()?.uid || this.userID || (profile && (profile.userID || profile.uid));
+    // Capture the user's role for conditional UI (fallback to 'user')
+    this.userRole = (profile && (profile.role || profile['role'])) || 'user';
 
     if (this.userID) {
       this.refreshCacheWarmStatus(this.userID);
@@ -3550,6 +3552,20 @@ private async initialize(): Promise<void> {
     try { this.presenceService.start(); } catch (e) { console.warn('PresenceService.start failed', e); }
   } catch (err) {
     console.warn('[ChatPage] initialize error', err);
+  }
+}
+
+/**
+ * Returns the current logged-in user's role. If not yet available, fetches profile.
+ */
+public async getCurrentUserRole(): Promise<string> {
+  if (this.userRole) return this.userRole;
+  try {
+    const profile = await this.auth3.getUserProfile().catch(() => null);
+    this.userRole = (profile && (profile.role || profile['role'])) || 'user';
+    return this.userRole as string;
+  } catch (e) {
+    return 'user';
   }
 }
 

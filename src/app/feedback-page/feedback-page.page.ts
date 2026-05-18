@@ -151,6 +151,58 @@ private lastImageTitleDebugAt: number = 0;
     console.log(this.message)
   }
 
+  /**
+   * Draw bounding boxes onto an original dataURL and return a new dataURL (JPEG).
+   * @param originalDataUrl - base64 data URL of the original image
+   * @param boxes - array of boxes with {x,y,w,h} relative (0..1) or absolute pixel values
+   */
+  private async createWithBoxesDataUrl(originalDataUrl: string, boxes: BoundingBox[] | any[]): Promise<string | null> {
+    return new Promise((resolve) => {
+      try {
+        const img = new Image();
+        img.crossOrigin = 'Anonymous';
+        img.onload = () => {
+          try {
+            const canvas = document.createElement('canvas');
+            canvas.width = img.width;
+            canvas.height = img.height;
+            const ctx = canvas.getContext('2d');
+            if (!ctx) return resolve(originalDataUrl);
+            ctx.drawImage(img, 0, 0);
+            ctx.lineWidth = Math.max(2, Math.round(Math.min(img.width, img.height) * 0.01));
+            ctx.strokeStyle = 'rgba(255,0,0,0.9)';
+            ctx.fillStyle = 'rgba(255,0,0,0.12)';
+            (boxes || []).forEach((b: any) => {
+              let x = b.x ?? b.left ?? 0;
+              let y = b.y ?? b.top ?? 0;
+              let w = b.w ?? b.width ?? b.wid ?? 0;
+              let h = b.h ?? b.height ?? b.hei ?? 0;
+              // If normalized coords (<=1) convert to pixels
+              if (x <= 1 && y <= 1 && w <= 1 && h <= 1) {
+                x = x * img.width;
+                y = y * img.height;
+                w = w * img.width;
+                h = h * img.height;
+              }
+              ctx.strokeRect(x, y, w, h);
+              ctx.fillRect(x, y, w, h);
+            });
+            const dataUrl = canvas.toDataURL('image/png');
+            resolve(dataUrl);
+          } catch (e) {
+            console.warn('[FeedbackPage] canvas draw failed', e);
+            resolve(originalDataUrl);
+          }
+        };
+        img.onerror = () => resolve(originalDataUrl);
+        img.src = originalDataUrl;
+      } catch (e) {
+        console.warn('[FeedbackPage] createWithBoxesDataUrl top-level error', e);
+        resolve(originalDataUrl);
+      }
+    });
+  }
+
     /**
    * Lifecycle: stop camera preview (if available), then load sessions and
    * associated images. Kicks off a debug log and center detection.
@@ -752,7 +804,7 @@ private lastImageTitleDebugAt: number = 0;
       return;
     }
 
-    console.log(`[FeedbackPage] S3 hydration triggered for ${imagesToHydrate.length} image(s) with originalS3Key or storage paths`);
+    console.log(`[FeedbackPage] S3 hydration triggered for ${imagesToHydrate.length} image(s)`);
     this.sessionLoadingTotal = imagesToHydrate.length;
     this.sessionLoadingCompleted = 0;
     
@@ -867,6 +919,35 @@ private lastImageTitleDebugAt: number = 0;
     console.log(`[FeedbackPage] S3 hydration complete: all ${imagesToHydrate.length} images processed and withBoxes generated`);
     this.sessionLoadingMessage = 'S3 images ready';
     this.sessionLoadingDetail = 'Session images hydrated and ready for display';
+    
+    // Store session objects to session storage for persistence across navigation
+    this.storeSessionToSessionStorage();
+  }
+
+  /**
+   * Store the current session and image objects to sessionStorage for debugging and persistence.
+   * Called after S3 hydration to ensure all images are ready.
+   */
+  private storeSessionToSessionStorage(): void {
+    try {
+      const sessionData = {
+        selectedSessionId: this.selectedSessionId,
+        imagePaths: this.imagePaths,
+        timestamp: new Date().toISOString(),
+        imageCount: this.imagePaths.length
+      };
+      
+      sessionStorage.setItem('feedbackPageSession', JSON.stringify(sessionData));
+      
+      console.group('[FeedbackPage] 💾 Session stored to sessionStorage');
+      console.log('Session ID:', sessionData.selectedSessionId);
+      console.log('Image count:', sessionData.imageCount);
+      console.log('Timestamp:', sessionData.timestamp);
+      console.log('Full session data:', sessionData);
+      console.groupEnd();
+    } catch (err) {
+      console.warn('[FeedbackPage] Failed to store session to sessionStorage', err);
+    }
   }
 
   // Normalize StoredImage-like object into DisplayImage 
@@ -896,11 +977,16 @@ private lastImageTitleDebugAt: number = 0;
       ? img.statusMessage
       : (predShape || predSeverity) ? `${predShape}${predSeverity ? ' â€” ' + predSeverity : ''}` : '';
 
+    const originalSrc = typeof img.original === 'string' && img.original.trim().length > 0 ? img.original : '';
+    const withBoxesSrc = typeof img.withBoxes === 'string' && img.withBoxes.trim().length > 0
+      ? img.withBoxes
+      : originalSrc;
+
     //Build return object: choose withBoxes fallback, derive filename, 
     // include normalized prediction/status, and include S3 keys for mobile compatibility
       return {
-      original: img.original,
-      withBoxes: img.withBoxes ?? img.original,
+      original: originalSrc,
+      withBoxes: withBoxesSrc,
       filename: img.filename || '',
       fileName: img.filename || '',
         boxes: Array.isArray(img.boxes) ? img.boxes : [],
@@ -1352,8 +1438,18 @@ addEntry() {
     if (matched.withBoxesStoragePath) updatedStored.withBoxesStoragePath = matched.withBoxesStoragePath;
     if (matched.withBoxesStorageUrl) updatedStored.withBoxesStorageUrl = matched.withBoxesStorageUrl;
 
+    // Ensure original and withBoxes are persisted into the stored entry
+    if (matched.original) updatedStored.original = matched.original;
+    if (matched.withBoxes) updatedStored.withBoxes = matched.withBoxes;
+
+    // Ensure a filename exists to use as the storage key
+    if (!updatedStored.filename || updatedStored.filename === '') {
+      updatedStored.filename = matched.fileName ?? matched.filename ?? key ?? '';
+    }
+
+    const storageKey = updatedStored.filename || key;
     if (typeof svc.setEntryForImage === 'function') {
-      svc.setEntryForImage(key, updatedStored);
+      svc.setEntryForImage(storageKey, updatedStored);
     }
 
     // Also refresh selectedImage to the correct src based on toggle
@@ -1804,26 +1900,14 @@ addEntry() {
 
     const patchedImages = sessionImages.map((img: any, index: number) => {
       const imgName = img.filename || `Image ${index + 1}`;
-      
-      // Check if S3 keys exist; if so, ensure original/withBoxes point to them
-      if (img.storagePath || img.originalS3Key) {
-        const originalS3Key = img.storagePath || img.originalS3Key;
-        if (originalS3Key && img.original !== originalS3Key) {
-          console.log(
-            `[FeedbackPage] Guard Rail - Original [${imgName}]: "${img.original}" â†' S3 key "${originalS3Key}"`
-          );
-          img.original = originalS3Key;
-        }
-      }
 
-      if (img.withBoxesStoragePath || img.withBoxesS3Key) {
-        const withBoxesS3Key = img.withBoxesStoragePath || img.withBoxesS3Key;
-        if (withBoxesS3Key && img.withBoxes !== withBoxesS3Key) {
-          console.log(
-            `[FeedbackPage] Guard Rail - WithBoxes [${imgName}]: "${img.withBoxes}" â†' S3 key "${withBoxesS3Key}"`
-          );
-          img.withBoxes = withBoxesS3Key;
-        }
+      // Keep the in-memory base64 payloads intact so navigation to the
+      // dashboard and PDF page can still render the boxed image.
+      // S3 key fields are already preserved separately on the object.
+      if (img.storagePath || img.originalS3Key || img.withBoxesStoragePath || img.withBoxesS3Key) {
+        console.log(
+          `[FeedbackPage] Guard Rail - Preserving image payloads for [${imgName}] while keeping S3 key references`
+        );
       }
 
       return img;
@@ -2146,17 +2230,139 @@ addEntry() {
           }
 
           if (!hasInternet) {
-            // **OFFLINE MODE**: Save only to local storage
+            // **OFFLINE MODE**: Save full session and image objects to local storage
             updateProgress(50, 'Saving Session (Offline): 50%');
             console.log('[FeedbackPage] No internet available. Saving session to local storage only.');
             
-            // Session and images are already persisted to local storage by the service
-            // Just update progress and show completion
+            let sessionObject: any = null;
+            let sessionImagesToStore: StoredImage[] = [];
+
+            try {
+              // Retrieve the complete session object that was created/updated
+
+              if (savedSessionId && typeof svc.getSession === 'function') {
+                sessionObject = svc.getSession(savedSessionId);
+              }
+
+              // Get all images in the session
+              if (savedSessionId && typeof svc.getAllImages === 'function') {
+                try {
+                  const allImages = typeof svc.getAllImagesAsync === 'function' 
+                    ? await svc.getAllImagesAsync() 
+                    : svc.getAllImages();
+
+                  if (sessionObject && Array.isArray(sessionObject.imageKeys) && sessionObject.imageKeys.length > 0) {
+                    sessionImagesToStore = sessionObject.imageKeys
+                      .map((k: string) => allImages.find((img: StoredImage) => img.filename === k || img.original === k || img.withBoxes === k))
+                      .filter(Boolean) as StoredImage[];
+                  } else {
+                    sessionImagesToStore = allImages.filter((img: StoredImage) => {
+                      const imgKey = img.filename || img.original || '';
+                      return imgKey && this.formDataMap[imgKey] !== undefined;
+                    });
+                  }
+                } catch (e) {
+                  console.warn('[FeedbackPage] Failed to retrieve session images for offline storage:', e);
+                  sessionImagesToStore = [entry]; // Fallback to current entry
+                }
+              } else {
+                sessionImagesToStore = [entry];
+              }
+
+              // **EXPLICIT OFFLINE STORAGE**: Save complete session and image objects to localStorage
+              const offlineStorageKey = `offlineSessions_${new Date().getTime()}`;
+              const offlineData = {
+                timestamp: new Date().toISOString(),
+                sessionId: savedSessionId,
+                sessionName: val,
+                sessionObject: sessionObject || {
+                  id: savedSessionId,
+                  name: val,
+                  imageKeys: sessionImagesToStore.map(img => img.filename || img.original),
+                  notes: this.notesText,
+                  engineerCheckedSession: this.userRole?.toLowerCase() === 'engineer' && this.engineerLookedSessionChecked
+                },
+                sessionImages: sessionImagesToStore.map((img: StoredImage, index: number) => ({
+                  index,
+                  ...this.normalizePredictionFields(img),
+                  // Ensure all prediction data is included
+                  original: img.original,
+                  withBoxes: img.withBoxes,
+                  filename: img.filename,
+                  boxes: Array.isArray(img.boxes) ? [...img.boxes] : [],
+                  prediction: img.prediction ? { ...img.prediction } : undefined,
+                  correctedPrediction: img.correctedPrediction ? { ...img.correctedPrediction } : undefined,
+                  statusMessage: img.statusMessage,
+                  engineerCheckedSession: img.engineerCheckedSession,
+                  timestamp: img.timestamp,
+                  detectionMessage: img.detectionMessage,
+                  faceDetected: img.faceDetected,
+                  faceData: img.faceData,
+                  // Preserve S3 references if they exist
+                  originalS3Key: img.originalS3Key,
+                  originalS3Url: img.originalS3Url,
+                  withBoxesS3Key: img.withBoxesS3Key,
+                  withBoxesS3Url: img.withBoxesS3Url,
+                  storagePath: img.storagePath,
+                  storageUrl: img.storageUrl,
+                  withBoxesStoragePath: img.withBoxesStoragePath,
+                  withBoxesStorageUrl: img.withBoxesStorageUrl
+                })),
+                userRole: this.userRole,
+                userId: this.userId,
+                totalImages: sessionImagesToStore.length
+              };
+
+              // Save to localStorage
+              localStorage.setItem(offlineStorageKey, JSON.stringify(offlineData));
+              
+              // Also maintain an index of all offline sessions for easy retrieval
+              let offlineSessionsIndex: any[] = [];
+              try {
+                const indexStr = localStorage.getItem('offlineSessionsIndex');
+                offlineSessionsIndex = indexStr ? JSON.parse(indexStr) : [];
+              } catch (e) {
+                offlineSessionsIndex = [];
+              }
+
+              offlineSessionsIndex.push({
+                key: offlineStorageKey,
+                sessionId: savedSessionId,
+                sessionName: val,
+                timestamp: new Date().toISOString(),
+                imageCount: sessionImagesToStore.length
+              });
+
+              localStorage.setItem('offlineSessionsIndex', JSON.stringify(offlineSessionsIndex));
+
+              console.group('[FeedbackPage] 💾 Offline Session Saved to localStorage');
+              console.log('Storage Key:', offlineStorageKey);
+              console.log('Session Object:', offlineData.sessionObject);
+              console.log(`Total Images in Session: ${offlineData.totalImages}`);
+              console.log('Session Images:', offlineData.sessionImages);
+              console.table(offlineData.sessionImages.map((img: any) => ({
+                index: img.index + 1,
+                filename: img.filename || '(unnamed)',
+                boxCount: Array.isArray(img.boxes) ? img.boxes.length : 0,
+                predictionType: img.prediction?.type || 'N/A',
+                predictionShape: img.prediction?.shape || 'N/A',
+                predictionSeverity: img.prediction?.severity || 'N/A',
+                hasCorrectedPrediction: !!img.correctedPrediction,
+                statusMessage: img.statusMessage || '(none)'
+              })));
+              console.log('Offline Sessions Index:', offlineSessionsIndex);
+              console.groupEnd();
+
+            } catch (offlineErr) {
+              console.error('[FeedbackPage] Error saving session to offline storage:', offlineErr);
+              alert('⚠ Failed to save session to offline storage. Please check console for details.');
+            }
+
             updateProgress(100, 'Saving Session: 100% (Local storage)');
 
             try { document.body.removeChild(overlay); } catch (e) {}
 
-            alert(`âš  Offline Mode: Session "${val}" saved to local storage only.\n\nOnce internet is available, the session will be synced to the cloud.`);
+            alert(`⚠ Offline Mode: Session "${val}" saved to local storage only.\n\nSession Details:\n• Images: ${sessionImagesToStore.length}\n• Timestamp: ${new Date().toLocaleString()}\n\nOnce internet is available, the session will be synced to the cloud.`);
             this.router.navigate(['/home-page2']);
             resolve();
             return; // Exit early for offline scenario
@@ -2225,6 +2431,9 @@ addEntry() {
                 currentProgress += 5;
                 updateProgress(currentProgress, `Saving Session: ${Math.min(currentProgress, 85)}%`);
 
+                // Capture the original dataURL so we can generate withBoxes even after uploading
+                const originalDataForBoxes = imgEntry.original;
+
                 // Upload original image
                 if (typeof svc.uploadSessionImageOriginal === 'function' && imgEntry.original) {
                   try {
@@ -2232,7 +2441,8 @@ addEntry() {
                     if (originalS3Result) {
                       imgEntry.storagePath = originalS3Result.s3Key;
                       imgEntry.storageUrl = originalS3Result.url;
-                      imgEntry.original = originalS3Result.s3Key;
+                      imgEntry.originalS3Key = originalS3Result.s3Key;
+                      imgEntry.originalS3Url = originalS3Result.url;
                       console.log(`âœ… Original image ${imgIndex + 1} uploaded to S3 with key:`, originalS3Result?.s3Key);
                     }
                   } catch (error) {
@@ -2243,14 +2453,46 @@ addEntry() {
                 currentProgress += progressPerImage * 0.5;
                 updateProgress(Math.min(currentProgress, 85), `Saving Session: ${Math.min(currentProgress, 85)}%`);
 
-                // Note: withBoxes images are NOT uploaded to S3 (only stored locally)
-                // The withBoxes image is used for local preview only and will be generated on-demand if needed
-                console.log(`[FeedbackPage] WithBoxes image for ${imgIndex + 1} kept locally (not uploaded to S3)`);
+                // Generate withBoxes image (if boxes exist) and upload it to S3 so PDF/navigation can access it.
+                try {
+                    if (Array.isArray(imgEntry.boxes) && imgEntry.boxes.length > 0) {
+                    // If withBoxes is not present create it using the captured original data (originalDataForBoxes)
+                    if (!imgEntry.withBoxes && originalDataForBoxes) {
+                      try {
+                        const boxed = await this.createWithBoxesDataUrl(originalDataForBoxes, imgEntry.boxes || []);
+                        if (boxed) {
+                          imgEntry.withBoxes = boxed;
+                        }
+                      } catch (e) {
+                        console.warn('[FeedbackPage] failed to create withBoxes image', e);
+                      }
+                    }
 
-                // Update the image entry in service with S3 references
-                if (typeof svc.setEntryForImage === 'function') {
-                  svc.setEntryForImage(imgKey, imgEntry);
-                  console.log(`[FeedbackPage] S3 references persisted for image ${imgIndex + 1}: ${imgKey}`);
+                    // Upload withBoxes to S3 if present and upload function exists
+                    if (typeof svc.uploadSessionImageWithBoxes === 'function' && imgEntry.withBoxes) {
+                      try {
+                        const withBoxesResult = await svc.uploadSessionImageWithBoxes(imgEntry.withBoxes, savedSessionId, imgEntry.filename || imgKey);
+                        if (withBoxesResult) {
+                          imgEntry.withBoxesStoragePath = withBoxesResult.s3Key;
+                          imgEntry.withBoxesStorageUrl = withBoxesResult.url;
+                          imgEntry.withBoxesS3Key = withBoxesResult.s3Key;
+                          imgEntry.withBoxesS3Url = withBoxesResult.url;
+                          // keep imgEntry.withBoxes as the dataURL so the UI still shows the processed image locally
+                          console.log(`âœ… WithBoxes uploaded for ${imgKey}:`, withBoxesResult.s3Key);
+                        }
+                      } catch (err) {
+                        console.warn('[FeedbackPage] uploadSessionImageWithBoxes failed for', imgKey, err);
+                      }
+                    }
+                  }
+
+                  // Persist the updated image entry (now with S3 refs) into the service
+                  if (typeof svc.setEntryForImage === 'function') {
+                    svc.setEntryForImage(imgKey, imgEntry);
+                    console.log(`[FeedbackPage] Updated image entry persisted for image ${imgIndex + 1}: ${imgKey}`);
+                  }
+                } catch (e) {
+                  console.warn('[FeedbackPage] Error while processing withBoxes for upload', e);
                 }
 
                 currentProgress += progressPerImage * 0.5;
@@ -2295,8 +2537,8 @@ addEntry() {
           if (savedSessionId && typeof svc.saveSessionWithImagesToFirestore === 'function') {
             try {
               updateProgress(90, 'Saving Session: 90%');
-              // Pass excludeWithBoxes=true to exclude withBoxes-related fields from Firestore
-              await svc.saveSessionWithImagesToFirestore(savedSessionId, undefined, true);
+              // Include withBoxes S3 references in Firestore so other pages (PDF) can fetch them
+              await svc.saveSessionWithImagesToFirestore(savedSessionId, undefined, false);
               firestoreSaved = true;
               console.log('✅ Firestore save completed with S3 references (withBoxes excluded)');
               
@@ -2351,6 +2593,9 @@ addEntry() {
               
               console.groupEnd();
               
+              // Keep the in-memory base64 `withBoxes` payloads so downstream
+              // pages can render the boxed image without rehydrating from S3.
+              // We intentionally do not clear them here.
               if (typeof svc.logSaveWorkflowStatus === 'function') {
                 try {
                   await svc.logSaveWorkflowStatus(savedSessionId);

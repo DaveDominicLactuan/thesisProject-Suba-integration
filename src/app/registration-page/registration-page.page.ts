@@ -16,7 +16,12 @@ import { RegistrationMapCoordinates } from './registration-leaflet-map/registrat
 export class RegistrationPagePage implements OnInit {
   // Stepper state for multi-stage registration
   step: number = 1;
-  maxStep: number = 4; // 1: Basic Info, 2: PRC, 3: Account Info, 4: Confirm
+  maxStep: number = 4; // default (engineer flow). Will be adjusted on role select.
+
+  /** Derived array used to render dynamic stepper UI */
+  get stepsArray(): number[] {
+    return Array.from({ length: this.maxStep }, (_, i) => i + 1);
+  }
 
 //  regForm = this.fb.group({
   //   firstName: ['', Validators.required],
@@ -378,7 +383,11 @@ selectRole(role: string) {
   }
 
   this.selectedRole = role;
-  console.log('Selected Role:', role);
+  // adjust total steps depending on selected role: engineers have 4, regular users have 3
+  this.maxStep = role === 'engineer' ? 4 : 3;
+  // reset to first step when role changes
+  this.step = 1;
+  console.log('Selected Role:', role, 'maxStep set to', this.maxStep);
 
   // Update validators and enabled/disabled state depending on role
   const engCtrl = this.regForm.get('engineeringID');

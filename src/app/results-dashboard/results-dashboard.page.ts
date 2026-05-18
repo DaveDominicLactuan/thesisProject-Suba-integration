@@ -67,9 +67,9 @@ export class ResultsDashboardPage implements OnInit {
   ) {}
 
   ngOnInit(): void {
-    this.route.queryParams.subscribe((params) => {
+    this.route.queryParams.subscribe(async (params) => {
       this.sessionId = params['sessionId'] || null;
-      this.loadData();
+      await this.loadData();
       try {
         this.printSessionObjects();
       } catch (e) {
@@ -88,7 +88,10 @@ export class ResultsDashboardPage implements OnInit {
      
   }
 
-  private loadData(): void {
+  private async loadData(): Promise<void> {
+    // Check sessionStorage for session data from feedback-page
+    this.retrieveAndLogSessionFromStorage();
+    
     //Read every stored image and set a working imgs list (defaults to all).
     const all = this.storage.getAllImages();
     let imgs: StoredImage[] = all;
@@ -114,6 +117,9 @@ export class ResultsDashboardPage implements OnInit {
           seen.add(key);
           return true;
         });
+        // Hydrate image payloads so withBoxes survives navigation to PDF.
+        imgs = await this.hydrateSessionImages(imgs);
+
         //Save the sessions available images and select all of them by default 
         // (selected keys used for later aggregation).
         this.availableSessionImages = imgs;
@@ -150,6 +156,142 @@ export class ResultsDashboardPage implements OnInit {
   }
 
   /**
+   * Retrieve and log session data from sessionStorage for debugging.
+   * Images are retrieved in descending order as stored.
+   */
+  private retrieveAndLogSessionFromStorage(): void {
+    try {
+      const sessionData = sessionStorage.getItem('feedbackPageSession');
+      if (sessionData) {
+        const parsed = JSON.parse(sessionData);
+        console.group('[ResultsDashboard] 📋 Retrieved session from sessionStorage (descending order)');
+        console.log('Session ID:', parsed.selectedSessionId);
+        console.log('Image count:', parsed.imageCount);
+        console.log('Timestamp:', parsed.timestamp);
+        if (parsed.imagePaths && Array.isArray(parsed.imagePaths)) {
+          console.log('Image order:', parsed.imagePaths.map((img: any, i: number) => `${i}: ${img.filename || 'unnamed'}`).join(', '));
+        }
+        console.log('Full session data:', parsed);
+        console.groupEnd();
+      } else {
+        console.log('[ResultsDashboard] No session data found in sessionStorage');
+      }
+    } catch (err) {
+      console.warn('[ResultsDashboard] Failed to retrieve session from sessionStorage', err);
+    }
+  }
+
+  private async hydrateSessionImages(images: StoredImage[]): Promise<StoredImage[]> {
+    const hydrated: StoredImage[] = [];
+
+    for (const img of images || []) {
+      try {
+        const copy: any = { ...img };
+
+        // Hydrate original if missing
+        if ((!copy.original || copy.original.trim().length === 0) && (copy.originalS3Key || copy.storagePath || copy.originalS3Url || copy.storageUrl)) {
+          const originalKey = copy.originalS3Key || copy.storagePath || copy.originalS3Url || copy.storageUrl;
+          try {
+            const fetchedOriginal = await this.storage.fetchS3ObjectAsDataUrl(originalKey);
+            if (fetchedOriginal) copy.original = fetchedOriginal;
+          } catch (e) {
+            console.warn('[ResultsDashboard] Failed to hydrate original image', copy.filename, e);
+          }
+        }
+
+        // Hydrate withBoxes from S3 if available
+        if ((!copy.withBoxes || (typeof copy.withBoxes === 'string' && copy.withBoxes.trim().length === 0)) && (copy.withBoxesS3Key || copy.withBoxesStoragePath || copy.withBoxesS3Url || copy.withBoxesStorageUrl)) {
+          const withBoxesKey = copy.withBoxesS3Key || copy.withBoxesStoragePath || copy.withBoxesS3Url || copy.withBoxesStorageUrl;
+          try {
+            const fetchedWithBoxes = await this.storage.fetchS3ObjectAsDataUrl(withBoxesKey);
+            if (fetchedWithBoxes) copy.withBoxes = fetchedWithBoxes;
+          } catch (e) {
+            console.warn('[ResultsDashboard] Failed to hydrate withBoxes image', copy.filename, e);
+          }
+        }
+
+        // If withBoxes still missing but we have boxes and an original image, generate it locally
+        if ((!copy.withBoxes || (typeof copy.withBoxes === 'string' && copy.withBoxes.trim() === '')) && copy.boxes && copy.boxes.length > 0 && copy.original) {
+          try {
+            const generated = await this.createWithBoxesDataUrl(copy.original, copy.boxes);
+            if (generated) {
+              copy.withBoxes = generated;
+              try {
+                const key = copy.filename || this.getImageKey(copy) || '';
+                if (key) {
+                  const existingEntry = this.storage.getEntryForImage(key) as any || {};
+                  await this.storage.setEntryForImage(key, {
+                    ...existingEntry,
+                    withBoxes: generated
+                  });
+                }
+              } catch (e) {
+                console.warn('[ResultsDashboard] Failed to persist generated withBoxes for', this.getImageKey(copy), e);
+              }
+            }
+          } catch (e) {
+            console.warn('[ResultsDashboard] Failed to generate withBoxes', copy.filename, e);
+          }
+        }
+
+        hydrated.push(copy as StoredImage);
+      } catch (err) {
+        console.warn('[ResultsDashboard] hydrateSessionImages: skipping image due to error', err);
+      }
+    }
+
+    return hydrated;
+  }
+
+  // Create an annotated copy of an original data URL by drawing boxes on a canvas.
+  private async createWithBoxesDataUrl(originalDataUrl: string, boxes: any[]): Promise<string> {
+    return new Promise((resolve) => {
+      try {
+        const img = new Image();
+        img.crossOrigin = 'Anonymous';
+        img.onload = () => {
+          try {
+            const canvas = document.createElement('canvas');
+            canvas.width = img.width;
+            canvas.height = img.height;
+            const ctx = canvas.getContext('2d');
+            if (!ctx) return resolve(originalDataUrl);
+            ctx.drawImage(img, 0, 0);
+            ctx.lineWidth = Math.max(2, Math.round(Math.min(img.width, img.height) * 0.01));
+            ctx.strokeStyle = 'rgba(255,0,0,0.9)';
+            ctx.fillStyle = 'rgba(255,0,0,0.12)';
+            (boxes || []).forEach((b: any) => {
+              let x = b.x ?? b.left ?? 0;
+              let y = b.y ?? b.top ?? 0;
+              let w = b.w ?? b.width ?? b.wid ?? 0;
+              let h = b.h ?? b.height ?? b.hei ?? 0;
+              // If normalized coords (<=1) convert to pixels
+              if (x <= 1 && y <= 1 && w <= 1 && h <= 1) {
+                x = x * img.width;
+                y = y * img.height;
+                w = w * img.width;
+                h = h * img.height;
+              }
+              ctx.strokeRect(x, y, w, h);
+              ctx.fillRect(x, y, w, h);
+            });
+            const dataUrl = canvas.toDataURL('image/png');
+            resolve(dataUrl);
+          } catch (e) {
+            console.warn('[ResultsDashboard] canvas draw failed', e);
+            resolve(originalDataUrl);
+          }
+        };
+        img.onerror = () => resolve(originalDataUrl);
+        img.src = originalDataUrl;
+      } catch (e) {
+        console.warn('[ResultsDashboard] createWithBoxesDataUrl top-level error', e);
+        resolve(originalDataUrl);
+      }
+    });
+  }
+
+  /**
    * Print the current session objects to the console for debugging.
    */
   private printSessionObjects(): void {
@@ -169,6 +311,26 @@ export class ResultsDashboardPage implements OnInit {
       console.log('------------------------------------------');
     } catch (err) {
       console.warn('Error while printing session objects:', err);
+    }
+  }
+
+  /**
+   * Count session images whose status indicates prediction failure.
+   * Considers `statusMessage` containing "Prediction failed" or "No prediction" (case-insensitive).
+   */
+  getFailedImagesProcessedCount(): number {
+    try {
+      if (!this.availableSessionImages || this.availableSessionImages.length === 0) return 0;
+      const count = this.availableSessionImages.reduce((acc, img) => {
+        const s = (img as any)?.statusMessage || '';
+        const lower = (s || '').toString().toLowerCase();
+        if (lower.includes('prediction failed') || lower.includes('no prediction')) return acc + 1;
+        return acc;
+      }, 0);
+      return count;
+    } catch (err) {
+      console.warn('[ResultsDashboard] getFailedImagesProcessedCount failed', err);
+      return 0;
     }
   }
 

@@ -49,7 +49,7 @@
           </div>
           <div class="board-item">
             <div class="board-label">Failed Images Processed</div>
-            <div class="board-value">{{ stats.totalImages }}</div>
+            <div class="board-value">{{ getFailedImagesProcessedCount() }}</div>
             <div class="board-caption">Total</div>
           </div>
         </div>
@@ -228,12 +228,12 @@
 <!-- Export button at the top right corner -->
 <div class="export-button-container">
   <button class="export-top-btn" type="button" (click)="ExportPDF()">
-    <img src="assets/exportIcon.png" alt="Export" class="export-top-icon" />
+    <img src="assets/shareIconBlack.png" alt="Export" class="export-top-icon" />
   </button>
 </div>
 
      <div class="back-button-container">
       <button class="back-btn" type="button" (click)="onBack()">
-        <img src="assets/shareIconBlack.png" alt="Back" class="back-icon" />
+        <img src="assets/back.png" alt="Back" class="back-icon" />
       </button>
     </div>

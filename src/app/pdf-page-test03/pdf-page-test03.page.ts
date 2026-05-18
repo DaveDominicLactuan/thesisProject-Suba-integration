@@ -51,6 +51,9 @@ export class PdfPageTest03Page {
       await this.platform.ready();
 
       console.log('Platform:', this.platform.platforms());
+      
+      // Retrieve and log session data from sessionStorage for debugging
+      this.retrieveAndLogSessionFromStorage();
 
       // Read incoming sessionId from query params and then proceed
       this.route.queryParams.subscribe(async (params) => {
@@ -72,44 +75,67 @@ export class PdfPageTest03Page {
           }
         }
 
-        // Try to obtain passed images from navigation extras or history.state
+        // Try to obtain passed images from multiple sources (in order of priority):
+        // 1. sessionStorage (sorted from feedback-page)
+        // 2. Navigation extras state
+        // 3. History state
+        // 4. ImageStorageService by sessionId
         try {
-          //Attempts to read images passed via Angular Router navigation extras 
-          //(this.router.getCurrentNavigation()?.extras?.state). If present, stores them in sessionImages.
-          const navImages = this.router.getCurrentNavigation()?.extras?.state as any;
-          if (navImages && navImages.images) {
-            this.sessionImages = navImages.images;
-            console.log('Loaded session images from navigation state:', this.sessionImages.length);
-          } else {
+          // First, try sessionStorage (contains sorted images from feedback-page)
+          let imagesLoaded = false;
+          try {
+            const storedData = sessionStorage.getItem('feedbackPageSession');
+            if (storedData) {
+              const parsed = JSON.parse(storedData);
+              if (parsed.imagePaths && Array.isArray(parsed.imagePaths) && parsed.imagePaths.length > 0) {
+                this.sessionImages = parsed.imagePaths;
+                console.log('[PDF ngOnInit] Loaded session images from sessionStorage (sorted, descending):', this.sessionImages.length, 'images');
+                imagesLoaded = true;
+              }
+            }
+          } catch (e) {
+            console.warn('[PDF ngOnInit] Failed to load images from sessionStorage:', e);
+          }
 
-            //If navigation extras didn't provide images, check the 
-            // browser/history state (window.history.state) for an images property and use it if found.
-            const hist = (window as any).history?.state || {};
-            if (hist && hist.images) {
-              this.sessionImages = hist.images;
-              console.log('Loaded session images from history.state:', this.sessionImages.length);
-
-              //load from service by sessionId if navigation or history didn't provide images, attempt 
-              //to load a stored sesion, then reads session data and maps image keys to entries with 
-              //getEntryForImage, and assigns them to sessionImages
-            } else if (this.sessionId) {
-              // Try loading the session images from persistent storage by sessionId
-              try {
-                const s = this.imageStorage.getSession(this.sessionId);
-                if (s && Array.isArray(s.imageKeys) && s.imageKeys.length > 0) {
-                  const imgs = s.imageKeys.map((k: string) => this.imageStorage.getEntryForImage(k)).filter((x: any) => !!x);
-                  this.sessionImages = imgs as any[];
-                  console.log('Loaded session images from ImageStorageService:', this.sessionImages.length);
-                } else {
-                  console.warn('No session entry or no imageKeys for sessionId', this.sessionId);
-                }
-              } catch (err) {
-                console.warn('Failed to load session images from ImageStorageService', err);
+          // If sessionStorage didn't provide images, try navigation/history state
+          if (!imagesLoaded) {
+            //Attempts to read images passed via Angular Router navigation extras 
+            //(this.router.getCurrentNavigation()?.extras?.state). If present, stores them in sessionImages.
+            const navImages = this.router.getCurrentNavigation()?.extras?.state as any;
+            if (navImages && navImages.images) {
+              this.sessionImages = navImages.images;
+              console.log('Loaded session images from navigation state:', this.sessionImages.length);
+              imagesLoaded = true;
+            } else {
+              //If navigation extras didn't provide images, check the 
+              // browser/history state (window.history.state) for an images property and use it if found.
+              const hist = (window as any).history?.state || {};
+              if (hist && hist.images) {
+                this.sessionImages = hist.images;
+                console.log('Loaded session images from history.state:', this.sessionImages.length);
+                imagesLoaded = true;
               }
             }
           }
+
+          // If still no images, try loading from service by sessionId
+          if (!imagesLoaded && this.sessionId) {
+            // Try loading the session images from persistent storage by sessionId
+            try {
+              const s = this.imageStorage.getSession(this.sessionId);
+              if (s && Array.isArray(s.imageKeys) && s.imageKeys.length > 0) {
+                const imgs = s.imageKeys.map((k: string) => this.imageStorage.getEntryForImage(k)).filter((x: any) => !!x);
+                this.sessionImages = imgs as any[];
+                console.log('Loaded session images from ImageStorageService:', this.sessionImages.length);
+              } else {
+                console.warn('No session entry or no imageKeys for sessionId', this.sessionId);
+              }
+            } catch (err) {
+              console.warn('Failed to load session images from ImageStorageService', err);
+            }
+          }
         } catch (e) {
-          console.warn('Could not read navigation state for images', e);
+          console.warn('Could not read images from any source', e);
         }
 
         // Print session objects for debugging, then preview PDF
@@ -157,6 +183,33 @@ export class PdfPageTest03Page {
       }
     } catch (e) {}
     this.backButtonSub = null;
+  }
+
+  /**
+   * Retrieve and log session data from sessionStorage for debugging.
+   * Uses this data for PDF generation if available.
+   * Images are retrieved in descending order as stored.
+   */
+  private retrieveAndLogSessionFromStorage(): void {
+    try {
+      const sessionData = sessionStorage.getItem('feedbackPageSession');
+      if (sessionData) {
+        const parsed = JSON.parse(sessionData);
+        console.group('[PdfPageTest03] 📋 Retrieved session from sessionStorage (descending order)');
+        console.log('Session ID:', parsed.selectedSessionId);
+        console.log('Image count:', parsed.imageCount);
+        console.log('Timestamp:', parsed.timestamp);
+        if (parsed.imagePaths && Array.isArray(parsed.imagePaths)) {
+          console.log('Image order:', parsed.imagePaths.map((img: any, i: number) => `${i}: ${img.filename || 'unnamed'}`).join(', '));
+        }
+        console.log('Full session data:', parsed);
+        console.groupEnd();
+      } else {
+        console.log('[PdfPageTest03] No session data found in sessionStorage');
+      }
+    } catch (err) {
+      console.warn('[PdfPageTest03] Failed to retrieve session from sessionStorage', err);
+    }
   }
 
     /**
@@ -392,20 +445,208 @@ export class PdfPageTest03Page {
      // Returns a promise that resolves to a Blob
      // allow for generation of pdf and store in blob
      
-    private generatePdfBlob(): Promise<Blob> {
+    private async generatePdfBlob(): Promise<Blob> {
 
-      //Wraps the pdfMake callback-style API in a Promise so callers can await a Blob.
-      return new Promise((resolve, reject) => {
+      // Ensure any image sources that are not data URLs are converted
+      // to base64 data URLs and their dimensions measured so pdfMake
+      // renders them correctly (especially `withBoxes` images).
+      const originalSessionImages = this.sessionImages;
+      try {
+        if (Array.isArray(this.sessionImages) && this.sessionImages.length > 0) {
+          const processed: any[] = [];
+          for (const img of this.sessionImages) {
+            try {
+              const extractedOriginal = this.extractOriginalImage(img);
+              const extractedBoxed = this.extractBoxedImage(img);
 
-        //Builds the PDF object from the consolidated document definition (getDocumentDefinition()).
+              const originalData = extractedOriginal ? await this.ensureImageDataUrl(extractedOriginal) : null;
+              let boxedData = extractedBoxed ? await this.ensureImageDataUrl(extractedBoxed) : null;
+
+              if ((!boxedData || boxedData.trim().length === 0) && (img?.withBoxesS3Key || img?.withBoxesStoragePath || img?.withBoxesS3Url || img?.withBoxesStorageUrl)) {
+                const boxedCandidate = img?.withBoxesS3Key || img?.withBoxesStoragePath || img?.withBoxesS3Url || img?.withBoxesStorageUrl;
+                try {
+                  const fetchedBoxed = await this.imageStorage.fetchS3ObjectAsDataUrl(boxedCandidate);
+                  if (fetchedBoxed) {
+                    boxedData = fetchedBoxed;
+                  }
+                } catch (e) {
+                  console.warn('[PDF] Failed to hydrate withBoxes from S3 key', boxedCandidate, e);
+                }
+              }
+
+              // If boxedData still missing but boxes exist, try to generate an annotated image from the original
+              if ((!boxedData || boxedData.trim().length === 0) && img?.boxes && img.boxes.length > 0 && originalData) {
+                try {
+                  const generated = await this.createWithBoxesDataUrl(originalData, img.boxes);
+                  if (generated) {
+                    boxedData = generated;
+                    // try to persist back to storage so downstream pages can reuse
+                    try {
+                      const key = img.filename || img.original || img.storagePath || img.originalS3Key || '';
+                      if (key) {
+                        const existingEntry: any = this.imageStorage.getEntryForImage(key) || {};
+                        const mergedEntry: any = {
+                          ...existingEntry,
+                          withBoxes: generated
+                        };
+                        await this.imageStorage.setEntryForImage(key, mergedEntry);
+                      }
+                    } catch (e) {
+                      console.warn('[PDF] Failed to persist generated withBoxes for', img.filename, e);
+                    }
+                  }
+                } catch (e) {
+                  console.warn('[PDF] createWithBoxesDataUrl failed', e);
+                }
+              }
+
+              // Measure dimensions if we have data URLs
+              const dimsOriginal = originalData ? await this.getImageDimensions(originalData).catch(() => null) : null;
+              const dimsBoxed = boxedData ? await this.getImageDimensions(boxedData).catch(() => null) : null;
+
+              const copy = { ...img };
+              if (originalData) copy.original = originalData;
+              if (boxedData) copy.withBoxes = boxedData;
+              if (dimsOriginal) {
+                copy.originalWidth = dimsOriginal.width;
+                copy.originalHeight = dimsOriginal.height;
+              }
+              if (dimsBoxed) {
+                copy.withBoxesWidth = dimsBoxed.width;
+                copy.withBoxesHeight = dimsBoxed.height;
+              }
+
+              processed.push(copy);
+            } catch (e) {
+              console.warn('Failed processing an image for PDF generation', e);
+              processed.push(img);
+            }
+          }
+
+          // Temporarily replace sessionImages used by getDocumentDefinition
+          this.sessionImages = processed;
+        }
+
+        // Build PDF and return blob
+        const pdfDoc = pdfMake.createPdf(this.getDocumentDefinition());
+        const blob: Blob = await new Promise((resolve, reject) => {
+          try {
+            pdfDoc.getBlob((b: Blob) => resolve(b));
+          } catch (err) {
+            reject(err);
+          }
+        });
+
+        return blob;
+      } finally {
+        // Restore original sessionImages to avoid side-effects
+        this.sessionImages = originalSessionImages;
+      }
+    }
+
+    /**
+     * Convert a URL/blob/file-like source to a base64 data URL when needed.
+     * If source is already a data URL, it's returned unchanged.
+     */
+    private async ensureImageDataUrl(src: string): Promise<string> {
+      try {
+        if (!src || typeof src !== 'string') throw new Error('invalid-src');
+
+        // Already a data URL
+        if (src.startsWith('data:')) return src;
+
+        // blob: or http(s) or relative path - try fetching
         try {
-          const pdfDoc = pdfMake.createPdf(this.getDocumentDefinition());
+          const resp = await fetch(src);
+          if (!resp.ok) throw new Error('fetch-failed');
+          const blob = await resp.blob();
+          return await this.blobToDataURL(blob);
+        } catch (e) {
+          // Fetch may fail for file:// or platform-specific paths. Try fallback: if string contains base64 payload
+          const base64Match = src.match(/base64,(.*)$/);
+          if (base64Match) return 'data:image/png;base64,' + base64Match[1];
+          // As final fallback return the original string so downstream code may still attempt to use it
+          return src;
+        }
+      } catch (err) {
+        console.warn('ensureImageDataUrl failed for src:', src, err);
+        return src;
+      }
+    }
 
-          //Calls pdfDoc.getBlob (async callback) and resolves 
-          // the outer Promise with the resulting Blob.
-          pdfDoc.getBlob((blob: Blob) => resolve(blob));
-        } catch (error) {
-          reject(error);
+    private blobToDataURL(blob: Blob): Promise<string> {
+      return new Promise((resolve, reject) => {
+        try {
+          const reader = new FileReader();
+          reader.onloadend = () => {
+            resolve(reader.result as string);
+          };
+          reader.onerror = (e) => reject(e);
+          reader.readAsDataURL(blob);
+        } catch (e) {
+          reject(e);
+        }
+      });
+    }
+
+    private getImageDimensions(dataUrl: string): Promise<{ width: number; height: number }> {
+      return new Promise((resolve, reject) => {
+        try {
+          const img = new Image();
+          img.onload = () => {
+            resolve({ width: img.naturalWidth || img.width, height: img.naturalHeight || img.height });
+          };
+          img.onerror = (e) => reject(e);
+          img.src = dataUrl;
+        } catch (e) {
+          reject(e);
+        }
+      });
+    }
+
+    // Create an annotated copy of an original data URL by drawing boxes on a canvas.
+    private async createWithBoxesDataUrl(originalDataUrl: string, boxes: any[]): Promise<string> {
+      return new Promise((resolve) => {
+        try {
+          const img = new Image();
+          img.crossOrigin = 'Anonymous';
+          img.onload = () => {
+            try {
+              const canvas = document.createElement('canvas');
+              canvas.width = img.width;
+              canvas.height = img.height;
+              const ctx = canvas.getContext('2d');
+              if (!ctx) return resolve(originalDataUrl);
+              ctx.drawImage(img, 0, 0);
+              ctx.lineWidth = Math.max(2, Math.round(Math.min(img.width, img.height) * 0.01));
+              ctx.strokeStyle = 'rgba(255,0,0,0.9)';
+              ctx.fillStyle = 'rgba(255,0,0,0.12)';
+              (boxes || []).forEach((b: any) => {
+                let x = b.x ?? b.left ?? 0;
+                let y = b.y ?? b.top ?? 0;
+                let w = b.w ?? b.width ?? b.wid ?? 0;
+                let h = b.h ?? b.height ?? b.hei ?? 0;
+                if (x <= 1 && y <= 1 && w <= 1 && h <= 1) {
+                  x = x * img.width;
+                  y = y * img.height;
+                  w = w * img.width;
+                  h = h * img.height;
+                }
+                ctx.strokeRect(x, y, w, h);
+                ctx.fillRect(x, y, w, h);
+              });
+              const dataUrl = canvas.toDataURL('image/png');
+              resolve(dataUrl);
+            } catch (e) {
+              console.warn('[PDF] canvas draw failed', e);
+              resolve(originalDataUrl);
+            }
+          };
+          img.onerror = () => resolve(originalDataUrl);
+          img.src = originalDataUrl;
+        } catch (e) {
+          console.warn('[PDF] createWithBoxesDataUrl top-level error', e);
+          resolve(originalDataUrl);
         }
       });
     }

@@ -1212,7 +1212,51 @@ export class ImageStorageService {
     if (!entry.filename || entry.filename === '') {
       entry.filename = this.generateImageFilename(entry.sessionId, entry.timestamp);
     }
-    
+
+    // Preserve any existing non-empty in-memory image payloads so a partial
+    // update cannot wipe out original/withBoxes data that downstream pages need.
+    const existing = this.images.find(i => i.filename === imageKey);
+    if (existing) {
+      if ((!entry.original || entry.original.trim().length === 0) && existing.original && existing.original.trim().length > 0) {
+        entry.original = existing.original;
+      }
+
+      if ((!entry.withBoxes || entry.withBoxes.trim().length === 0) && existing.withBoxes && existing.withBoxes.trim().length > 0) {
+        entry.withBoxes = existing.withBoxes;
+      }
+
+      if ((!entry.storagePath || entry.storagePath.trim().length === 0) && existing.storagePath) {
+        entry.storagePath = existing.storagePath;
+      }
+      if ((!entry.storageUrl || entry.storageUrl.trim().length === 0) && existing.storageUrl) {
+        entry.storageUrl = existing.storageUrl;
+      }
+      if ((!entry.withBoxesStoragePath || entry.withBoxesStoragePath.trim().length === 0) && existing.withBoxesStoragePath) {
+        entry.withBoxesStoragePath = existing.withBoxesStoragePath;
+      }
+      if ((!entry.withBoxesStorageUrl || entry.withBoxesStorageUrl.trim().length === 0) && existing.withBoxesStorageUrl) {
+        entry.withBoxesStorageUrl = existing.withBoxesStorageUrl;
+      }
+      if ((!entry.originalS3Key || entry.originalS3Key.trim().length === 0) && existing.originalS3Key) {
+        entry.originalS3Key = existing.originalS3Key;
+      }
+      if ((!entry.originalS3Url || entry.originalS3Url.trim().length === 0) && existing.originalS3Url) {
+        entry.originalS3Url = existing.originalS3Url;
+      }
+      if ((!entry.withBoxesS3Key || entry.withBoxesS3Key.trim().length === 0) && existing.withBoxesS3Key) {
+        entry.withBoxesS3Key = existing.withBoxesS3Key;
+      }
+      if ((!entry.withBoxesS3Url || entry.withBoxesS3Url.trim().length === 0) && existing.withBoxesS3Url) {
+        entry.withBoxesS3Url = existing.withBoxesS3Url;
+      }
+    }
+
+    // If boxed data is still missing but we have an S3 reference, keep the
+    // reference so callers can rehydrate later instead of losing the key.
+    if ((!entry.withBoxes || entry.withBoxes.trim().length === 0) && !entry.withBoxesS3Key && entry.withBoxesStoragePath) {
+      entry.withBoxesS3Key = entry.withBoxesStoragePath;
+    }
+
     const idx = this.images.findIndex(i => i.filename === imageKey);
     if (idx !== -1) this.images[idx] = entry;
     else this.images.unshift(entry);

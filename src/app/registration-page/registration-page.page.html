@@ -101,29 +101,20 @@
       <div class="steps-container" *ngIf="selectedRole">
         <!-- Step indicator with progress -->
         <div class="step-indicator-section">
-          <p class="step-indicator-text">Step {{ step }} of 4 — Create your account</p>
+          <p class="step-indicator-text">Step {{ step }} of {{ maxStep }} — Create your account</p>
           <div class="progress-bar-wrapper">
-            <div class="progress-bar-fill" [ngStyle]="{'width': (step / 4) * 100 + '%'}"></div>
+            <div class="progress-bar-fill" [ngStyle]="{'width': (step / maxStep) * 100 + '%'}"></div>
           </div>
         </div>
 
         <!-- Stepper navigation UI with progress connectors -->
         <div class="stepper">
-          <div class="step-wrapper" role="button" tabindex="0" (click)="goToStep(1)" (keydown.enter)="goToStep(1)" [attr.aria-current]="step===1">
-            <div class="step" [class.active]="step === 1">1</div>
-            <div class="step-connector" [class.active]="step > 1"></div>
-          </div>
-          <div class="step-wrapper" role="button" tabindex="0" (click)="goToStep(2)" (keydown.enter)="goToStep(2)" [attr.aria-current]="step===2">
-            <div class="step" [class.active]="step === 2">2</div>
-            <div class="step-connector" [class.active]="step > 2"></div>
-          </div>
-          <div class="step-wrapper" role="button" tabindex="0" (click)="goToStep(3)" (keydown.enter)="goToStep(3)" [attr.aria-current]="step===3">
-            <div class="step" [class.active]="step === 3">3</div>
-            <div class="step-connector" [class.active]="step > 3"></div>
-          </div>
-          <div class="step-wrapper" role="button" tabindex="0" (click)="goToStep(4)" (keydown.enter)="goToStep(4)" [attr.aria-current]="step===4">
-            <div class="step" [class.active]="step === 4">4</div>
-          </div>
+          <ng-container *ngFor="let s of stepsArray">
+            <div class="step-wrapper" role="button" tabindex="0" (click)="goToStep(s)" (keydown.enter)="goToStep(s)" [attr.aria-current]="step===s">
+              <div class="step" [class.active]="step === s">{{ s }}</div>
+              <div *ngIf="s < maxStep" class="step-connector" [class.active]="step > s"></div>
+            </div>
+          </ng-container>
         </div>
 
         <!-- Role display section (visible when role selected) -->
@@ -196,12 +187,20 @@
             </div>
             <div *ngIf="f['engineeringID'].invalid && (f['engineeringID'].touched || submitted)" class="field-error">PRC Number is required for Engineer role.</div>
           </div>
-          <button class="signup-btn" type="button" (click)="nextStep()" [disabled]="isRegistering || f['firstName'].invalid || f['lastName'].invalid || (selectedRole === 'engineer' && f['engineeringID'].invalid)">Next</button>
+          
+          <!-- For regular users, collect phone number on step 2 -->
+          <div *ngIf="selectedRole === 'user'">
+            <div class="form-field" [class.invalid]="f['phoneNumber']?.invalid && (f['phoneNumber']?.touched || submitted)">
+              <ion-icon name="call-outline"></ion-icon>
+              <input type="tel" placeholder="Phone Number" formControlName="phoneNumber" />
+            </div>
+            <div *ngIf="f['phoneNumber']?.invalid && (f['phoneNumber']?.touched || submitted)" class="field-error">Phone number is required.</div>
+          </div>
+          <button class="signup-btn" type="button" (click)="nextStep()" [disabled]="isRegistering || f['firstName'].invalid || f['lastName'].invalid || (selectedRole === 'engineer' && f['engineeringID'].invalid) || (selectedRole === 'user' && f['phoneNumber']?.invalid)">Next</button>
           <button class="signup-btn" type="button" (click)="onBack()" [disabled]="isRegistering">Back</button>
         </div>
-
-        <!-- Step 3: Contact Info -->
-        <div *ngIf="step === 3" class="step-panel">
+        <!-- Step 3: Contact Info (engineer-only). For users, step 3 will be Confirm (maxStep=3) -->
+        <div *ngIf="step === 3 && selectedRole === 'engineer'" class="step-panel">
           <div class="form-field" [class.invalid]="f['phoneNumber']?.invalid && (f['phoneNumber']?.touched || submitted)">
             <ion-icon name="call-outline"></ion-icon>
             <input type="tel" placeholder="Phone Number" formControlName="phoneNumber" />
@@ -223,11 +222,6 @@
               </p>
             </div>
 
-            <!-- <div class="location-preview-chip">
-              <ion-icon name="navigate-circle-outline"></ion-icon>
-              <span>{{ officeLocationText }}</span>
-            </div> -->
-
             <div
               class="location-map-placeholder"
               [class.invalid]="(f['officeLatitude']?.invalid || f['officeLongitude']?.invalid) && (f['officeLatitude']?.touched || submitted)"
@@ -248,10 +242,10 @@
           <button class="signup-btn" type="button" (click)="onBack()" [disabled]="isRegistering">Back</button>
         </div>
 
-        <!-- Step 4: Confirm Details -->
-        <div *ngIf="step === 4" class="step-panel">
+        <!-- Confirm Details (final step: step === maxStep) -->
+        <div *ngIf="step === maxStep" class="step-panel">
           <div class="confirm-details">
-            <h3 style="text-align:center;margin-bottom:18px;">Confirm Your Details</h3>
+            <h3 style="text-align:center;margin-bottom:18px;color:black;">Confirm Your Details</h3>
             <div class="confirm-row"><span>First Name:</span> <span>{{ regForm.value.firstName }}</span></div>
             <div class="confirm-row"><span>Last Name:</span> <span>{{ regForm.value.lastName }}</span></div>
             <div class="confirm-row" *ngIf="selectedRole === 'engineer'"><span>PRC Number:</span> <span>{{ regForm.value.engineeringID }}</span></div>
