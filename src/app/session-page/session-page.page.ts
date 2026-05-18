@@ -272,21 +272,28 @@ private startUserSyncInBackground(userId: string): void {
         sessionsRaw = Array.isArray(s) ? s.slice() : [];
       }
 
-      // Filter sessions to only include those belonging to the current user
+      // Filter sessions to only include those belonging to the current user or received by the current user
       // Sessions without userId are legacy sessions (show them for backward compatibility)
       // Sessions with userId must match the current user's ID
+      // Sessions with ReceivedBy must match the current user's ID (for received/shared sessions)
       const filteredSessions = sessionsRaw.filter((sess: any) => {
         // If session has no userId, include it (backward compatibility with old sessions)
         if (!sess.userId) {
           console.log('[SessionPage.loadSessions] Including legacy session (no userId):', sess.id);
           return true;
         }
-        // If session has userId, only include if it matches current user
+        
+        // Check if session belongs to current user (original owner)
         const isOwnSession = sess.userId === currentUserID;
-        if (!isOwnSession) {
-          console.log('[SessionPage.loadSessions] Excluding session from different user:', sess.id, 'session userId:', sess.userId, 'current user:', currentUserID);
+        
+        // Check if session was received/shared with current user
+        const isReceivedSession = sess.ReceivedBy === currentUserID;
+        
+        if (!isOwnSession && !isReceivedSession) {
+          console.log('[SessionPage.loadSessions] Excluding session from different user:', sess.id, 'session userId:', sess.userId, 'ReceivedBy:', sess.ReceivedBy, 'current user:', currentUserID);
         }
-        return isOwnSession;
+        
+        return isOwnSession || isReceivedSession;
       });
 
       // compute image counts by comparing session imageKeys with stored images with 
@@ -1558,13 +1565,13 @@ private startUserSyncInBackground(userId: string): void {
   }
 
   /**
-   * Check if there are any sessions for the current user.
+   * Check if there are any sessions for the current user (owned or received).
    */
   hasUserSessions(): boolean {
     if (!this.sessions || this.sessions.length === 0) {
       return false;
     }
-    return this.sessions.some(session => session.userId === this.userID);
+    return this.sessions.some(session => session.userId === this.userID || session.ReceivedBy === this.userID);
   }
 
   /** Navigate to sessions list page. */

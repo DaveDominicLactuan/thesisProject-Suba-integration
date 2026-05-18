@@ -125,7 +125,7 @@
     <!-- Sessions list content -->
     <ng-container *ngIf="!isSessionsLoading">
       <ng-container *ngFor="let s of sessions">
-        <div *ngIf="s.userId === userID" class="session-item" [class.session-foreign]="s.ReceivedBy && s.OriginUserId && s.ReceivedBy !== s.OriginUserId" (click)="onSessionItemClick(s, $event)">
+        <div *ngIf="s.userId === userID || s.ReceivedBy === userID" class="session-item" [class.session-foreign]="s.ReceivedBy && s.OriginUserId && s.ReceivedBy !== s.OriginUserId" (click)="onSessionItemClick(s, $event)">
           <div class="session-left">
             <div class="session-name">{{ s.name }}</div>
             <div class="session-images">

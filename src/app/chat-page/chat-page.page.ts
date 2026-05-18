@@ -1142,6 +1142,45 @@ export class ChatPagePage implements OnInit, OnDestroy {
     return null;
   }
 
+  private sanitizeRecipientOrReceiverId(value: string | null | undefined): string {
+    if (typeof value !== 'string') {
+      console.warn('[ChatPage.sanitizeRecipientOrReceiverId] Non-string value received:', value);
+      return '';
+    }
+
+    const trimmed = value.trim();
+    if (trimmed.length <= 28) {
+      console.log('[ChatPage.sanitizeRecipientOrReceiverId] No sanitization needed (length <= 28)', {
+        input: value,
+        trimmed,
+        length: trimmed.length
+      });
+      return trimmed;
+    }
+
+    const underscoreIndex = trimmed.indexOf('_', 28);
+    if (underscoreIndex === -1) {
+      console.log('[ChatPage.sanitizeRecipientOrReceiverId] No underscore found at/after index 28. Keeping full value.', {
+        input: value,
+        trimmed,
+        length: trimmed.length
+      });
+      return trimmed;
+    }
+
+    const sanitized = trimmed.slice(0, underscoreIndex);
+    console.log('[ChatPage.sanitizeRecipientOrReceiverId] Sanitized value by removing suffix starting at underscore.', {
+      input: value,
+      trimmed,
+      length: trimmed.length,
+      underscoreIndex,
+      sanitized,
+      sanitizedLength: sanitized.length
+    });
+
+    return sanitized;
+  }
+
   private getStoredImageForAttachment(imageKey: string): any | null {
     if (!imageKey) {
       return null;
@@ -1396,8 +1435,8 @@ export class ChatPagePage implements OnInit, OnDestroy {
       return;
     }
 
-    const recipientUserId = this.resolveAttachmentShareRecipient();
-    if (!recipientUserId) {
+    const resolvedRecipientUserId = this.resolveAttachmentShareRecipient();
+    if (!resolvedRecipientUserId) {
       console.error('[ChatPage.confirmAttachmentShareCopy] Cannot determine recipient user ID', {
         activeChat: this.activeChat,
         activeChatKeys: this.activeChat ? Object.keys(this.activeChat) : [],
@@ -1409,8 +1448,40 @@ export class ChatPagePage implements OnInit, OnDestroy {
       return;
     }
 
-    this.receiverUserId = recipientUserId;
+    const recipientUserId = this.sanitizeRecipientOrReceiverId(resolvedRecipientUserId);
+    const receiverId = this.sanitizeRecipientOrReceiverId(this.receiverUserId || recipientUserId);
+
+    console.log('[ChatPage.confirmAttachmentShareCopy] Recipient/receiver ID sanitization result', {
+      resolvedRecipientUserId,
+      resolvedRecipientUserIdLength: resolvedRecipientUserId.length,
+      existingReceiverUserId: this.receiverUserId,
+      existingReceiverUserIdLength: (this.receiverUserId || '').toString().length,
+      sanitizedRecipientUserId: recipientUserId,
+      sanitizedRecipientUserIdLength: recipientUserId.length,
+      sanitizedReceiverId: receiverId,
+      sanitizedReceiverIdLength: receiverId.length,
+      recipientChanged: recipientUserId !== resolvedRecipientUserId,
+      receiverChanged: receiverId !== (this.receiverUserId || recipientUserId)
+    });
+
+    if (!recipientUserId || !receiverId) {
+      console.error('[ChatPage.confirmAttachmentShareCopy] Recipient/receiver ID sanitization resulted in empty value', {
+        resolvedRecipientUserId,
+        receiverUserId: this.receiverUserId
+      });
+      alert('Error: Invalid recipient identifier. Please reopen the chat and try again.');
+      return;
+    }
+
+    this.receiverUserId = receiverId;
     this.newRecepientUserId = recipientUserId;
+
+    console.log('[ChatPage.confirmAttachmentShareCopy] Stored sanitized IDs in component state', {
+      receiverUserId: this.receiverUserId,
+      receiverUserIdLength: (this.receiverUserId || '').toString().length,
+      newRecepientUserId: this.newRecepientUserId,
+      newRecepientUserIdLength: (this.newRecepientUserId || '').toString().length
+    });
 
     const service: any = this.imageStorage;
     const newSessionId = `s-${Date.now()}`;
@@ -1871,7 +1942,16 @@ export class ChatPagePage implements OnInit, OnDestroy {
     
       console.log("Selected Session", selectedSession, "Selected Session EngineerChecked", selectedSession.engineerCheckedSession);
 
-      await service.saveSessionWithImagesToFirestore(copiedSession.id, recipientUserId);
+      console.log('[ChatPage.confirmAttachmentShareCopy] Preparing Firestore session save with sanitized IDs', {
+        copiedSessionId: copiedSession.id,
+        copiedSessionUserId: copiedSession.userId,
+        receiverId,
+        recipientUserId,
+        receiverUserIdState: this.receiverUserId,
+        newRecepientUserIdState: this.newRecepientUserId
+      });
+
+      await service.saveSessionWithImagesToFirestore(copiedSession.id, receiverId);
 
       this.updateCopyProgress(100, 'Session copy completed');
 
@@ -1882,7 +1962,7 @@ export class ChatPagePage implements OnInit, OnDestroy {
       console.log('[ChatPage.confirmAttachmentShareCopy] Firestore image objects used for copy:', Array.from(firestoreImageObjects.values()));
       console.log('[ChatPage.confirmAttachmentShareCopy] Per-image upload status (original/withBoxes):', uploadStatusByImage);
 
-      console.log('Receiver user ID:', recipientUserId);
+      console.log('Receiver user ID:', receiverId);
       console.log('Current user ID:', currentUserId);
 
       const failedUploads = uploadStatusByImage.filter((item) => {
