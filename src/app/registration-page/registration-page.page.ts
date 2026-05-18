@@ -216,8 +216,10 @@ async onRegister() {
         userID: pendingUid,
         firstName: firstName ?? '',
         lastName: lastName ?? '',
+        phoneNumber: phoneNumber ?? '',
         prcNumber: engineeringID ?? '',
         email: email ?? '',
+        location: location ?? '',
         password: password ?? '', // Store hashed password later by admin? Or delete after review
         role: 'engineer',
         officeLocation: {
@@ -239,6 +241,7 @@ async onRegister() {
         userID: pendingUid,
         firstName: firstName ?? '',
         lastName: lastName ?? '',
+        phoneNumber: phoneNumber ?? '',
         role: 'engineer',
         status: 'pending',
         location: {
@@ -266,6 +269,7 @@ async onRegister() {
         firstName,
         lastName,
         engineeringID,
+        phoneNumber,
         pendingUid
       });
 

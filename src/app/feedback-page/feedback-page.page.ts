@@ -845,7 +845,7 @@ private lastImageTitleDebugAt: number = 0;
     for (let index = 0; index < imagesToHydrate.length; index++) {
       const img = imagesToHydrate[index];
       const imageName = img.filename || img.fileName || '(unnamed)';
-      this.sessionLoadingDetail = `Loading ${imageName} (${index + 1} of ${imagesToHydrate.length})`;
+      this.sessionLoadingDetail = `Loading image (${index + 1} of ${imagesToHydrate.length})`;
 
       // Build candidate list for original image - prioritize originalS3Key
       const originalCandidates = [
@@ -890,7 +890,7 @@ private lastImageTitleDebugAt: number = 0;
       // This ensures withBoxes are created from the fetched original image
       if (img.boxes && Array.isArray(img.boxes) && img.boxes.length > 0) {
         try {
-          this.sessionLoadingDetail = `Generating boxes for ${imageName} (${index + 1} of ${imagesToHydrate.length})`;
+          this.sessionLoadingDetail = `Generating boxes (${index + 1} of ${imagesToHydrate.length})`;
           console.log(`[FeedbackPage] Generating withBoxes for ${imageName} with ${img.boxes.length} bounding box(es)`);
           
           const withBoxesDataUrl = await this.drawBoxesOnImage(img.original, img.boxes, 128, 128);

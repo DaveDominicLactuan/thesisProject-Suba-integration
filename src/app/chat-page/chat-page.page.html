@@ -206,22 +206,24 @@
       </div>
         <div class="search-conv-list">
         <!-- show real engineers from Firestore when available, otherwise show placeholder results -->
-        <div class="search-conv-item" *ngFor="let result of searchOptions" (click)="selectEngineer(result)">
-          <div class="search-conv-avatar">
-            <img *ngIf="result.photoURL || result.avatar" [src]="result.photoURL || result.avatar" />
-            <div *ngIf="!(result.photoURL || result.avatar)" class="search-conv-initials">{{ result.initials || (result.firstName ? (result.firstName[0]+(result.lastName?result.lastName[0] : '')) : (result.name ? result.name[0] : 'U')) }}</div>
-          </div>
-          <div class="search-conv-info">
-            <div class="search-conv-title-row">
-              <span class="search-conv-name">{{ result.firstName ? (result.firstName + ' ' + (result.lastName||'')) : (result.name || result.email) }}</span>
-              <span class="search-conv-time">{{ result.time || '' }}</span>
+          <ng-container *ngFor="let result of searchOptions">
+          <div class="search-conv-item" *ngIf="((result?.role === 'engineer') || (result?.userRole === 'engineer')) && (result?.isAdmin !== 'true' && result?.isAdmin !== true)" (click)="selectEngineer(result)">
+              <div class="search-conv-avatar">
+                <img *ngIf="result.photoURL || result.avatar" [src]="result.photoURL || result.avatar" />
+                <div *ngIf="!(result.photoURL || result.avatar)" class="search-conv-initials">{{ result.initials || (result.firstName ? (result.firstName[0]+(result.lastName?result.lastName[0] : '')) : (result.name ? result.name[0] : 'U')) }}</div>
+              </div>
+              <div class="search-conv-info">
+                <div class="search-conv-title-row">
+                  <span class="search-conv-name">{{ result.firstName ? (result.firstName + ' ' + (result.lastName||'')) : (result.name || result.email) }}</span>
+                  <span class="search-conv-time">{{ result.time || '' }}</span>
+                </div>
+                <div class="search-conv-message">
+                  <span class="role-text">{{ result.lastMessage || result.subtitle || result.role || 'user' }}</span>
+                  <span class="email-text" *ngIf="result.email"> • {{ result.email }}</span>
+                </div>
+              </div>
             </div>
-            <div class="search-conv-message">
-              <span class="role-text">{{ result.lastMessage || result.subtitle || result.role || 'user' }}</span>
-              <span class="email-text" *ngIf="result.email"> • {{ result.email }}</span>
-            </div>
-          </div>
-        </div>
+          </ng-container>
         <div *ngIf="searchOptions.length === 0" class="no-results">No results found.</div>
       </div>
     </div>
