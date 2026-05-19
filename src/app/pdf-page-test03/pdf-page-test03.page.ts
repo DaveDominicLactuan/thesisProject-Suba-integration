@@ -33,6 +33,18 @@ export class PdfPageTest03Page {
     private savedPdfPath: string = ''; // Store the path for opening from notification
     // Images passed via navigation state or history.state
     sessionImages: any[] = [];
+    showSessionLoadingWindow: boolean = false;
+    sessionLoadingMessage: string = 'Fetching S3 images...';
+    sessionLoadingDetail: string = 'Preparing session images';
+    sessionLoadingCompleted: number = 0;
+    sessionLoadingTotal: number = 0;
+    sessionLoadingError: string = '';
+    sessionLoadingHasError: boolean = false;
+    private sessionLoadingWindowTimer: any;
+    showPdfGenerationWindow: boolean = false;
+    pdfGenerationMessage: string = 'Generating PDF page';
+    pdfGenerationDetail: string = 'Please wait while the PDF is prepared';
+    private pdfGenerationWindowTimer: any;
   
     constructor(
       private platform: Platform,
@@ -156,6 +168,16 @@ export class PdfPageTest03Page {
 
   ionViewWillLeave() {
     this.removeBackButtonHandler();
+    if (this.sessionLoadingWindowTimer) {
+      clearTimeout(this.sessionLoadingWindowTimer);
+      this.sessionLoadingWindowTimer = null;
+    }
+    this.showSessionLoadingWindow = false;
+    if (this.pdfGenerationWindowTimer) {
+      clearTimeout(this.pdfGenerationWindowTimer);
+      this.pdfGenerationWindowTimer = null;
+    }
+    this.showPdfGenerationWindow = false;
   }
 
   private registerBackButtonHandler() {
@@ -183,6 +205,41 @@ export class PdfPageTest03Page {
       }
     } catch (e) {}
     this.backButtonSub = null;
+  }
+
+  private getPdfGenerationMessage(): string {
+    const imageCount = Array.isArray(this.sessionImages) ? this.sessionImages.length : 0;
+    return imageCount > 1 ? 'Generating PDF pages' : 'Generating PDF page';
+  }
+
+  private async runPdfGenerationWindow<T>(task: () => Promise<T>, minimumDurationMs: number = 350): Promise<T> {
+    if (this.pdfGenerationWindowTimer) {
+      clearTimeout(this.pdfGenerationWindowTimer);
+      this.pdfGenerationWindowTimer = null;
+    }
+
+    this.showPdfGenerationWindow = true;
+    this.pdfGenerationMessage = this.getPdfGenerationMessage();
+    this.pdfGenerationDetail = 'Please wait while the PDF is prepared';
+
+    const startedAt = Date.now();
+    let result: T;
+
+    try {
+      result = await task();
+    } finally {
+      const elapsed = Date.now() - startedAt;
+      const remaining = Math.max(0, minimumDurationMs - elapsed);
+
+      this.pdfGenerationWindowTimer = setTimeout(() => {
+        this.showPdfGenerationWindow = false;
+        this.pdfGenerationMessage = 'Generating PDF page';
+        this.pdfGenerationDetail = 'Please wait while the PDF is prepared';
+        this.pdfGenerationWindowTimer = null;
+      }, remaining);
+    }
+
+    return result;
   }
 
   /**
@@ -336,13 +393,14 @@ export class PdfPageTest03Page {
           const imgPlainFallback = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
           const imgBoxFallback = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
     
-          const content: Content[] = [
-            { text: 'Crack', style: 'header', alignment: 'center', margin: [0, 0, 0, 0] },
-            { text: 'Damage', style: 'header', alignment: 'center', margin: [0, 0, 0, 0] },
-            { text: 'Report', style: 'header', alignment: 'center', margin: [0, 0, 0, 30] }
-          ];
+          const content: Content[] = [];
+
+          // Title appears only once at the beginning of the PDF.
+          content.push({ text: 'Crack', style: 'header', alignment: 'center', margin: [0, 0, 0, 0] });
+          content.push({ text: 'Damage', style: 'header', alignment: 'center', margin: [0, 0, 0, 0] });
+          content.push({ text: 'Report', style: 'header', alignment: 'center', margin: [0, 0, 0, 30] });
     
-          // If sessionImages exist, create one section per image
+          // If sessionImages exist, create one page per image with page breaks
           if (this.sessionImages && this.sessionImages.length > 0) {
             this.sessionImages.forEach((img: any, idx: number) => {
               const i = idx + 1;
@@ -402,6 +460,11 @@ export class PdfPageTest03Page {
                 columnGap: 10,
                 margin: [0, 0, 0, 20]
               });
+
+              // Add page break after each image section (except the last one)
+              if (idx < this.sessionImages.length - 1) {
+                content.push({ text: '', pageBreak: 'after', margin: [0, 0, 0, 0] });
+              }
             });
           } else {
             // no session images — keep a single placeholder block
@@ -604,6 +667,88 @@ export class PdfPageTest03Page {
       });
     }
 
+    /**
+     * Check if a rendered canvas is blank (mostly white/empty pixels)
+     * Useful for detecting pages with no content or images
+     */
+    private isCanvasBlank(canvas: HTMLCanvasElement, threshold: number = 0.95): boolean {
+      try {
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return true;
+        
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const data = imageData.data;
+        
+        let whitePixels = 0;
+        // Check RGBA values - count pixels that are nearly white (R≈255, G≈255, B≈255)
+        for (let i = 0; i < data.length; i += 4) {
+          const r = data[i];
+          const g = data[i + 1];
+          const b = data[i + 2];
+          if (r > 240 && g > 240 && b > 240) {
+            whitePixels++;
+          }
+        }
+        
+        const totalPixels = data.length / 4;
+        const whitenessRatio = whitePixels / totalPixels;
+        
+        // Page is blank if more than threshold% is white
+        return whitenessRatio > threshold;
+      } catch (err) {
+        console.warn('[PDF] Error analyzing canvas for blank pages:', err);
+        return false;
+      }
+    }
+
+    /**
+     * Check PDF pages for blank content
+     * Returns array of page numbers that are blank (1-indexed)
+     */
+    private async checkBlankPages(pdfBytes: Uint8Array): Promise<number[]> {
+      try {
+        const loadingTask = getDocument({ data: pdfBytes });
+        const pdf = await loadingTask.promise;
+        const numPages = pdf.numPages || 0;
+        const blankPages: number[] = [];
+        const screenWidth = window.innerWidth;
+        const canvasWidth = screenWidth * 0.95;
+        const outputScale = window.devicePixelRatio || 1;
+
+        for (let p = 1; p <= numPages; p++) {
+          try {
+            const page = await pdf.getPage(p);
+            const originalViewport = page.getViewport({ scale: 1.0 });
+            const scale = canvasWidth / originalViewport.width;
+            const viewport = page.getViewport({ scale });
+
+            const testCanvas = document.createElement('canvas');
+            const testCtx = testCanvas.getContext('2d')!;
+            testCanvas.width = Math.floor(viewport.width * outputScale);
+            testCanvas.height = Math.floor(viewport.height * outputScale);
+
+            if (outputScale !== 1) {
+              testCtx.setTransform(outputScale, 0, 0, outputScale, 0, 0);
+            }
+
+            await page.render({ canvasContext: testCtx, viewport }).promise;
+
+            if (this.isCanvasBlank(testCanvas)) {
+              blankPages.push(p);
+              console.warn(`[PDF] Page ${p} detected as blank`);
+            }
+          } catch (err) {
+            console.warn(`[PDF] Error checking page ${p} for blank content:`, err);
+          }
+        }
+
+        return blankPages;
+      } catch (err) {
+        console.warn('[PDF] Error checking blank pages:', err);
+        return [];
+      }
+    }
+
     // Create an annotated copy of an original data URL by drawing boxes on a canvas.
     private async createWithBoxesDataUrl(originalDataUrl: string, boxes: any[]): Promise<string> {
       return new Promise((resolve) => {
@@ -662,125 +807,94 @@ export class PdfPageTest03Page {
         */
        async previewPdf() {
          try {
-           // Generate the PDF using the current document definition so it matches download behaviour
-           const pdfDoc = pdfMake.createPdf(this.getDocumentDefinition());
-           const blob: Blob = await new Promise((resolve, reject) => {
-             try {
-               pdfDoc.getBlob((b: Blob) => resolve(b));
-             } catch (err) {
-               reject(err);
-             }
-           });
-           const arrayBuffer = await blob.arrayBuffer();
-           const pdfBytes = new Uint8Array(arrayBuffer);
-           
-           const loadingTask = getDocument({ data: pdfBytes });
-           const pdf = await loadingTask.promise;
-     
-           const numPages = pdf.numPages || 1;
-           const containerEl = this.pdfContainer.nativeElement as HTMLDivElement;
-           containerEl.style.paddingTop = '0px';
-           containerEl.innerHTML = '';
-   
-           // Determine device width once
-           const screenWidth = window.innerWidth;
-           const canvasWidth = screenWidth * 0.95;
-   
-           // Render every page. If there are multiple session images, stack
-           // the rendered pages vertically in a single tall canvas so the
-           // document appears centered and vertically ordered.
-           const sessionCount = Array.isArray(this.sessionImages) ? this.sessionImages.length : 0;
-           let extraMultiplier;
-           if (sessionCount === 2) {
-             extraMultiplier = Math.max(1, sessionCount);
-           } else if (sessionCount >= 2) {
-             extraMultiplier = Math.max(1, sessionCount - 1);
-           } else {
-             extraMultiplier = 1;
-           }
-           const outputScale = window.devicePixelRatio || 1;
-   
-           if (extraMultiplier > 1) {
-             // Create one tall canvas that will contain all pages stacked vertically
-             // Use the first page to determine per-page pixel dimensions
-             const firstPage = await pdf.getPage(1);
-             const firstViewport = firstPage.getViewport({ scale: canvasWidth / firstPage.getViewport({ scale: 1.0 }).width });
-             const pagePixelWidth = Math.floor(firstViewport.width * outputScale);
-             const pagePixelHeight = Math.floor(firstViewport.height * outputScale);
-   
-             const mainCanvas = document.createElement('canvas');
-             const mainCtx = mainCanvas.getContext('2d')!;
-             mainCanvas.width = pagePixelWidth;
-             mainCanvas.height = pagePixelHeight * extraMultiplier;
-   
-             // CSS for centered, responsive display
-             mainCanvas.style.display = 'block';
-             mainCanvas.style.margin = '2px auto 0';
-             mainCanvas.style.marginTop = '10px auto 0';
-             mainCanvas.style.maxWidth = '95%';
-             mainCanvas.style.width = '95%';
-             mainCanvas.style.height = 'auto';
-   
-             // For each page, render into an offscreen canvas and blit into the main canvas
-             for (let p = 1; p <= numPages; p++) {
-               const page = await pdf.getPage(p);
-               const originalViewport = page.getViewport({ scale: 1.0 });
-               const scale = canvasWidth / originalViewport.width;
-               const viewport = page.getViewport({ scale });
-   
-               // Offscreen canvas for per-page rendering (pixel-sized)
-               const offCanvas = document.createElement('canvas');
-               const offCtx = offCanvas.getContext('2d')!;
-               offCanvas.width = Math.floor(viewport.width * outputScale);
-               offCanvas.height = Math.floor(viewport.height * outputScale);
-   
-               if (outputScale !== 1) {
-                 offCtx.setTransform(outputScale, 0, 0, outputScale, 0, 0);
+           let containerEl: HTMLDivElement | null = null;
+
+           await this.runPdfGenerationWindow(async () => {
+             // Generate the PDF using the current document definition so it matches download behaviour
+             const pdfDoc = pdfMake.createPdf(this.getDocumentDefinition());
+             const blob: Blob = await new Promise((resolve, reject) => {
+               try {
+                 pdfDoc.getBlob((b: Blob) => resolve(b));
+               } catch (err) {
+                 reject(err);
                }
-   
-               await page.render({ canvasContext: offCtx, viewport }).promise;
-   
-               // Compute vertical offset (in pixels) inside main canvas
-               const yOffset = (p - 1) * offCanvas.height;
-               mainCtx.drawImage(offCanvas, 0, yOffset);
-             }
-   
-             containerEl.appendChild(mainCanvas);
-           } else {
-             // Single or default behavior: render one canvas per page (existing behavior)
+             });
+             const arrayBuffer = await blob.arrayBuffer();
+             const pdfBytes = new Uint8Array(arrayBuffer);
+
+             // Check for blank pages in the background so preview rendering is not blocked.
+             void this.checkBlankPages(pdfBytes).then((blankPages) => {
+               if (blankPages.length > 0) {
+                 console.warn(`[PDF Preview] ${blankPages.length} blank page(s) detected:`, blankPages);
+               }
+             }).catch((err) => {
+               console.warn('[PDF Preview] Blank page scan failed:', err);
+             });
+
+             const loadingTask = getDocument({ data: pdfBytes });
+             const pdf = await loadingTask.promise;
+       
+             const numPages = pdf.numPages || 1;
+             containerEl = this.pdfContainer.nativeElement as HTMLDivElement;
+             containerEl.style.paddingTop = '0px';
+             containerEl.style.display = 'flex';
+             containerEl.style.flexDirection = 'column';
+             containerEl.style.alignItems = 'center';
+             containerEl.style.justifyContent = 'flex-start';
+             containerEl.style.gap = '12px';
+             containerEl.innerHTML = '';
+     
+             // Determine device width once
+             const screenWidth = window.innerWidth;
+             const canvasWidth = screenWidth * 0.95;
+     
+             const outputScale = window.devicePixelRatio || 1;
+
+             // Render each page individually to keep page count and display stable.
              for (let p = 1; p <= numPages; p++) {
                const page = await pdf.getPage(p);
                const originalViewport = page.getViewport({ scale: 1.0 });
                const scale = canvasWidth / originalViewport.width;
                const viewport = page.getViewport({ scale });
-   
+
                const canvas = document.createElement('canvas');
                const context = canvas.getContext('2d')!;
-   
+
                canvas.width = Math.floor(viewport.width * outputScale);
                canvas.height = Math.floor(viewport.height * outputScale);
-   
+
                // Keep canvas responsive and maintain aspect ratio
                canvas.style.display = 'block';
                canvas.style.margin = '2px auto 0';
                canvas.style.maxWidth = '95%';
                canvas.style.width = '95%';
                canvas.style.height = 'auto';
-   
+
+               const pageWrapper = document.createElement('div');
+               pageWrapper.style.display = 'flex';
+               pageWrapper.style.width = '100%';
+               pageWrapper.style.justifyContent = 'center';
+               pageWrapper.style.alignItems = 'center';
+               pageWrapper.appendChild(canvas);
+
                if (outputScale !== 1) {
                  context.setTransform(outputScale, 0, 0, outputScale, 0, 0);
                }
-   
+
                await page.render({ canvasContext: context, viewport }).promise;
-   
-               containerEl.appendChild(canvas);
+
+               containerEl.appendChild(pageWrapper);
              }
-           }
+           }, 350);
    
            // Safety guard: try to bring the container to the top of the viewport
            // Use a slight delay to allow layout to settle
            setTimeout(() => {
              try {
+               if (!containerEl) {
+                 return;
+               }
+
                // Preferred: bring container into view aligned to the top
                containerEl.scrollIntoView({ behavior: 'auto', block: 'start' });
    
@@ -834,7 +948,7 @@ export class PdfPageTest03Page {
     private async savePDF(fileName: string, usePublicDownloads = false): Promise<string> {
       try {
         //Generate PDF blob
-        const blob = await this.generatePdfBlob();
+        const blob = await this.runPdfGenerationWindow(() => this.generatePdfBlob(), 350);
 
         // Ensure permission for writing to external storage on older Android versions
         if (this.platform.is('android')) {
@@ -885,6 +999,7 @@ export class PdfPageTest03Page {
   
     /**
      * Download PDF - Native save for Android, browser download for web
+     * Checks for blank pages before downloading
      */
     async downloadPDF() {
       if (this.platform.is('hybrid') && this.platform.is('android')) {
@@ -905,8 +1020,10 @@ export class PdfPageTest03Page {
       } else {
         // Browser: Trigger download
         const fileName = this.sessionId ? `sample-${this.sessionId}.pdf` : 'sample.pdf';
-        const pdfDoc = pdfMake.createPdf(this.getDocumentDefinition());
-        pdfDoc.download(fileName);
+        await this.runPdfGenerationWindow(async () => {
+          const pdfDoc = pdfMake.createPdf(this.getDocumentDefinition());
+          pdfDoc.download(fileName);
+        }, 350);
         // Show success message for web
         await this.showDownloadNotification('sample.pdf');
       }

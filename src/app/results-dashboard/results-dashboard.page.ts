@@ -404,9 +404,9 @@ export class ResultsDashboardPage implements OnInit {
       if (corrected) {
         const boxCount = Array.isArray(corrected.boxes) && corrected.boxes.length > 0 ? corrected.boxes.length : 1;
         totalCracks += boxCount;
-        if (corrected.type) type[corrected.type] = (type[corrected.type] || 0) + boxCount;
-        if (corrected.severity) severity[corrected.severity] = (severity[corrected.severity] || 0) + boxCount;
-        if (corrected.shape) shape[corrected.shape] = (shape[corrected.shape] || 0) + boxCount;
+        if (corrected.type) type[corrected.type] = (type[corrected.type] || 0) + 1;
+        if (corrected.severity) severity[corrected.severity] = (severity[corrected.severity] || 0) + 1;
+        if (corrected.shape) shape[corrected.shape] = (shape[corrected.shape] || 0) + 1;
         return;
       }
 
@@ -428,9 +428,9 @@ export class ResultsDashboardPage implements OnInit {
       if (!p) return;
       const boxCount = Array.isArray((img as any).boxes) && (img as any).boxes.length > 0 ? (img as any).boxes.length : 1;
       totalCracks += boxCount;
-      if (p.type) type[p.type] = (type[p.type] || 0) + boxCount;
-      if (p.severity) severity[p.severity] = (severity[p.severity] || 0) + boxCount;
-      if (p.shape) shape[p.shape] = (shape[p.shape] || 0) + boxCount;
+      if (p.type) type[p.type] = (type[p.type] || 0) + 1;
+      if (p.severity) severity[p.severity] = (severity[p.severity] || 0) + 1;
+      if (p.shape) shape[p.shape] = (shape[p.shape] || 0) + 1;
     });
 
     //Finalize and save aggregated stats

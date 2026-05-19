@@ -70,7 +70,10 @@ sessionLoadingMessage: string = 'Fetching S3 images...';
 sessionLoadingDetail: string = 'Preparing session images';
 sessionLoadingCompleted: number = 0;
 sessionLoadingTotal: number = 0;
+sessionLoadingError: string = ''; // Error message if loading fails
+sessionLoadingHasError: boolean = false; // Track if an error occurred
 private sessionLoadingWindowTimer: any;
+private sessionLoadingErrorTimer: any; // Timer for auto-returning on error
 private backNavigationInProgress: boolean = false;
 private lastBackTapAt: number = 0;
 private lastImageTitleDebugAt: number = 0;
@@ -597,6 +600,10 @@ private lastImageTitleDebugAt: number = 0;
    * Converts storage entries to DisplayImage for UI.
    */
   async refreshDisplayedImages(): Promise<void> {
+    // Reset error state at the start of loading
+    this.sessionLoadingHasError = false;
+    this.sessionLoadingError = '';
+    
     //Setup service reference and clear imagePaths, so it can only reflect the newly 
     // loaded images from the session. avoids duplicates on repeated calls if function is 
     // called more than ounce. allows the placeholder when empty to run without issue or predictably
@@ -750,7 +757,19 @@ private lastImageTitleDebugAt: number = 0;
       
       //Top-level error handling
     } catch (err) {
-      console.warn('[FeedbackPage] refreshDisplayedImages failed', err);
+      console.error('[FeedbackPage] refreshDisplayedImages failed', err);
+      this.sessionLoadingHasError = true;
+      this.sessionLoadingError = 'Error loading session, Returning to session page';
+      this.sessionLoadingMessage = 'Error';
+      this.sessionLoadingDetail = this.sessionLoadingError;
+      
+      // Auto-return to session page after 2 seconds
+      if (this.sessionLoadingErrorTimer) {
+        clearTimeout(this.sessionLoadingErrorTimer);
+      }
+      this.sessionLoadingErrorTimer = setTimeout(() => {
+        this.goBack();
+      }, 2000);
     }
   }
 
@@ -765,23 +784,46 @@ private lastImageTitleDebugAt: number = 0;
     this.sessionLoadingDetail = 'Preparing session images';
     this.sessionLoadingCompleted = 0;
     this.sessionLoadingTotal = Math.max(this.imagePaths.length, 1);
+    this.sessionLoadingHasError = false;
+    this.sessionLoadingError = '';
     const startedAt = Date.now();
 
     try {
       await task();
-    } finally {
+    } catch (err) {
+      // If task fails, set error state
+      console.error('[FeedbackPage] Session loading task failed:', err);
+      this.sessionLoadingHasError = true;
+      this.sessionLoadingError = 'Error loading session, Returning to session page';
+      this.sessionLoadingMessage = 'Error';
+      this.sessionLoadingDetail = this.sessionLoadingError;
+      
+      // Wait at least 2 seconds before returning to allow user to see error
       const elapsed = Date.now() - startedAt;
-      const remaining = Math.max(0, minimumDurationMs - elapsed);
-
-      this.sessionLoadingWindowTimer = setTimeout(() => {
+      const waitTime = Math.max(2000, minimumDurationMs - elapsed);
+      
+      if (this.sessionLoadingErrorTimer) {
+        clearTimeout(this.sessionLoadingErrorTimer);
+      }
+      this.sessionLoadingErrorTimer = setTimeout(() => {
         this.showSessionLoadingWindow = false;
-        this.sessionLoadingMessage = 'Fetching S3 images...';
-        this.sessionLoadingDetail = 'Preparing session images';
-        this.sessionLoadingCompleted = 0;
-        this.sessionLoadingTotal = 0;
-        this.sessionLoadingWindowTimer = null;
-      }, remaining);
+        this.goBack();
+      }, waitTime);
+      return;
     }
+    
+    // Normal completion path (no error)
+    const elapsed = Date.now() - startedAt;
+    const remaining = Math.max(0, minimumDurationMs - elapsed);
+
+    this.sessionLoadingWindowTimer = setTimeout(() => {
+      this.showSessionLoadingWindow = false;
+      this.sessionLoadingMessage = 'Fetching S3 images...';
+      this.sessionLoadingDetail = 'Preparing session images';
+      this.sessionLoadingCompleted = 0;
+      this.sessionLoadingTotal = 0;
+      this.sessionLoadingWindowTimer = null;
+    }, remaining);
   }
 
   /**
@@ -1643,6 +1685,10 @@ addEntry() {
     if (this.sessionLoadingWindowTimer) {
       clearTimeout(this.sessionLoadingWindowTimer);
       this.sessionLoadingWindowTimer = null;
+    }
+    if (this.sessionLoadingErrorTimer) {
+      clearTimeout(this.sessionLoadingErrorTimer);
+      this.sessionLoadingErrorTimer = null;
     }
     this.showSessionLoadingWindow = false;
   }

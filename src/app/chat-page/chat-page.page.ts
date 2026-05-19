@@ -1978,6 +1978,28 @@ export class ChatPagePage implements OnInit, OnDestroy {
       this.isAttachmentCopyInProgress = false;
       this.attachmentDebugState = 'completed';
       this.selectedAttachmentForDebug = copiedSession;
+
+      // Send a confirmation message in the current chat with the new session id attached
+      try {
+        if (this.currentChatId) {
+          const senderId = this.auth3.getCurrentUser()?.uid || this.userID || '';
+          const sharedSessionId = copiedSession?.id || null;
+          await this.chatService.sendMessage(this.currentChatId, {
+            senderId,
+            receiverId,
+            text: 'File shared successfully',
+            sharedSessionId,
+            metadata: {
+              sharedSessionId
+            }
+          });
+          console.log('[ChatPage.confirmAttachmentShareCopy] Sent confirmation message with sharedSessionId', sharedSessionId);
+        } else {
+          console.warn('[ChatPage.confirmAttachmentShareCopy] No current chat to send confirmation message to.');
+        }
+      } catch (sendErr) {
+        console.warn('[ChatPage.confirmAttachmentShareCopy] Failed to send confirmation message', sendErr);
+      }
     } catch (error) {
       console.error('[ChatPage.confirmAttachmentShareCopy] Failed to copy session:', error);
       this.isAttachmentCopyInProgress = false;
@@ -2308,10 +2330,10 @@ export class ChatPagePage implements OnInit, OnDestroy {
       this.closeAttachmentSheet();
 
       // Auto-send success message
-      this.messageText = 'File shared successfully';
-      setTimeout(() => {
-        this.sendMessage();
-      }, 500);
+      // this.messageText = 'File shared successfully';
+      // setTimeout(() => {
+      //   this.sendMessage();
+      // }, 500);
 
       // Request location permission for location-based features
       console.log('[ChatPage] Requesting location permission for enhanced features...');
@@ -3869,6 +3891,38 @@ getMessageStatusLabel(message: Message): 'Sent' | 'Delivered' | 'Read' {
 
   // Additional methods can be added here
 onMsgBubbleTap(message: Message): void {
+  try {
+    console.log('[ChatPage.onMsgBubbleTap] senderId:', message?.senderId);
+    console.log('[ChatPage.onMsgBubbleTap] receiverId:', message?.receiverId);
+  } catch (e) {
+    console.warn('[ChatPage.onMsgBubbleTap] Failed to read senderId from message', e);
+  }
+
+  // If this message carries a shared session id, log it too (use any cast to avoid TS errors)
+  try {
+    const m: any = message as any;
+    const sessionId = m?.sharedSessionId || m?.copiedSessionId || m?.sessionId || m?.metadata?.sharedSessionId;
+    if (sessionId) {
+      const currentUserId = (this.auth3.getCurrentUser()?.uid || this.userID || '').toString().trim();
+      const messageReceiverId = (m?.receiverId || m?.metadata?.receiverId || '').toString().trim();
+
+      if (!currentUserId || !messageReceiverId || currentUserId !== messageReceiverId) {
+        console.log('[ChatPage.onMsgBubbleTap] Navigation blocked: receiverId does not match current user.', {
+          currentUserId,
+          messageReceiverId,
+          sessionId
+        });
+        return;
+      }
+
+      console.log('[ChatPage.onMsgBubbleTap] sharedSessionId:', sessionId);
+      this.goSessionPage(sessionId);
+      return;
+    }
+  } catch (e) {
+    console.warn('[ChatPage.onMsgBubbleTap] Failed to read sharedSessionId from message', e);
+  }
+
   this.tappedMessageId = this.tappedMessageId === (message.id ?? null) ? null : (message.id ?? null);
 }
 
@@ -4222,7 +4276,12 @@ onMsgBubbleTap(message: Message): void {
   }
 
   /** Navigate to sessions list page. */
-  goSessionPage() {
+  goSessionPage(sessionId?: string) {
+    if (sessionId) {
+      this.router.navigate(['/session-page'], { queryParams: { sessionId } });
+      return;
+    }
+
     this.router.navigate(['/session-page']);
     console.log('pdf 2 page');
   }

@@ -6,7 +6,45 @@
 
 <ion-content [fullscreen]="true">
   <!-- <ion-button expand="full" (click)="previewPdf()">Generate & Preview PDF</ion-button> -->
-  <div #pdfContainer style="display: flex; justify-content: center; align-items: flex-start; width: 100%; margin-top: 0; padding-top: 0;"></div>
+  <!-- Session Loading Modal (Outside ion-content for proper z-index/display on device) -->
+  <div *ngIf="showSessionLoadingWindow" class="session-loading-overlay" aria-live="polite" aria-busy="true">
+    <div class="session-loading-card">
+      <!-- Show spinner only if no error -->
+      <div *ngIf="!sessionLoadingHasError" class="session-loading-spinner" aria-hidden="true"></div>
+      
+      <!-- Error indicator if loading failed -->
+      <div *ngIf="sessionLoadingHasError" class="session-loading-error-icon" aria-hidden="true">
+        <span style="font-size: 48px; color: #ff3333;">⚠</span>
+      </div>
+      
+      <h2>{{ sessionLoadingMessage }}</h2>
+      <p>{{ sessionLoadingDetail }}</p>
+      
+      <!-- Progress Section (only show if not in error state) -->
+      <div class="session-loading-progress" *ngIf="sessionLoadingTotal > 0 && !sessionLoadingHasError">
+        <div class="session-loading-progress-track">
+          <div
+            class="session-loading-progress-fill"
+            [style.width.%]="(sessionLoadingCompleted / sessionLoadingTotal) * 100"
+          ></div>
+        </div>
+        <div class="session-loading-progress-text">
+          {{ sessionLoadingCompleted }} / {{ sessionLoadingTotal }} images
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- PDF Generation Modal -->
+  <div *ngIf="showPdfGenerationWindow" class="session-loading-overlay" aria-live="polite" aria-busy="true">
+    <div class="session-loading-card">
+      <div class="session-loading-spinner" aria-hidden="true"></div>
+      <h2>{{ pdfGenerationMessage }}</h2>
+      <p>{{ pdfGenerationDetail }}</p>
+    </div>
+  </div>
+
+  <div #pdfContainer style="display: flex; flex-direction: column; justify-content: flex-start; align-items: center; width: 100%; margin-top: 0; padding-top: 0;"></div>
 
   <div class="bottom-actions">
     <!-- Upload and Finish blocks (now siblings of the spinner block for even spacing) -->

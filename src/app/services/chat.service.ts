@@ -13,7 +13,14 @@ export interface Chat {
 export interface Message {
   id?: string;
   senderId: string;
+  receiverId?: string | null;
   text: string;
+  sharedSessionId?: string | null;
+  metadata?: {
+    sharedSessionId?: string | null;
+    receiverId?: string | null;
+    [key: string]: any;
+  };
   timestamp?: any;
   deliveredAt?: any;
   isRead?: boolean;
@@ -105,19 +112,50 @@ export class ChatService {
   }
 
   // Send a message using a write batch: add message doc and update parent chat lastMessage/timestamp
-  async sendMessage(chatId: string, message: { senderId: string; text: string; }): Promise<void> {
+  async sendMessage(
+    chatId: string,
+    message: {
+      senderId: string;
+      receiverId?: string | null;
+      text: string;
+      sharedSessionId?: string | null;
+      metadata?: Record<string, any>;
+      [key: string]: any;
+    }
+  ): Promise<void> {
     const chatRef = doc(this.firestore, 'chats', chatId);
     const msgsCol = collection(this.firestore, 'chats', chatId, 'messages');
     const messageRef = doc(msgsCol); // auto-id doc ref
 
     const batch = writeBatch(this.firestore);
-    batch.set(messageRef, {
+    const messagePayload: any = {
       senderId: message.senderId,
       text: message.text,
       timestamp: serverTimestamp(),
       deliveredAt: serverTimestamp(),
       isRead: false
-    });
+    };
+
+    // Preserve extra metadata for special system messages (e.g., shared session reference)
+    const sharedSessionId = message?.['sharedSessionId'] ?? message?.metadata?.['sharedSessionId'] ?? null;
+    const receiverId = message?.['receiverId'] ?? message?.metadata?.['receiverId'] ?? null;
+
+    if (receiverId) {
+      messagePayload.receiverId = receiverId;
+    }
+
+    if (sharedSessionId || receiverId) {
+      messagePayload.sharedSessionId = sharedSessionId;
+      messagePayload.metadata = {
+        ...(message.metadata || {}),
+        ...(sharedSessionId ? { sharedSessionId } : {}),
+        ...(receiverId ? { receiverId } : {})
+      };
+    } else if (message?.metadata && Object.keys(message.metadata).length > 0) {
+      messagePayload.metadata = message.metadata;
+    }
+
+    batch.set(messageRef, messagePayload);
     batch.set(chatRef, { lastMessage: message.text, timestamp: serverTimestamp() }, { merge: true });
     await batch.commit();
   }
