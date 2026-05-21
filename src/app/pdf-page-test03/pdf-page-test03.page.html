@@ -36,9 +36,9 @@
   </div>
 
   <!-- PDF Generation Modal -->
-  <div *ngIf="showPdfGenerationWindow" class="session-loading-overlay" aria-live="polite" aria-busy="true">
-    <div class="session-loading-card">
-      <div class="session-loading-spinner" aria-hidden="true"></div>
+  <div *ngIf="showPdfGenerationWindow" class="pdf-generation-overlay" aria-live="polite" aria-busy="true">
+    <div class="pdf-generation-card" role="status" aria-label="Generating PDF">
+      <div class="pdf-generation-spinner" aria-hidden="true"></div>
       <h2>{{ pdfGenerationMessage }}</h2>
       <p>{{ pdfGenerationDetail }}</p>
     </div>

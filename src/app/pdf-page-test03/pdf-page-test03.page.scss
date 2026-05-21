@@ -2,6 +2,87 @@
   font-family: 'Segoe UI Variable Text Semibold', sans-serif;
 }
 
+.pdf-generation-overlay {
+	position: fixed;
+	top: 0;
+	left: 0;
+	right: 0;
+	bottom: 0;
+	z-index: 20000;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	padding: 20px;
+	background: rgba(255, 255, 255, 0.7);
+	backdrop-filter: blur(8px);
+	-webkit-backdrop-filter: blur(8px);
+}
+
+.pdf-generation-card {
+	width: min(92vw, 360px);
+	min-height: 280px;
+	border-radius: 24px;
+	border: 1px solid transparent;
+	padding: 28px 22px;
+	text-align: center;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	background:
+		linear-gradient(#f3f3f3, #f3f3f3) padding-box,
+		linear-gradient(135deg, #ff6a3d, #f0a11f) border-box;
+	box-shadow: 0 16px 40px rgba(0, 0, 0, 0.14);
+}
+
+.pdf-generation-spinner {
+	width: 62px;
+	height: 62px;
+	margin-bottom: 18px;
+	border-radius: 50%;
+	border: 7px solid rgba(0, 0, 0, 0.12);
+	border-top-color: #f0a11f;
+	animation: pdfGenerationSpin 0.9s linear infinite;
+}
+
+.pdf-generation-card h2 {
+	margin: 0 0 8px;
+	color: #121212;
+	font-size: 2rem;
+	line-height: 1.05;
+	font-weight: 800;
+}
+
+.pdf-generation-card p {
+	margin: 0;
+	color: #1d1d1d;
+	font-size: 0.95rem;
+	line-height: 1.35;
+	font-weight: 600;
+}
+
+@keyframes pdfGenerationSpin {
+	to {
+		transform: rotate(360deg);
+	}
+}
+
+@media (max-width: 480px) {
+	.pdf-generation-card {
+		min-height: 250px;
+		padding: 24px 18px;
+	}
+
+	.pdf-generation-card h2,
+	.pdf-generation-card p {
+		font-size: 0.9rem;
+	}
+
+	.pdf-generation-card h2 {
+		font-size: 1.85rem;
+	}
+}
+
 .bottom-actions {
 	background: white;
 	/* Replace solid black border with gradient border */

@@ -43,7 +43,7 @@ export class PdfPageTest03Page {
     private sessionLoadingWindowTimer: any;
     showPdfGenerationWindow: boolean = false;
     pdfGenerationMessage: string = 'Generating PDF page';
-    pdfGenerationDetail: string = 'Please wait while the PDF is prepared';
+    pdfGenerationDetail: string = 'Please wait while the PDF is being generated';
     private pdfGenerationWindowTimer: any;
   
     constructor(
@@ -220,7 +220,7 @@ export class PdfPageTest03Page {
 
     this.showPdfGenerationWindow = true;
     this.pdfGenerationMessage = this.getPdfGenerationMessage();
-    this.pdfGenerationDetail = 'Please wait while the PDF is prepared';
+    this.pdfGenerationDetail = 'Please wait while the PDF is being generated';
 
     const startedAt = Date.now();
     let result: T;
@@ -234,7 +234,7 @@ export class PdfPageTest03Page {
       this.pdfGenerationWindowTimer = setTimeout(() => {
         this.showPdfGenerationWindow = false;
         this.pdfGenerationMessage = 'Generating PDF page';
-        this.pdfGenerationDetail = 'Please wait while the PDF is prepared';
+        this.pdfGenerationDetail = 'Please wait while the PDF is being generated';
         this.pdfGenerationWindowTimer = null;
       }, remaining);
     }

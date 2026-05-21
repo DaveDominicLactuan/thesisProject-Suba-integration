@@ -1559,8 +1559,8 @@ private startUserSyncInBackground(userId: string): void {
 
   onNavigateToMarker(marker: any): void {
     console.log('[SessionPage.onNavigateToMarker] ===== NAVIGATE TO MARKER START =====');
-    console.log('[SessionPage.onNavigateToMarker] Marker Latitude:', marker?.officeLocation?.latitude ?? marker?.location?.latitude);
-    console.log('[SessionPage.onNavigateToMarker] Marker Longitude:', marker?.officeLocation?.longitude ?? marker?.location?.longitude);
+    console.log('[SessionPage.onNavigateToMarker] Marker Latitude (raw):', marker?.officeLocation?.latitude ?? marker?.location?.latitude);
+    console.log('[SessionPage.onNavigateToMarker] Marker Longitude (raw):', marker?.officeLocation?.longitude ?? marker?.location?.longitude);
     console.log('[SessionPage.onNavigateToMarker] Full marker object:', marker);
     console.log('[SessionPage.onNavigateToMarker] ===== NAVIGATE TO MARKER END =====');
     
@@ -1568,6 +1568,9 @@ private startUserSyncInBackground(userId: string): void {
     const markerLocation = marker?.officeLocation ?? marker?.location;
     const markerLatitude = Number(markerLocation?.latitude);
     const markerLongitude = Number(markerLocation?.longitude);
+
+    // Log the final numeric coordinates derived from the selected marker
+    console.log('[SessionPage.onNavigateToMarker] Marker coords (numeric):', { latitude: markerLatitude, longitude: markerLongitude });
     if (Number.isFinite(markerLatitude) && Number.isFinite(markerLongitude)) {
       sessionStorage.setItem('selectedMarkerLocation', JSON.stringify({
         latitude: markerLatitude,
