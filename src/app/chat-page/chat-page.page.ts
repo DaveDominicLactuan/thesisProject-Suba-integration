@@ -5,7 +5,7 @@ import { AuthService } from '../services/auth.service';
 import { NavController, Platform } from '@ionic/angular';
 import { User } from 'firebase/auth';
 import { Auth3Service } from '../services/auth3.service';
-import { Firestore, collection, doc, getDoc, query, where, getDocs, setDoc } from '@angular/fire/firestore';
+import { Firestore, collection, doc, getDoc, query, where, getDocs, setDoc, deleteDoc } from '@angular/fire/firestore';
 import { ImageStorageService } from '../services/image-storage.service';
 import { Chat, ChatService, Message, TypingState } from '../services/chat.service';
 import { PresenceService } from '../services/presence.service';
@@ -57,6 +57,7 @@ export class ChatPagePage implements OnInit, OnDestroy {
   private chatOptionsDragActive = false;
   private chatOptionsMinDragToClose = 80;
   private chatOptionsSelectedChat: any = null;
+  chatOptionsDeleteInProgress = false;
   receiverUserId: string | any;
   newRecepientUserId: string | any;
   sessionImageObjectCounter: number = 0;
@@ -65,6 +66,7 @@ export class ChatPagePage implements OnInit, OnDestroy {
       if (this.chatOptionsLongPressTimer) clearTimeout(this.chatOptionsLongPressTimer);
       this.chatOptionsLongPressTimer = setTimeout(() => {
         this.chatOptionsSelectedChat = chat;
+        console.log('[ChatPage.chatOptions] Long-press selected chat object:', chat);
         this.showChatOptionsOverlay = true;
         this.chatOptionsOverlayY = 0;
       }, 420); // 420ms for long-press
@@ -122,41 +124,46 @@ export class ChatPagePage implements OnInit, OnDestroy {
       return 0;
     }
 
-    async closeChatOptionsOverlay(removeSelectedChat: boolean = false): Promise<void> {
-      const selectedChat = this.chatOptionsSelectedChat;
+    async closeChatOptionsOverlay(): Promise<void> {
       this.showChatOptionsOverlay = false;
       this.chatOptionsOverlayY = 0;
       this.chatOptionsSelectedChat = null;
       this.chatOptionsDragStartY = null;
       this.chatOptionsDragCurrentY = null;
       this.chatOptionsDragActive = false;
+    }
 
-      if (!removeSelectedChat || !selectedChat?.chatId) {
+    // Placeholder logic for options
+    async onDeleteChatOption(): Promise<void> {
+      const selectedChat = this.chatOptionsSelectedChat;
+      console.log('[ChatPage.onDeleteChatOption] Selected chat object:', selectedChat);
+
+      if (!selectedChat?.chatId) {
+        console.warn('[ChatPage.onDeleteChatOption] No chat selected for deletion.');
+        await this.closeChatOptionsOverlay();
         return;
       }
 
-      const currentUid = await this.resolveCurrentUid();
-      if (!currentUid) {
-        console.warn('[ChatPage] Unable to delete selected chat preview: missing current uid.');
+      if (this.chatOptionsDeleteInProgress) {
         return;
       }
+
+      this.chatOptionsDeleteInProgress = true;
 
       try {
-        await this.chatService.clearChatForUser(selectedChat.chatId, currentUid);
+        await this.chatService.deleteChat(selectedChat.chatId);
         this.chats = this.chats.filter((chat) => chat?.chatId !== selectedChat.chatId);
 
         if (this.currentChatId === selectedChat.chatId) {
           this.closeChat();
         }
       } catch (error) {
-        console.error('[ChatPage] Failed to delete selected chat preview:', error);
-        alert('Unable to delete this conversation right now. Please try again.');
+        console.error('[ChatPage.onDeleteChatOption] Failed to delete chat from Firestore:', error);
+        alert('Unable to delete this chat right now. Please try again.');
+      } finally {
+        this.chatOptionsDeleteInProgress = false;
+        await this.closeChatOptionsOverlay();
       }
-    }
-
-    // Placeholder logic for options
-    onDeleteChatOption() {
-      void this.closeChatOptionsOverlay(true);
     }
     onNotifyChatOption() {
       alert('Notify option pressed (placeholder).');

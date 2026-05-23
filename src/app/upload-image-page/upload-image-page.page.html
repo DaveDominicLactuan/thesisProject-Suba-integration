@@ -37,10 +37,10 @@
 </div>
 <div *ngIf="imagePaths.length === 0 && capturedImages.length === 0" class="thumbnail-placeholder"></div>
 <div *ngIf="imagePaths.length > 0" class="thumbnail-scroll2" #thumbScroll (scroll)="onThumbnailScroll($event)" [ngClass]="getThumbClasses(imagePaths.length)">
-  <img *ngFor="let img of imagePaths" [src]="(showWithBoxes && img.withBoxes) ? img.withBoxes : img.original" class="thumbnail2" [style.border]="selectedThumbSrc===((showWithBoxes && img.withBoxes) ? img.withBoxes : img.original) ? '3px solid #f09819' : 'none'" (click)="$event.stopPropagation(); onStoredThumbClick(img)" />
+  <img *ngFor="let img of imagePaths; let i = index" [src]="(showWithBoxes && img.withBoxes) ? img.withBoxes : img.original" [attr.data-overlay-key]="getImageSelectionKey(img, i)" class="thumbnail2" [style.border]="selectedImageKey===getImageSelectionKey(img, i) ? '3px solid #f09819' : 'none'" (click)="$event.stopPropagation(); onStoredThumbClick(img)" />
 </div>
 <div *ngIf="imagePaths.length === 0 && capturedImages.length > 0" class="thumbnail-scroll2" #thumbScroll (scroll)="onThumbnailScroll($event)" [ngClass]="getThumbClasses(capturedImages.length)">
-  <img *ngFor="let img of capturedImages" [src]="img" class="thumbnail2" [style.border]="selectedThumbSrc===img ? '3px solid #f09819' : 'none'" (click)="$event.stopPropagation(); onStoredThumbClick({ original: img, withBoxes: img, fileName: '' })" />
+  <img *ngFor="let img of capturedImages; let i = index" [src]="img" [attr.data-overlay-key]="getImageSelectionKey({ original: img, withBoxes: img, fileName: '' }, i)" class="thumbnail2" [style.border]="selectedImageKey===getImageSelectionKey({ original: img, withBoxes: img, fileName: '' }, i) ? '3px solid #f09819' : 'none'" (click)="$event.stopPropagation(); onStoredThumbClick({ original: img, withBoxes: img, fileName: '' })" />
 </div>
 
 <!-- Combined control bar (top on top, bottom below) -->

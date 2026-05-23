@@ -119,13 +119,13 @@
       <button class="shutter-btn" (click)="takePicture()" [disabled]="isCooldown"></button>
 
       <!-- Thumbnails on the right (render from stored images) -->
-      <div *ngIf="storedImages.length === 0" class="thumbnail-placeholder" (click)="showTestOverlay()"></div>
-      <div *ngIf="storedImages.length > 0" class="thumbnail-scroll" (click)="showTestOverlay()">
+      <div *ngIf="storedImages.length === 0" class="thumbnail-placeholder" (click)="openTestOverlay()"></div>
+      <div *ngIf="storedImages.length > 0" class="thumbnail-scroll" (click)="openTestOverlay()">
         <img *ngFor="let img of storedImages"
              [src]="img.original"
              class="thumbnail"
-             [class.selected]="img.original === selectedThumbSrc"
-             (click)="$event.stopPropagation(); onStoredThumbClick(img)"
+             [class.selected]="getImageSelectionKey(img) === selectedImageKey"
+             (click)="$event.stopPropagation(); onStoredThumbClick(img); openTestOverlay()"
              [title]="img.filename || img.timestamp"
         />
       </div>

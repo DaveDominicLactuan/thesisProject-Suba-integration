@@ -71,6 +71,13 @@ export class CameraPage2Page implements AfterViewInit {
   savedImage: StoredImage | null = null;
   selectedThumbSrc: string | null = null;
   selectedImageTitle: string = '';
+  private selectedImageSelectionKey: string = '';
+  get selectedImageKey(): string {
+    return this.selectedImageSelectionKey || this.selectedThumbSrc || '';
+  }
+  getImageSelectionKey(img: StoredImage): string {
+    return img.filename || img.withBoxes || img.original;
+  }
   // Toggle state to switch original vs withBoxes in overlay context
   showWithBoxes: boolean = false;
   // Overlay helpers for updating UI after center detection
@@ -155,7 +162,8 @@ export class CameraPage2Page implements AfterViewInit {
         if (img) {
           // update selected thumbnail reference and title
           this.selectedThumbSrc = img.withBoxes || img.original;
-          this.selectedImageTitle = img.filename ?? '';
+          this.selectedImageSelectionKey = this.getImageSelectionKey(img);
+          this.selectedImageTitle = this.getShortImageTitle(img.filename ?? '');
         }
       });
     } catch (e) {
@@ -416,6 +424,12 @@ export class CameraPage2Page implements AfterViewInit {
     // bump counters early so spinner shows while processing unless caller already did so
     if (bumpCounters) this.photosTaken += 1;
     this.isProcessing = true;
+    let finalizationClaimed = false;
+    const claimFinalization = () => {
+      if (finalizationClaimed) return false;
+      finalizationClaimed = true;
+      return true;
+    };
 
     const maxBytes = 900_000;
 
@@ -510,8 +524,12 @@ export class CameraPage2Page implements AfterViewInit {
         (entry as any).boxes = [];
         (entry as any).detectionMessage = 'Box rendering failed';
       }
-      //store image entry via image storage service
-          await this.imageStorage.addImage(entry, this.selectedSessionId || undefined);
+      //store image entry via image storage service, but only once per invocation
+      if (!claimFinalization()) {
+        console.warn('[CameraPage2] Skipping persist because processing was already finalized');
+        return entry;
+      }
+      await this.imageStorage.addImage(entry, this.selectedSessionId || undefined);
       // Debug: log the full entry after processing and storage
       console.log('[CameraPage2] processDataUrl saved entry:', entry);
       // also add to active session if one exists
@@ -556,6 +574,10 @@ export class CameraPage2Page implements AfterViewInit {
           sessionId: this.selectedSessionId || undefined
         };
         try {
+          if (!claimFinalization()) {
+            console.warn('[CameraPage2] Skipping timeout fallback because processing was already finalized');
+            return;
+          }
           await this.imageStorage.addImage(entry, this.selectedSessionId || undefined);
           try {
             if (this.selectedSessionId && typeof (this.imageStorage.addImageToSession) === 'function') {
@@ -992,6 +1014,10 @@ export class CameraPage2Page implements AfterViewInit {
     console.log('openMore pressed (stub)');
   }
 
+  openTestOverlay() {
+    this.showTestOverlay();
+  }
+
   /**
    * Show a simple overlay/modal used for quick tests.
    */
@@ -1021,7 +1047,7 @@ export class CameraPage2Page implements AfterViewInit {
       // box.style.background = '#fff';
       box.style.border = '1px solid transparent';
       box.style.background = 'linear-gradient(#fff, #fff) padding-box, linear-gradient(to right, #ff512f, #f09819) border-box';
-      box.style.padding = '12px';
+      box.style.padding = '1px';
       box.style.borderRadius = '8px';
       box.style.minWidth = '280px';
       box.style.maxWidth = '92vw';
@@ -1034,21 +1060,27 @@ export class CameraPage2Page implements AfterViewInit {
       box.style.gap = '12px';
       box.style.overflow = 'hidden';
 
-      // Top bar: title on the left, toggle on the right
+      // Top bar: title on the left, close action on the right
       const topBar = document.createElement('div');
       topBar.style.display = 'flex';
-      topBar.style.justifyContent = 'space-between';
+      topBar.style.justifyContent = 'end';
       topBar.style.alignItems = 'center';
       topBar.style.width = '100%';
-      topBar.style.padding = '4px 8px';
+      topBar.style.padding = '4px 8px 0';
+      topBar.style.gap = '12px';
 
       const title = document.createElement('div');
       title.textContent = this.getShortImageTitle(this.selectedImageTitle) || 'No Image Selected';
       title.style.fontWeight = '600';
-      title.style.marginBottom = '4px';
+      title.style.marginBottom = '0';
       title.style.color = 'black';
       title.style.marginTop = '10px';
       title.style.flex = '0 1 auto';
+      title.style.width = '220px';
+      title.style.maxWidth = '220px';
+      title.style.whiteSpace = 'nowrap';
+      title.style.overflow = 'hidden';
+      title.style.textOverflow = 'ellipsis';
       this._overlayTitleEl = title;
 
       const toggleWrapper = document.createElement('div');
@@ -1056,7 +1088,7 @@ export class CameraPage2Page implements AfterViewInit {
       toggleWrapper.style.display = 'flex';
       toggleWrapper.style.alignItems = 'center';
       toggleWrapper.style.gap = '10px';
-      toggleWrapper.style.margin = '10px 0';
+      toggleWrapper.style.margin = '10px 0 0';
       toggleWrapper.style.flex = '0 0 auto';
 
       const labelEl = document.createElement('label');
@@ -1079,8 +1111,46 @@ export class CameraPage2Page implements AfterViewInit {
       labelEl.appendChild(sliderEl);
       toggleWrapper.appendChild(labelEl);
 
-      topBar.appendChild(title);
-      topBar.appendChild(toggleWrapper);
+      // keep the close button in the top bar (above the toggle row)
+      const closeBtn = document.createElement('button');
+      closeBtn.type = 'button';
+      closeBtn.setAttribute('aria-label', 'Close overlay');
+      closeBtn.style.width = '28px';
+      closeBtn.style.height = '28px';
+      closeBtn.style.borderRadius = '9999px';
+      closeBtn.style.border = '1px solid #f2a15a';
+      closeBtn.style.background = '#fff';
+      closeBtn.style.color = '#ff8a2a';
+      closeBtn.style.fontSize = '18px';
+      closeBtn.style.fontWeight = '600';
+      closeBtn.style.lineHeight = '1';
+      closeBtn.style.display = 'flex';
+      closeBtn.style.alignItems = 'center';
+      closeBtn.style.justifyContent = 'center';
+      closeBtn.style.cursor = 'pointer';
+      closeBtn.textContent = '×';
+      closeBtn.onclick = () => { cleanupOverlay(); };
+
+      topBar.appendChild(closeBtn);
+
+      // Toggle row: place the toggle on the left and the filename on the right
+      const toggleRow = document.createElement('div');
+      toggleRow.style.display = 'flex';
+      toggleRow.style.justifyContent = 'space-between';
+      toggleRow.style.alignItems = 'center';
+      toggleRow.style.width = '100%';
+      toggleRow.style.padding = '0 8px';
+      toggleRow.style.marginTop = '2px';
+      // left: the toggle control
+      toggleRow.appendChild(toggleWrapper);
+      // right: move the title into the toggle row so it's aligned with the toggle
+      title.style.marginTop = '0';
+      title.style.marginBottom = '0';
+      title.style.flex = '0 0 auto';
+      title.style.textAlign = 'right';
+      title.style.width = '180px';
+      title.style.maxWidth = '180px';
+      toggleRow.appendChild(title);
        
 
       const thumbContainer = document.createElement('div');
@@ -1117,8 +1187,9 @@ export class CameraPage2Page implements AfterViewInit {
               imageElement.src = this.showWithBoxes ? (entry as any).withBoxes || entry.original : entry.original;
             }
           }
+          const imageKey = imageElement.dataset['overlayKey'] || imageElement.dataset['storedIndex'] || imageElement.dataset['index'] || imageElement.src;
           // update border highlighting
-          imageElement.style.border = imageElement.src === this.selectedThumbSrc ? '3px solid #2ecc71' : '2px solid #fff';
+          imageElement.style.border = imageKey === this.selectedImageKey ? '3px solid #2ecc71' : '2px solid #fff';
         });
       };
       this._overlayUpdateThumbs = updateThumbnails;
@@ -1143,11 +1214,13 @@ export class CameraPage2Page implements AfterViewInit {
           img.style.boxShadow = '0 0 6px rgba(0,0,0,0.12)';
           img.style.cursor = 'pointer';
           img.dataset['storedIndex'] = String(idx);
+          img.dataset['overlayKey'] = this.getImageSelectionKey(entry);
           img.src = this.showWithBoxes ? (entry as any).withBoxes || entry.original : entry.original;
-          img.style.border = img.src === this.selectedThumbSrc ? '3px solid #2ecc71' : '2px solid #fff';
+          img.style.border = img.dataset['overlayKey'] === this.selectedImageKey ? '3px solid #2ecc71' : '2px solid #fff';
           img.onclick = () => {
             this.selectedThumbSrc = img.src;
-            this.selectedImageTitle = entry.filename || `Stored ${idx + 1}`;
+            this.selectedImageSelectionKey = img.dataset['overlayKey'] || this.getImageSelectionKey(entry);
+            this.selectedImageTitle = this.getShortImageTitle(entry.filename || `Stored ${idx + 1}`);
             title.textContent = this.selectedImageTitle;
             updateThumbnails();
           };
@@ -1181,8 +1254,10 @@ export class CameraPage2Page implements AfterViewInit {
           img.style.boxShadow = '0 0 6px rgba(0,0,0,0.12)';
           img.style.cursor = 'pointer';
           img.dataset['index'] = String(idx);
+          img.dataset['overlayKey'] = `captured-${idx}`;
           img.onclick = () => {
             this.selectedThumbSrc = src;
+            this.selectedImageSelectionKey = `captured-${idx}`;
             this.selectedImageTitle = `Captured ${idx + 1}`;
             title.textContent = this.selectedImageTitle;
             updateThumbnails();
@@ -1199,6 +1274,7 @@ export class CameraPage2Page implements AfterViewInit {
       btnRow.style.width = '100%';
       btnRow.style.display = 'flex';
       btnRow.style.justifyContent = 'space-between';
+      btnRow.style.gap = '8px';
 
       const deleteBtn = document.createElement('button');
       deleteBtn.className = 'function-btn';
@@ -1227,6 +1303,33 @@ export class CameraPage2Page implements AfterViewInit {
       deleteIcon.src = 'assets/Trash.png';
       deleteBtn.appendChild(deleteText);
       deleteBtn.appendChild(deleteIcon);
+
+      const reprocessBtn = document.createElement('button');
+      reprocessBtn.className = 'function-btn';
+      reprocessBtn.type = 'button';
+      reprocessBtn.style.display = 'flex';
+      reprocessBtn.style.alignItems = 'center';
+      reprocessBtn.style.justifyContent = 'center';
+      reprocessBtn.style.height = '40px';
+      reprocessBtn.style.borderRadius = '10px';
+      reprocessBtn.style.border = '1px solid transparent';
+      reprocessBtn.style.background = 'linear-gradient(#fff, #fff) padding-box, linear-gradient(to right, #ff512f, #f09819) border-box';
+      reprocessBtn.style.color = '#ff7a00';
+
+      const reprocessText = document.createTextNode('Reprocess Image');
+      const reprocessIcon = document.createElement('span');
+      reprocessIcon.textContent = '↻';
+      reprocessIcon.style.display = 'inline-flex';
+      reprocessIcon.style.alignItems = 'center';
+      reprocessIcon.style.justifyContent = 'center';
+      reprocessIcon.style.width = '20px';
+      reprocessIcon.style.height = '20px';
+      reprocessIcon.style.marginLeft = '8px';
+      reprocessIcon.style.fontSize = '18px';
+      reprocessIcon.style.fontWeight = '700';
+      reprocessBtn.appendChild(reprocessText);
+      reprocessBtn.appendChild(reprocessIcon);
+
       // local cleanup helper unsubscribes overlay back-button subscription and removes overlay
       let overlayBackBtnSub: any = null;
       const cleanupOverlay = () => {
@@ -1243,44 +1346,21 @@ export class CameraPage2Page implements AfterViewInit {
         cleanupOverlay();
       };
 
-      const closeBtn = document.createElement('button');
-      closeBtn.className = 'function-btn';
-      closeBtn.type = 'button';
-      closeBtn.style.display = 'flex';
-      closeBtn.style.alignItems = 'center';
-      closeBtn.style.justifyContent = 'center';
-      closeBtn.style.height = '40px';
-      closeBtn.style.borderRadius = '10px';
-       closeBtn.style.background = '#ddd';
-      closeBtn.style.color = '#111';
-      closeBtn.style.border = '1px solid transparent';
-      closeBtn.style.background = 'linear-gradient(#fff, #fff) padding-box, linear-gradient(to right, #ff512f, #f09819) border-box';
-      closeBtn.style.color = '#111';
-      
-
-      // text + inline check SVG icon for close
-      const closeText = document.createTextNode('Close');
-      const closeIcon = document.createElement('img');
-      closeIcon.className = 'action-icon';
-      closeIcon.style.width = '20px';
-      closeIcon.style.height = '20px';
-      closeIcon.style.marginLeft = '8px';
-
-      // use project asset for check/close icon
-      closeIcon.src = 'assets/Check_Black.png';
-      closeBtn.appendChild(closeText);
-      closeBtn.appendChild(closeIcon);
-      closeBtn.onclick = () => { cleanupOverlay(); };
+      reprocessBtn.onclick = () => {
+        void this.reprocessSelectedImage();
+        cleanupOverlay();
+      };
 
       // make buttons visually fill available space like in bottom-top-row
       deleteBtn.style.flex = '1 1 auto';
-      closeBtn.style.flex = '1 1 auto';
+      reprocessBtn.style.flex = '1 1 auto';
       deleteBtn.style.marginRight = '8px';
 
       btnRow.appendChild(deleteBtn);
-      btnRow.appendChild(closeBtn);
+      btnRow.appendChild(reprocessBtn);
 
       box.appendChild(topBar);
+      box.appendChild(toggleRow);
       box.appendChild(thumbContainer);
       box.appendChild(btnRow);
       overlay.appendChild(box);
@@ -1342,6 +1422,7 @@ export class CameraPage2Page implements AfterViewInit {
     //Purpose: obtain the image source and update selectedThumbSrc.
     if (!closestImg) return;
     const src = (closestImg as HTMLImageElement).src;
+    const overlayKey = (closestImg as HTMLImageElement).dataset['overlayKey'] || '';
     // Prefer storedImages (which may have withBoxes) when resolving title
     let newTitle = src;
     const storedIdx = this.storedImages ? this.storedImages.findIndex(s => (s as any).withBoxes === src || s.original === src) : -1;
@@ -1353,13 +1434,59 @@ export class CameraPage2Page implements AfterViewInit {
     }
 
     this.selectedThumbSrc = src;
-    this.selectedImageTitle = newTitle;
+    this.selectedImageSelectionKey = overlayKey || src;
+    this.selectedImageTitle = this.getShortImageTitle(newTitle);
     // Update overlay title if present
     if (this._overlayTitleEl) this._overlayTitleEl.textContent = this.selectedImageTitle;
     // Refresh borders to reflect new selection
     if (this._overlayUpdateThumbs) this._overlayUpdateThumbs();
 
     console.log('[CameraPage2] Center thumbnail selected:', { title: newTitle, src });
+  }
+
+  private getSelectedOverlayImageData(): { dataUrl: string; originalName?: string } | null {
+    const src = this.selectedThumbSrc || '';
+    const selectionKey = this.selectedImageSelectionKey || '';
+    if (!src) {
+      return null;
+    }
+
+    const storedImage = this.storedImages.find(image => this.getImageSelectionKey(image) === selectionKey) || this.storedImages.find(image => image.original === src || image.withBoxes === src);
+    if (storedImage) {
+      return {
+        dataUrl: storedImage.original,
+        originalName: storedImage.fileImageName || storedImage.filename || this.selectedImageTitle || undefined
+      };
+    }
+
+    const capturedIndex = selectionKey.startsWith('captured-') ? parseInt(selectionKey.replace('captured-', ''), 10) : this.capturedImages.indexOf(src);
+    if (capturedIndex !== -1) {
+      return {
+        dataUrl: this.capturedImages[capturedIndex],
+        originalName: this.selectedImageTitle || `Captured ${capturedIndex + 1}`
+      };
+    }
+
+    return {
+      dataUrl: src,
+      originalName: this.selectedImageTitle || undefined
+    };
+  }
+
+  async reprocessSelectedImage() {
+    const selectedImage = this.getSelectedOverlayImageData();
+    if (!selectedImage) {
+      console.warn('[CameraPage2] reprocessSelectedImage: no image selected');
+      alert('No image selected to reprocess');
+      return;
+    }
+
+    try {
+      await this.processDataUrl(selectedImage.dataUrl, selectedImage.originalName);
+    } catch (err) {
+      console.warn('[CameraPage2] reprocessSelectedImage failed', err);
+      alert('Failed to reprocess selected image. See console for details.');
+    }
   }
 
   /**
@@ -1513,7 +1640,8 @@ export class CameraPage2Page implements AfterViewInit {
       console.warn('onStoredThumbClick failed:', e);
     }
     this.selectedThumbSrc = img.withBoxes || img.original;
-    this.selectedImageTitle = img.filename ?? '';
+    this.selectedImageSelectionKey = this.getImageSelectionKey(img);
+    this.selectedImageTitle = this.getShortImageTitle(img.filename ?? '');
   }
 
   /** Load all StoredImage entries from the ImageStorageService and update local list */
@@ -1539,7 +1667,7 @@ export class CameraPage2Page implements AfterViewInit {
         const cur = (this.imageStorage as any).getCurrentImage ? (this.imageStorage as any).getCurrentImage() : null;
         if (cur) {
           this.selectedThumbSrc = cur.withBoxes || cur.original;
-          this.selectedImageTitle = cur.filename ?? '';
+          this.selectedImageTitle = this.getShortImageTitle(cur.filename ?? '');
         }
       } catch (e) {
         // ignore

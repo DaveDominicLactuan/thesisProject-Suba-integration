@@ -1,5 +1,5 @@
 import { Injectable } from '@angular/core';
-import { Firestore, collection, doc, setDoc, serverTimestamp, writeBatch, query, where, orderBy, collectionData, docData, getDoc, updateDoc } from '@angular/fire/firestore';
+import { Firestore, collection, doc, setDoc, serverTimestamp, writeBatch, query, where, orderBy, collectionData, docData, getDoc, updateDoc, deleteDoc, getDocs } from '@angular/fire/firestore';
 import { Observable } from 'rxjs';
 
 export interface Chat {
@@ -82,6 +82,34 @@ export class ChatService {
     await updateDoc(chatRef, {
       [`clearedBy.${userId}`]: serverTimestamp()
     });
+  }
+
+  // Permanently delete a chat doc and its immediate child documents.
+  async deleteChat(chatId: string): Promise<void> {
+    if (!chatId) return;
+
+    const chatRef = doc(this.firestore, 'chats', chatId);
+    const messagesCol = collection(this.firestore, 'chats', chatId, 'messages');
+    const typingCol = collection(this.firestore, 'chats', chatId, 'typing');
+
+    const [messagesSnapshot, typingSnapshot] = await Promise.all([
+      getDocs(messagesCol),
+      getDocs(typingCol)
+    ]);
+
+    const deletions: Promise<void>[] = [];
+
+    messagesSnapshot.forEach((messageDoc) => {
+      deletions.push(deleteDoc(messageDoc.ref));
+    });
+
+    typingSnapshot.forEach((typingDoc) => {
+      deletions.push(deleteDoc(typingDoc.ref));
+    });
+
+    deletions.push(deleteDoc(chatRef));
+
+    await Promise.all(deletions);
   }
 
   // Observe messages for a chat in realtime (ordered)

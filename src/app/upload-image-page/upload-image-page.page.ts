@@ -71,6 +71,7 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
   showWithBoxes = false;
   selectedImage: string = '';
   selectedImageTitle: string = '';
+  private selectedImageSelectionKey: string = '';
   includeTestAssets = true; // set to false after testing to remove placeholder assets
   // debug panel and selected prediction
   showDebugPanel = false;
@@ -80,6 +81,21 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
   scaledBoxes: ScaledBox[] = [];
   selectedThumbSrc: string | null = null;
   private _thumbScrollTimeout: any = null;
+
+  get selectedImageKey(): string {
+    return this.selectedImageSelectionKey || this.selectedThumbSrc || this.selectedImage || '';
+  }
+
+  getImageSelectionKey(img: any, index?: number): string {
+    if (!img) return typeof index === 'number' ? `item-${index}` : '';
+    if (img.filename) return img.filename;
+    if (img.fileName) return img.fileName;
+    if (img.key) return img.key;
+    if (typeof index === 'number') {
+      return img.original === img.withBoxes ? `item-${index}` : `item-${index}-${img.original || img.withBoxes || ''}`;
+    }
+    return img.original || img.withBoxes || '';
+  }
   // sessions list for session selection UI
   sessions: any[] = [];
   selectedSessionId: string | null = null;
@@ -108,6 +124,7 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
       this.imageStorage.getCurrentImage$().subscribe(img => {
         if (img) {
           this.selectedThumbSrc = img.withBoxes ?? img.original;
+          this.selectedImageSelectionKey = this.getImageSelectionKey(img);
           this.selectedImageTitle = img.filename ?? '';
         }
       });
@@ -244,6 +261,7 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
     // Respect the current toggle: show boxed version when toggled on, otherwise show original
     // update the selected thumbnail src and title with respect to the toggle, and auto-scroll to center
     this.selectedThumbSrc = this.showWithBoxes ? (img.withBoxes ?? img.original) : (img.original ?? img.withBoxes ?? '');
+    this.selectedImageSelectionKey = this.getImageSelectionKey(img);
     this.selectedImageTitle = img.filename ?? img.fileName ?? '';
     
     // Auto-scroll to center the selected thumbnail or item (Android Recent Apps style).  
@@ -263,8 +281,8 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
     // Find the selected image element
     let selectedImg: HTMLImageElement | null = null;
     images.forEach(img => {
-      const src = img.src || img.getAttribute('src');
-      if (src === this.selectedThumbSrc) {
+      const key = img.getAttribute('data-overlay-key') || '';
+      if (key === this.selectedImageKey) {
         selectedImg = img as HTMLImageElement;
       }
     });
@@ -378,6 +396,12 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
     // yield to the event loop so the spinner can render/animate before heavy work
     await this.sleep(50);
     try { this.cdr.detectChanges(); } catch (e) { /* ignore */ }
+    let finalizationClaimed = false;
+    const claimFinalization = () => {
+      if (finalizationClaimed) return false;
+      finalizationClaimed = true;
+      return true;
+    };
 
     //set for tracking inference success/failure
     let inferenceCalled = false;
@@ -466,7 +490,11 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
         (entry as any).boxes = [];
         (entry as any).detectionMessage = 'Box rendering failed';
       }
-      //store image entry via image storage service
+      //store image entry via image storage service, but only once per invocation
+      if (!claimFinalization()) {
+        console.warn('[UploadImagePage] Skipping persist because processing was already finalized');
+        return entry;
+      }
       await this.imageStorage.addImage(entry, this.selectedSessionId || undefined);
       // Debug: log the full entry after processing and storage
       console.log('[UploadImagePage] processDataUrl saved entry:', entry);
@@ -526,6 +554,10 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
             userId: userId,
             sessionId: this.selectedSessionId || undefined
           };
+          if (!claimFinalization()) {
+            console.warn('[UploadImagePage] Skipping timeout fallback because processing was already finalized');
+            return;
+          }
           await this.imageStorage.addImage(entry, this.selectedSessionId || undefined);
           try {
             if (this.selectedSessionId && typeof (this.imageStorage.addImageToSession) === 'function') {
@@ -1199,6 +1231,7 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
     const imgEl: any = closestImg;
     const src = (imgEl && (imgEl.src || (imgEl.getAttribute && imgEl.getAttribute('src')))) || '';
     this.selectedThumbSrc = src;
+    this.selectedImageSelectionKey = (imgEl && imgEl.dataset && imgEl.dataset['overlayKey']) || src;
     
     //Resolve a title from stored images or captured images
     //Purpose: map the src to a friendly filename/title, fallback to captured index or src.
