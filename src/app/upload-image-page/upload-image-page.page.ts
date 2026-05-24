@@ -269,6 +269,81 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
     setTimeout(() => this.scrollThumbnailIntoView(), 100);
   }
 
+  /** Resolve the currently selected stored image record for actions like reprocess */
+  private resolveSelectedStoredImage(): StoredImage | null {
+    try {
+      const current = typeof (this.imageStorage as any).getCurrentImage === 'function'
+        ? (this.imageStorage as any).getCurrentImage()
+        : null;
+      if (current) {
+        return current as StoredImage;
+      }
+
+      const lookupKeys = [
+        this.selectedImageSelectionKey,
+        this.selectedThumbSrc,
+        this.selectedImage,
+        this.selectedImageTitle
+      ];
+
+      for (const key of lookupKeys) {
+        if (!key) continue;
+
+        const found = typeof (this.imageStorage as any).getEntryForImage === 'function'
+          ? (this.imageStorage as any).getEntryForImage(key)
+          : null;
+        if (found) {
+          return found as StoredImage;
+        }
+
+        const local = this.imagePaths.find((img: any) =>
+          img && (
+            img.fileName === key ||
+            img.filename === key ||
+            img.original === key ||
+            img.withBoxes === key
+          )
+        );
+        if (local) {
+          return {
+            original: local.original,
+            withBoxes: local.withBoxes,
+            timestamp: new Date().toISOString(),
+            filename: local.fileName || local.filename || `selected-${Date.now()}.jpg`,
+            prediction: local.rawPrediction,
+          } as StoredImage;
+        }
+      }
+    } catch (e) {
+      console.warn('[UploadImagePage] resolveSelectedStoredImage failed', e);
+    }
+
+    return null;
+  }
+
+  /** Reprocess the currently selected image through the normal upload pipeline */
+  async reprocessSelectedImage() {
+    try {
+      const selected = this.resolveSelectedStoredImage();
+      if (!selected) {
+        alert('No image selected to reprocess');
+        return;
+      }
+
+      const dataUrl = selected.original || selected.withBoxes || this.selectedThumbSrc || '';
+      if (!dataUrl) {
+        alert('The selected image does not contain data that can be reprocessed');
+        return;
+      }
+
+      const filename = selected.fileImageName || selected.filename || this.selectedImageTitle || `selected-${Date.now()}.jpg`;
+      await this.processDataUrl(dataUrl, filename);
+    } catch (e) {
+      console.warn('[UploadImagePage] reprocessSelectedImage failed', e);
+      alert('Failed to reprocess the selected image. See console for details.');
+    }
+  }
+
   /** Scroll the thumbnail carousel to center the selected item */
   private scrollThumbnailIntoView() {
     //get the container element for the thumbnail scroller(horizontal scroll area, bail if missing)
@@ -830,8 +905,8 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
         }
       } else {
         // Session has images or no active session, navigate normally
-        if (this.selectedSessionId && this.sessionIsPristine === false && typeof (this.imageStorage as any).promptAndSaveSession === 'function') {
-          try { await (this.imageStorage as any).promptAndSaveSession(this.selectedSessionId); } catch (e) { /* ignore */ }
+        if (this.selectedSessionId && this.sessionIsPristine === false && typeof (this.imageStorage as any).saveSessionSnapshotToBrowserStorage === 'function') {
+          try { await (this.imageStorage as any).saveSessionSnapshotToBrowserStorage(this.selectedSessionId, 'local'); } catch (e) { /* ignore */ }
         }
         this.router.navigate(['/home-page2']);
       }
@@ -1038,8 +1113,8 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
     }
 
     try {
-      if (this.selectedSessionId && this.sessionIsPristine === false && typeof (this.imageStorage as any).saveSessionWithImagesToFirestore === 'function') {
-        try { await (this.imageStorage as any).saveSessionWithImagesToFirestore(this.selectedSessionId); } catch (e) { /* ignore */ }
+      if (this.selectedSessionId && this.sessionIsPristine === false && typeof (this.imageStorage as any).saveSessionSnapshotToBrowserStorage === 'function') {
+        try { await (this.imageStorage as any).saveSessionSnapshotToBrowserStorage(this.selectedSessionId, 'local'); } catch (e) { /* ignore */ }
       }
       this.router.navigateByUrl('/home-page2');
     } catch (e) {

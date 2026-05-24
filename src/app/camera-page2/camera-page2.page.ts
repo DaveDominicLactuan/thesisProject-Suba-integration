@@ -95,15 +95,24 @@ export class CameraPage2Page implements AfterViewInit {
   isLevelEnabled: boolean = false;
   isPhoneLeveled: boolean = false;
   levelRollDeg: number = 0;
-  private levelThresholdDeg: number = 1.0;
+  private levelThresholdDeg: number = 0.85;
   private levelTargetRoll: number = 0; // Target roll angle for smooth interpolation
-  private levelSmoothingFactor: number = 0.4; // Increased from 0.15 for more responsive movement (0-1)
+  private levelSmoothingFactor: number = 0.68; // More responsive, but still smoothed (0-1)
   private levelAnimationFrameId?: number; // RAF ID for cleanup
   private lastRawRoll: number = 0; // Track last raw value for velocity calculation
-  private deadZoneDeg: number = 0.3; // Ignore movements smaller than this to filter noise
+  private deadZoneDeg: number = 0.14; // Ignore movements smaller than this to filter noise
   private velocityDampingFactor: number = 0.7; // Apply damping to sudden changes (0-1, higher = more damping)
   private lastProcessedRoll: number = 0; // Track the last applied roll for velocity calculation
-  private extremeChangeThreshold: number = 15; // Flag changes > this as potential sporadic movements
+  private extremeChangeThreshold: number = 18; // Flag changes > this as potential sporadic movements
+  private levelMotionSettling: boolean = false;
+  private levelLastSampleAt: number = 0;
+  private levelSettleTimer?: any;
+  private levelSettleDelayMs: number = 120;
+  private levelResyncThresholdDeg: number = 0.08;
+  private levelVelocityThresholdDegPerSec: number = 85;
+  private levelSnapThresholdDeg: number = 0.18;
+  private levelFastFollowFloor: number = 0.72;
+  private levelFastFollowCeil: number = 0.94;
   flashDurationMs: number = 120; // visual flash length
   cooldownMs: number = 500; // minimum time between pictures
   private backButtonSub: any; // hardware back handler
@@ -113,28 +122,77 @@ export class CameraPage2Page implements AfterViewInit {
 
     const rawRoll = event.gamma;
     const boundedRoll = Math.max(-45, Math.min(45, rawRoll));
+    const now = performance.now();
+    const elapsedMs = this.levelLastSampleAt > 0 ? Math.max(16, now - this.levelLastSampleAt) : 16;
+    const rawDelta = boundedRoll - this.lastRawRoll;
+    const velocityDegPerSec = Math.abs(rawDelta) / elapsedMs * 1000;
+    const velocityFactor = Math.min(1, velocityDegPerSec / 180);
+    const followFactor = this.levelMotionSettling
+      ? this.levelFastFollowCeil
+      : Math.min(this.levelFastFollowCeil, this.levelFastFollowFloor + (velocityFactor * 0.22));
+    this.levelLastSampleAt = now;
+    this.lastRawRoll = boundedRoll;
     
     // Apply dead zone filtering: ignore small movements
     const changeDelta = Math.abs(boundedRoll - this.lastProcessedRoll);
     if (changeDelta < this.deadZoneDeg) {
+      if (Math.abs(boundedRoll) <= this.levelThresholdDeg) {
+        if (this.levelSettleTimer) {
+          clearTimeout(this.levelSettleTimer);
+          this.levelSettleTimer = undefined;
+        }
+        this.levelMotionSettling = false;
+        this.levelTargetRoll = 0;
+        this.levelRollDeg = 0;
+        this.lastProcessedRoll = boundedRoll;
+        this.isPhoneLeveled = true;
+      } else {
+        this.isPhoneLeveled = Math.abs(this.levelRollDeg) <= this.levelThresholdDeg && !this.levelMotionSettling;
+      }
       return; // Ignore small noise
     }
     
     // Detect and dampen extreme/sporadic movements
+    const isSporadicMovement = changeDelta > this.extremeChangeThreshold || velocityDegPerSec > this.levelVelocityThresholdDegPerSec;
     let targetRoll = boundedRoll;
-    if (changeDelta > this.extremeChangeThreshold) {
+    if (isSporadicMovement) {
       // Large sudden change detected - apply velocity damping
-      // Blend between current and new value to prevent jitter
-      targetRoll = this.lastProcessedRoll + (boundedRoll - this.lastProcessedRoll) * this.velocityDampingFactor;
-      console.log('[Level] Extreme movement detected, applying damping:', {changeDelta, original: boundedRoll, damped: targetRoll});
+      // Blend between the displayed line and the new sensor value to prevent jitter while still following motion.
+      targetRoll = this.levelRollDeg + (boundedRoll - this.levelRollDeg) * followFactor;
+      this.levelMotionSettling = true;
+      console.log('[Level] Extreme movement detected, applying damping:', {
+        changeDelta,
+        velocityDegPerSec,
+        original: boundedRoll,
+        damped: targetRoll,
+      });
+
+      if (this.levelSettleTimer) {
+        clearTimeout(this.levelSettleTimer);
+      }
+      this.levelSettleTimer = setTimeout(() => {
+        if (!this.isLevelEnabled) return;
+        this.levelMotionSettling = false;
+        this.levelTargetRoll = this.lastRawRoll;
+        if (Math.abs(this.levelRollDeg - this.levelTargetRoll) <= this.levelResyncThresholdDeg) {
+          this.levelRollDeg = this.levelTargetRoll;
+        }
+        this.isPhoneLeveled = Math.abs(this.levelRollDeg) <= this.levelThresholdDeg;
+      }, this.levelSettleDelayMs);
+    } else {
+      this.levelMotionSettling = false;
     }
     
     // Update target for smooth interpolation loop
+    if (!isSporadicMovement && Math.abs(boundedRoll - this.levelRollDeg) <= this.levelSnapThresholdDeg) {
+      targetRoll = boundedRoll;
+    }
+
     this.levelTargetRoll = targetRoll;
     this.lastProcessedRoll = targetRoll; // Track processed value for velocity calculation
     
     // Update level status
-    this.isPhoneLeveled = Math.abs(rawRoll) <= this.levelThresholdDeg;
+    this.isPhoneLeveled = !this.levelMotionSettling && Math.abs(this.levelRollDeg) <= this.levelThresholdDeg;
   };
   // session management
   sessions: any[] = [];
@@ -916,8 +974,15 @@ export class CameraPage2Page implements AfterViewInit {
       this.isPhoneLeveled = false;
       this.levelRollDeg = 0;
       this.levelTargetRoll = 0;
+      this.levelMotionSettling = false;
+      this.levelLastSampleAt = 0;
       // Initialize processed roll to current value to establish baseline
       this.lastProcessedRoll = 0;
+      this.lastRawRoll = 0;
+      if (this.levelSettleTimer) {
+        clearTimeout(this.levelSettleTimer);
+        this.levelSettleTimer = undefined;
+      }
       
       // Add event listener for raw orientation data
       window.addEventListener('deviceorientation', this.orientationHandler, true);
@@ -939,18 +1004,29 @@ export class CameraPage2Page implements AfterViewInit {
 
       // Smooth interpolation using linear interpolation (lerp)
       const angleDelta = this.levelTargetRoll - this.levelRollDeg;
+      const smoothing = this.levelMotionSettling ? this.levelFastFollowCeil : this.levelSmoothingFactor;
       
       // Only update if there's a meaningful change to avoid excessive redraws
       if (Math.abs(angleDelta) > 0.01) {
         // Apply improved smoothing with faster responsiveness
-        this.levelRollDeg += angleDelta * this.levelSmoothingFactor;
+        this.levelRollDeg += angleDelta * smoothing;
         
         // Ensure we stay within reasonable bounds to prevent drift
         this.levelRollDeg = Math.max(-45, Math.min(45, this.levelRollDeg));
+        if (!this.levelMotionSettling && Math.abs(this.levelTargetRoll - this.levelRollDeg) <= this.levelSnapThresholdDeg) {
+          this.levelRollDeg = this.levelTargetRoll;
+        }
       } else if (Math.abs(angleDelta) > 0) {
         // Snap to target if very close to avoid oscillation
         this.levelRollDeg = this.levelTargetRoll;
       }
+
+      if (!this.levelMotionSettling && Math.abs(this.levelRollDeg) <= this.levelSnapThresholdDeg) {
+        this.levelRollDeg = 0;
+        this.levelTargetRoll = 0;
+      }
+
+      this.isPhoneLeveled = !this.levelMotionSettling && Math.abs(this.levelRollDeg) <= this.levelThresholdDeg;
 
       // Schedule next frame
       this.levelAnimationFrameId = window.requestAnimationFrame(updateLevel);
@@ -966,6 +1042,12 @@ export class CameraPage2Page implements AfterViewInit {
     this.levelRollDeg = 0;
     this.levelTargetRoll = 0;
     this.lastProcessedRoll = 0; // Reset processed roll on disable
+    this.levelMotionSettling = false;
+    this.levelLastSampleAt = 0;
+    if (this.levelSettleTimer) {
+      clearTimeout(this.levelSettleTimer);
+      this.levelSettleTimer = undefined;
+    }
     
     // Cancel RAF loop
     if (this.levelAnimationFrameId) {
@@ -1047,7 +1129,11 @@ export class CameraPage2Page implements AfterViewInit {
       // box.style.background = '#fff';
       box.style.border = '1px solid transparent';
       box.style.background = 'linear-gradient(#fff, #fff) padding-box, linear-gradient(to right, #ff512f, #f09819) border-box';
-      box.style.padding = '1px';
+      // box.style.padding = '15px';
+      box.style.paddingTop = '10px';
+      box.style.paddingBottom = '15px';
+      box.style.paddingLeft = '15px';
+      box.style.paddingRight = '15px';
       box.style.borderRadius = '8px';
       box.style.minWidth = '280px';
       box.style.maxWidth = '92vw';
@@ -1173,6 +1259,9 @@ export class CameraPage2Page implements AfterViewInit {
       thumbScroll.style.height = '490px';
       thumbScroll.style.maxHeight = '90vh';
       thumbScroll.style.boxSizing = 'border-box';
+      thumbScroll.style.position = 'relative';
+      thumbScroll.style.top = '-20px';
+
 
       const updateThumbnails = () => {
         const thumbnails = thumbScroll.querySelectorAll('img.thumbnail2');
@@ -1193,6 +1282,22 @@ export class CameraPage2Page implements AfterViewInit {
         });
       };
       this._overlayUpdateThumbs = updateThumbnails;
+
+      const reprocessSelectedOverlayImage = async () => {
+        const selectedImage = this.getSelectedOverlayImageData();
+        if (!selectedImage) {
+          console.warn('[CameraPage2] reprocessSelectedOverlayImage: no image selected');
+          alert('No image selected to reprocess');
+          return;
+        }
+
+        try {
+          await this.processDataUrl(selectedImage.dataUrl, selectedImage.originalName);
+        } catch (err) {
+          console.warn('[CameraPage2] reprocessSelectedOverlayImage failed', err);
+          alert('Failed to reprocess selected image. See console for details.');
+        }
+      };
 
       // Prefer storedImages (persisted) when available so we can toggle between original/withBoxes
       //checks if there is stored images and if so create thumbnails for each stored image
@@ -1347,7 +1452,7 @@ export class CameraPage2Page implements AfterViewInit {
       };
 
       reprocessBtn.onclick = () => {
-        void this.reprocessSelectedImage();
+        void reprocessSelectedOverlayImage();
         cleanupOverlay();
       };
 
@@ -1779,8 +1884,8 @@ export class CameraPage2Page implements AfterViewInit {
         if (choice === 'stay' || choice === null) return;
       }
 
-      if (this.selectedSessionId && this.sessionIsPristine === false && typeof (this.imageStorage as any).promptAndSaveSession === 'function') {
-        try { await (this.imageStorage as any).promptAndSaveSession(this.selectedSessionId); } catch (e) { /* ignore */ }
+      if (this.selectedSessionId && this.sessionIsPristine === false && typeof (this.imageStorage as any).saveSessionSnapshotToBrowserStorage === 'function') {
+        try { await (this.imageStorage as any).saveSessionSnapshotToBrowserStorage(this.selectedSessionId, 'local'); } catch (e) { /* ignore */ }
       }
       this.router.navigate(['/home-page2']);
     } catch (e) {

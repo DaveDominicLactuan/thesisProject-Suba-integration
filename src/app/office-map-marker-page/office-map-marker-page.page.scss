@@ -555,6 +555,28 @@ ion-content.home-page {
   flex-direction: column;
 }
 
+.markers-loading-state {
+  min-height: 180px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  color: #666;
+}
+
+.markers-loading-spinner {
+  width: 34px;
+  height: 34px;
+  color: #f09819;
+}
+
+.markers-loading-text {
+  font-size: 14px;
+  font-weight: 600;
+  color: #666;
+}
+
 /* Sessions summary pill */
 .sessions-summary {
    width: 96.5%;
@@ -1558,6 +1580,7 @@ ion-menu ion-item:hover {
         color: #666;
         text-transform: uppercase;
         letter-spacing: 0.5px;
+        margin-top: 15px;
 
         .section-icon {
           font-size: 18px;

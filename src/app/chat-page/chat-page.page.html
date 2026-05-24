@@ -173,8 +173,11 @@
       <div class="chat-options-backdrop" (click)="closeChatOptionsOverlay()"></div>
       <div class="chat-options-sheet" (click)="$event.stopPropagation()">
         <div class="chat-options-drag-handle"></div>
-        <div class="chat-options-icon-badge" aria-hidden="true">
-          <ion-icon name="trash-outline"></ion-icon>
+        <div class="chat-options-icon-badge" [class.is-loading]="chatOptionsDeleteInProgress" aria-hidden="true">
+          <ion-spinner *ngIf="chatOptionsDeleteInProgress; else deleteIcon" name="crescent"></ion-spinner>
+          <ng-template #deleteIcon>
+            <ion-icon name="trash-outline"></ion-icon>
+          </ng-template>
         </div>
         <h2 class="chat-options-title">Delete chat</h2>
         <p class="chat-options-description">This will permanently delete the chat history.</p>

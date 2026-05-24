@@ -2681,6 +2681,7 @@ export class ChatPagePage implements OnInit, OnDestroy {
     accuracy: number;
     timestamp: string;
   } | null = null;
+  private incomingMarkerLocationActive = false;
   private isBackgroundLocationFetchActive = false;
   private backgroundLocationFetchInterval?: ReturnType<typeof setInterval>;
 
@@ -3080,11 +3081,16 @@ ngOnInit(): void {
       this.refreshCacheWarmStatus(cachedUid);
     });
 
-    // Load user location from storage and start background marker fetch
-    this.loadUserLocationAndStartBackgroundFetch(cachedUid);
+    // Only bootstrap the user's own location when the map is not being driven by an incoming office marker.
+    if (!this.incomingMarkerLocationActive) {
+      // Load user location from storage and start background marker fetch
+      this.loadUserLocationAndStartBackgroundFetch(cachedUid);
 
-    // Get and save current location if available
-    void this.getAndSaveCurrentLocation();
+      // Get and save current location if available
+      void this.getAndSaveCurrentLocation();
+    } else {
+      console.log('[ChatPage.ngOnInit] Incoming marker location active; skipping user location bootstrap.');
+    }
   }
 
   this.initialize();
@@ -3143,7 +3149,20 @@ private loadIncomingMapLocation(): void {
 
   if (this.pendingMapLocation) {
     this.activeTab = 'location';
+    this.incomingMarkerLocationActive = true;
+    this.currentUserLocation = {
+      latitude: this.pendingMapLocation.latitude,
+      longitude: this.pendingMapLocation.longitude,
+      accuracy: 0,
+      timestamp: new Date().toISOString()
+    };
     console.log('[ChatPage.loadIncomingMapLocation] Incoming map location loaded:', this.pendingMapLocation);
+
+    try {
+      sessionStorage.removeItem('selectedMarkerLocation');
+    } catch (error) {
+      console.warn('[ChatPage.loadIncomingMapLocation] Failed to clear stored marker location:', error);
+    }
   }
 }
 
@@ -4653,6 +4672,11 @@ onMsgBubbleTap(message: Message): void {
    * Checks if user has location enabled and fetches markers within radius bounds.
    */
   private loadUserLocationAndStartBackgroundFetch(userId: string): void {
+    if (this.incomingMarkerLocationActive) {
+      console.log('[ChatPage.backgroundFetch] Incoming marker location active; skipping stored user location bootstrap.');
+      return;
+    }
+
     try {
       const locationKey = `user_sidebar_location_${userId}`;
       const storedLocation = localStorage.getItem(locationKey);
@@ -4735,6 +4759,16 @@ onMsgBubbleTap(message: Message): void {
    * Called during initialization to populate the stored location.
    */
   private async getAndSaveCurrentLocation(): Promise<{ latitude: number; longitude: number } | null> {
+    if (this.incomingMarkerLocationActive) {
+      console.log('[ChatPage.getAndSaveCurrentLocation] Incoming marker location active; skipping current location save.');
+      return this.pendingMapLocation
+        ? {
+            latitude: this.pendingMapLocation.latitude,
+            longitude: this.pendingMapLocation.longitude
+          }
+        : null;
+    }
+
     try {
       console.log('[ChatPage.getAndSaveCurrentLocation] Attempting to fetch and save current location...');
       const location = await this.getCurrentCoordinates();
@@ -6116,7 +6150,7 @@ onMsgBubbleTap(message: Message): void {
     }
 
     // Check if location was unavailable but is now available
-    if (!this.lastLocationStatus && locationNow) {
+    if (!this.incomingMarkerLocationActive && !this.lastLocationStatus && locationNow) {
       console.log('[ChatPage.checkAndRecoverServices] Location access recovered! Fetching and updating user location...');
       try {
         const coords = await this.getCurrentCoordinates();

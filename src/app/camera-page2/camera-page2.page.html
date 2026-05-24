@@ -116,7 +116,12 @@
       </div>
 
       <!-- 🔘 Capture Button -->
-      <button class="shutter-btn" (click)="takePicture()" [disabled]="isCooldown"></button>
+      <button
+        class="shutter-btn"
+        [class.shutter-btn-green]="isLevelEnabled && isPhoneLeveled"
+        (click)="takePicture()"
+        [disabled]="isCooldown"
+      ></button>
 
       <!-- Thumbnails on the right (render from stored images) -->
       <div *ngIf="storedImages.length === 0" class="thumbnail-placeholder" (click)="openTestOverlay()"></div>

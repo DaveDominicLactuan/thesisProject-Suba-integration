@@ -21,14 +21,10 @@ interface DisplayImage {
   hasPrediction?: boolean;
   engineerCheckedSession?: boolean;
   storagePath?: string;
-  withBoxesStoragePath?: string;
   storageUrl?: string;
-  withBoxesStorageUrl?: string;
   // S3 key fields for mobile compatibility
   originalS3Key?: string;
-  withBoxesS3Key?: string;
   originalS3Url?: string;
-  withBoxesS3Url?: string;
 }
 
 interface BoundingBox {
@@ -366,8 +362,7 @@ private lastImageTitleDebugAt: number = 0;
     const imagesToHydrate = (this.imagePaths || []).filter((img: DisplayImage) => {
       // Check for storagePath OR S3 keys
       const needsOriginal = (!!img.storagePath || !!img.originalS3Key) && !img.original?.startsWith('data:');
-      const needsWithBoxes = (!!img.withBoxesStoragePath || !!img.withBoxesS3Key) && !img.withBoxes?.startsWith('data:');
-      return needsOriginal || needsWithBoxes;
+      return needsOriginal;
     });
 
     if (imagesToHydrate.length === 0) {
@@ -399,30 +394,11 @@ private lastImageTitleDebugAt: number = 0;
           }
         }
 
-        // Fetch withBoxes image - try withBoxesStoragePath first, then S3 key as fallback
-        if (!img.withBoxes?.startsWith('data:')) {
-          if (img.withBoxesStoragePath) {
-            console.log('[FeedbackPage] Hydrating withBoxes from withBoxesStoragePath:', img.withBoxesStoragePath);
-            const withBoxesData = await this.imageStorageService.fetchS3ObjectAsDataUrl(img.withBoxesStoragePath);
-            if (withBoxesData) {
-              img.withBoxes = withBoxesData;
-            }
-          } else if (img.withBoxesS3Key) {
-            // Fallback to S3 key if withBoxesStoragePath not available (mobile compatibility)
-            console.log('[FeedbackPage] Hydrating withBoxes from S3 key:', img.withBoxesS3Key);
-            const withBoxesData = await this.imageStorageService.fetchS3ObjectAsDataUrl(img.withBoxesS3Key);
-            if (withBoxesData) {
-              img.withBoxes = withBoxesData;
-            }
-          }
-        }
       } catch (error) {
         console.warn('[FeedbackPage] Failed to hydrate session image from storage path', {
           filename: img.filename,
           storagePath: img.storagePath,
-          withBoxesStoragePath: img.withBoxesStoragePath,
           originalS3Key: img.originalS3Key,
-          withBoxesS3Key: img.withBoxesS3Key,
           error
         });
       }
@@ -657,9 +633,8 @@ private lastImageTitleDebugAt: number = 0;
             img?.original === key ||
             img?.withBoxes === key ||
             img?.storagePath === key ||
-            img?.withBoxesStoragePath === key ||
             img?.originalS3Key === key ||
-            img?.withBoxesS3Key === key
+            img?.originalS3Url === key
           );
         }
         if (entry) this.imagePaths.push(this.buildDisplayImage(entry));
@@ -690,9 +665,8 @@ private lastImageTitleDebugAt: number = 0;
               img?.original === key ||
               img?.withBoxes === key ||
               img?.storagePath === key ||
-              img?.withBoxesStoragePath === key ||
               img?.originalS3Key === key ||
-              img?.withBoxesS3Key === key
+              img?.originalS3Url === key
             );
             if (entry) this.imagePaths.push(this.buildDisplayImage(entry));
           }
@@ -700,7 +674,7 @@ private lastImageTitleDebugAt: number = 0;
       }
 
       const hasS3BackedImages = this.imagePaths.some((img: DisplayImage) =>
-        !!img.originalS3Key || !!img.storagePath || !!img.withBoxesStoragePath || !!img.withBoxesS3Key
+        !!img.originalS3Key || !!img.storagePath || !!img.originalS3Url
       );
       if (hasS3BackedImages) {
         await this.runSessionLoadingWindow(() => this.hydrateSessionImagesFromS3(), Math.max(1800, this.imagePaths.length * 450));
@@ -749,7 +723,7 @@ private lastImageTitleDebugAt: number = 0;
           predictionType: img.rawPrediction?.type || 'N/A',
           predictionShape: img.rawPrediction?.shape || 'N/A',
           predictionSeverity: img.rawPrediction?.severity || 'N/A',
-          hasS3Key: !!(img.originalS3Key || img.withBoxesS3Key),
+          hasS3Key: !!(img.originalS3Key || img.originalS3Url),
           boxCount: img.boxes?.length || 0
         })));
         console.groupEnd();
@@ -839,7 +813,7 @@ private lastImageTitleDebugAt: number = 0;
 
     // Filter images that need S3 hydration - prioritize originalS3Key when present
     const imagesToHydrate = this.imagePaths.filter((img: DisplayImage) => 
-      img?.originalS3Key || img?.storagePath || img?.withBoxesStoragePath || img?.withBoxesS3Key
+      img?.originalS3Key || img?.storagePath || img?.originalS3Url
     );
     if (imagesToHydrate.length === 0) {
       console.log('[FeedbackPage] No images with S3 keys found for hydration');
@@ -1024,27 +998,23 @@ private lastImageTitleDebugAt: number = 0;
       ? img.withBoxes
       : originalSrc;
 
-    //Build return object: choose withBoxes fallback, derive filename, 
-    // include normalized prediction/status, and include S3 keys for mobile compatibility
+    //Build return object: choose withBoxes fallback, derive filename,
+    // and include normalized prediction/status fields.
       return {
       original: originalSrc,
       withBoxes: withBoxesSrc,
       filename: img.filename || '',
       fileName: img.filename || '',
-        boxes: Array.isArray(img.boxes) ? img.boxes : [],
-        storagePath: img.storagePath,
-        withBoxesStoragePath: img.withBoxesStoragePath,
-        storageUrl: img.storageUrl,
-        withBoxesStorageUrl: img.withBoxesStorageUrl,
-        originalS3Key: img.originalS3Key,
-        withBoxesS3Key: img.withBoxesS3Key,
-        originalS3Url: img.originalS3Url,
-        withBoxesS3Url: img.withBoxesS3Url,
+      boxes: Array.isArray(img.boxes) ? img.boxes : [],
+      storagePath: img.storagePath,
+      storageUrl: img.storageUrl,
+      originalS3Key: img.originalS3Key,
+      originalS3Url: img.originalS3Url,
       detectionMessage,
       detectionResult,
-        rawPrediction: prediction ? { type: predType, shape: predShape, severity: predSeverity, boxes: Array.isArray(img.boxes) ? img.boxes : [] } : undefined,
-        prediction: originalPrediction ? { type: originalPrediction?.type ?? '', shape: originalPrediction?.shape ?? '', severity: originalPrediction?.severity ?? '', boxes: Array.isArray(img.boxes) ? img.boxes : [] } : undefined,
-        correctedPrediction: correctedPrediction ? { type: correctedPrediction?.type ?? '', shape: correctedPrediction?.shape ?? '', severity: correctedPrediction?.severity ?? '', boxes: Array.isArray(img.boxes) ? img.boxes : [] } : undefined,
+      rawPrediction: prediction ? { type: predType, shape: predShape, severity: predSeverity, boxes: Array.isArray(img.boxes) ? img.boxes : [] } : undefined,
+      prediction: originalPrediction ? { type: originalPrediction?.type ?? '', shape: originalPrediction?.shape ?? '', severity: originalPrediction?.severity ?? '', boxes: Array.isArray(img.boxes) ? img.boxes : [] } : undefined,
+      correctedPrediction: correctedPrediction ? { type: correctedPrediction?.type ?? '', shape: correctedPrediction?.shape ?? '', severity: correctedPrediction?.severity ?? '', boxes: Array.isArray(img.boxes) ? img.boxes : [] } : undefined,
       engineerCheckedSession: !!img.engineerCheckedSession,
       statusMessage: img.statusMessage
     } as DisplayImage;
@@ -1473,12 +1443,8 @@ addEntry() {
     // ✅ Preserve S3 key fields from matched DisplayImage to ensure they're not lost
     if (matched.originalS3Key) updatedStored.originalS3Key = matched.originalS3Key;
     if (matched.originalS3Url) updatedStored.originalS3Url = matched.originalS3Url;
-    if (matched.withBoxesS3Key) updatedStored.withBoxesS3Key = matched.withBoxesS3Key;
-    if (matched.withBoxesS3Url) updatedStored.withBoxesS3Url = matched.withBoxesS3Url;
     if (matched.storagePath) updatedStored.storagePath = matched.storagePath;
     if (matched.storageUrl) updatedStored.storageUrl = matched.storageUrl;
-    if (matched.withBoxesStoragePath) updatedStored.withBoxesStoragePath = matched.withBoxesStoragePath;
-    if (matched.withBoxesStorageUrl) updatedStored.withBoxesStorageUrl = matched.withBoxesStorageUrl;
 
     // Ensure original and withBoxes are persisted into the stored entry
     if (matched.original) updatedStored.original = matched.original;
@@ -1950,7 +1916,7 @@ addEntry() {
       // Keep the in-memory base64 payloads intact so navigation to the
       // dashboard and PDF page can still render the boxed image.
       // S3 key fields are already preserved separately on the object.
-      if (img.storagePath || img.originalS3Key || img.withBoxesStoragePath || img.withBoxesS3Key) {
+      if (img.storagePath || img.originalS3Key) {
         console.log(
           `[FeedbackPage] Guard Rail - Preserving image payloads for [${imgName}] while keeping S3 key references`
         );
@@ -2008,12 +1974,8 @@ addEntry() {
             // ✅ CRITICAL: Preserve S3 key fields so they're not lost when saving
             originalS3Key: found.originalS3Key,
             originalS3Url: found.originalS3Url,
-            withBoxesS3Key: found.withBoxesS3Key,
-            withBoxesS3Url: found.withBoxesS3Url,
             storagePath: found.storagePath,
-            storageUrl: found.storageUrl,
-            withBoxesStoragePath: found.withBoxesStoragePath,
-            withBoxesStorageUrl: found.withBoxesStorageUrl
+            storageUrl: found.storageUrl
           };
         }
       }
@@ -2037,7 +1999,7 @@ addEntry() {
         predictionBoxCount: Array.isArray(entry.prediction?.boxes) ? entry.prediction.boxes.length : 0,
         correctedPredictionBoxCount: Array.isArray(entry.correctedPrediction?.boxes) ? entry.correctedPrediction.boxes.length : 0,
         hasPrediction: !!entry.prediction || !!entry.rawPrediction,
-        hasS3Key: !!(entry.originalS3Key || entry.withBoxesS3Key)
+        hasS3Key: !!(entry.originalS3Key || entry.originalS3Url)
       });
       console.groupEnd();
 
@@ -2061,7 +2023,7 @@ addEntry() {
         correctedPrediction: entry.correctedPrediction || '(none)',
         statusMessage: entry.statusMessage || '(none)',
         engineerChecked: entry.engineerCheckedSession || false,
-        hasS3Key: !!(entry.originalS3Key || entry.withBoxesS3Key)
+        hasS3Key: !!(entry.originalS3Key || entry.originalS3Url)
       });
       console.groupEnd();
 
@@ -2347,12 +2309,8 @@ addEntry() {
                   // Preserve S3 references if they exist
                   originalS3Key: img.originalS3Key,
                   originalS3Url: img.originalS3Url,
-                  withBoxesS3Key: img.withBoxesS3Key,
-                  withBoxesS3Url: img.withBoxesS3Url,
                   storagePath: img.storagePath,
-                  storageUrl: img.storageUrl,
-                  withBoxesStoragePath: img.withBoxesStoragePath,
-                  withBoxesStorageUrl: img.withBoxesStorageUrl
+                  storageUrl: img.storageUrl
                 })),
                 userRole: this.userRole,
                 userId: this.userId,
@@ -2519,10 +2477,6 @@ addEntry() {
                       try {
                         const withBoxesResult = await svc.uploadSessionImageWithBoxes(imgEntry.withBoxes, savedSessionId, imgEntry.filename || imgKey);
                         if (withBoxesResult) {
-                          imgEntry.withBoxesStoragePath = withBoxesResult.s3Key;
-                          imgEntry.withBoxesStorageUrl = withBoxesResult.url;
-                          imgEntry.withBoxesS3Key = withBoxesResult.s3Key;
-                          imgEntry.withBoxesS3Url = withBoxesResult.url;
                           // keep imgEntry.withBoxes as the dataURL so the UI still shows the processed image locally
                           console.log(`âœ… WithBoxes uploaded for ${imgKey}:`, withBoxesResult.s3Key);
                         }
@@ -2667,25 +2621,19 @@ addEntry() {
                 if (img.storagePath) {
                   s3Summary.push(`âœ… Original [${imgName}]: ${img.storagePath}`);
                 }
-                if (img.withBoxesStoragePath) {
-                  s3Summary.push(`âœ… Processed [${imgName}]: ${img.withBoxesStoragePath}`);
-                }
               });
             }
             
             const firestoreMessage = `âœ… Session saved to Firestore: ${savedSessionId}\n${s3Summary.length > 0 ? 'ðŸ“ S3 Files:\n' + s3Summary.join('\n') : 'No S3 uploads found'}`;
             console.log(firestoreMessage);
             await this.showFirestoreSavePrompt(firestoreMessage);
-          } else if (sessionImages && sessionImages.some((img: StoredImage) => img.storagePath || img.withBoxesStoragePath)) {
+          } else if (sessionImages && sessionImages.some((img: StoredImage) => img.storagePath)) {
             // Build summary from images with S3 references
             const s3Summary: string[] = [];
             sessionImages.forEach((img: StoredImage, index: number) => {
               const imgName = img.filename || `Image ${index + 1}`;
               if (img.storagePath) {
                 s3Summary.push(`âœ… Original [${imgName}]: ${img.storagePath}`);
-              }
-              if (img.withBoxesStoragePath) {
-                s3Summary.push(`âœ… Processed [${imgName}]: ${img.withBoxesStoragePath}`);
               }
             });
             

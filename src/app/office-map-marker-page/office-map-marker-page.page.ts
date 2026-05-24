@@ -32,6 +32,7 @@ export class OfficeMapMarkerPagePage implements OnInit, OnDestroy {
   currentSort: string = 'time-newest'; // default sorting
   syncStatusText: string = 'Not synced';
   syncStatusState: 'idle' | 'syncing' | 'completed' | 'error' = 'idle';
+  isMarkersLoading: boolean = false;
   
   // --- Session Confirmation Dialog State ---
   isSessionConfirmDialogOpen: boolean = false;
@@ -1482,10 +1483,12 @@ private startUserSyncInBackground(userId: string): void {
    * Load office location markers from Firestore for the current user.
    */
   async loadOfficeLocationMarkers(): Promise<void> {
+    this.isMarkersLoading = true;
     try {
       const uid = this.userID || this.auth3.getCurrentUser()?.uid;
       if (!uid) {
         console.warn('[SessionPage.loadOfficeLocationMarkers] No user ID available');
+        this.officeLocationMarkers = [];
         return;
       }
 
@@ -1531,6 +1534,9 @@ private startUserSyncInBackground(userId: string): void {
       console.log('[SessionPage.loadOfficeLocationMarkers] Markers payload:', JSON.parse(JSON.stringify(markers)));
     } catch (error) {
       console.error('[SessionPage.loadOfficeLocationMarkers] Error loading markers:', error);
+      this.officeLocationMarkers = [];
+    } finally {
+      this.isMarkersLoading = false;
     }
   }
 
@@ -1742,6 +1748,38 @@ private startUserSyncInBackground(userId: string): void {
   }
 
   /**
+   * Build a Firestore payload from the current marker form values.
+   */
+  private buildMarkerPayload(userId: string, storedProfile: any, existingMarker?: any) {
+    const name = this.markerFormData.name.trim();
+    const address = this.markerFormData.address.trim();
+    const contactInfo = this.markerFormData.contactInfo.trim();
+    const availableTime = this.markerFormData.availableTime.trim();
+    const unavailableTime = this.markerFormData.unavailableTime.trim();
+    const officeLocation = {
+      latitude: this.markerFormData.location.latitude,
+      longitude: this.markerFormData.location.longitude,
+    };
+
+    return {
+      userID: userId,
+      name,
+      address,
+      officeAddress: address,
+      contactInfo,
+      availableTime,
+      unavailableTime,
+      firstName: this.firstName || storedProfile?.firstName || storedProfile?.givenName || '',
+      lastName: this.lastName || storedProfile?.lastName || storedProfile?.familyName || '',
+      email: this.email || storedProfile?.email || '',
+      location: officeLocation,
+      officeLocation,
+      created: existingMarker?.created || existingMarker?.createdAt || new Date().toISOString(),
+      createdAt: existingMarker?.createdAt || existingMarker?.created || new Date().toISOString(),
+    };
+  }
+
+  /**
    * Update an existing office marker in Firestore
    */
   private async updateMarkerInFirestore(markerId: string, updatedData: any): Promise<void> {
@@ -1782,53 +1820,21 @@ private startUserSyncInBackground(userId: string): void {
     }
 
     const storedProfile = (this.readStoredUserProfile && this.readStoredUserProfile()) || null;
-    const officeLocation = {
-      latitude: this.markerFormData.location.latitude,
-      longitude: this.markerFormData.location.longitude,
-    };
-    const payload = {
-      userID: userId,
-      name,
-      address,
-      officeAddress: address,
-      contactInfo,
-      availableTime,
-      unavailableTime,
-      firstName: this.firstName || storedProfile?.firstName || storedProfile?.givenName || '',
-      lastName: this.lastName || storedProfile?.lastName || storedProfile?.familyName || '',
-      email: this.email || storedProfile?.email || '',
-      location: officeLocation,
-      officeLocation,
-      created: this.selectedMarkerForEdit?.created || this.selectedMarkerForEdit?.createdAt || new Date().toISOString(),
-      createdAt: this.selectedMarkerForEdit?.createdAt || this.selectedMarkerForEdit?.created || new Date().toISOString(),
-    };
+    const payload = this.buildMarkerPayload(userId, storedProfile);
 
     console.log("office location Payload", payload);
 
     try {
-      if (this.isMarkerEditMode && this.editingMarkerId) {
-        // Update existing marker
-        const updatePayload = {
-          ...payload,
-          updated: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-          markerId: this.editingMarkerId,
-        };
-        await this.updateMarkerInFirestore(this.editingMarkerId, updatePayload);
-        console.log('[OfficeMapMarkerPage.confirmAddOffice] Office location marker updated:', this.editingMarkerId);
-      } else {
-        // Create new marker
-        const { collection, doc, getFirestore, setDoc } = await import('firebase/firestore');
-        const firestore = getFirestore();
-        const markerCollectionRef = collection(firestore, 'userOfficeLocationMarker');
-        const markerDocRef = doc(markerCollectionRef);
+      const { collection, doc, getFirestore, setDoc } = await import('firebase/firestore');
+      const firestore = getFirestore();
+      const markerCollectionRef = collection(firestore, 'userOfficeLocationMarker');
+      const markerDocRef = doc(markerCollectionRef);
 
-        await setDoc(markerDocRef, {
-          ...payload,
-          markerId: markerDocRef.id,
-        });
-        console.log('[OfficeMapMarkerPage.confirmAddOffice] Office location marker created:', markerDocRef.id);
-      }
+      await setDoc(markerDocRef, {
+        ...payload,
+        markerId: markerDocRef.id,
+      });
+      console.log('[OfficeMapMarkerPage.confirmAddOffice] Office location marker created:', markerDocRef.id);
       this.closeMarkerCreationDialog();
       await this.loadOfficeLocationMarkers();
     } catch (error) {
@@ -1836,8 +1842,66 @@ private startUserSyncInBackground(userId: string): void {
     }
   }
 
-  submitMarkerForm(): void {
-    void this.confirmAddOffice();
+  /**
+   * Submit handler for the marker dialog footer button.
+   * Create mode uses the create flow; edit mode updates the selected marker.
+   */
+  async submitMarkerForm(event?: Event): Promise<void> {
+    if (this.isMarkerEditMode && this.editingMarkerId) {
+      await this.updateCurrentMarker(event);
+      return;
+    }
+
+    await this.confirmAddOffice(event);
+  }
+
+  /**
+   * Update the marker currently loaded into the dialog form.
+   */
+  private async updateCurrentMarker(event?: Event): Promise<void> {
+    event?.preventDefault();
+
+    const name = this.markerFormData.name.trim();
+    const address = this.markerFormData.address.trim();
+    const contactInfo = this.markerFormData.contactInfo.trim();
+    const availableTime = this.markerFormData.availableTime.trim();
+    const unavailableTime = this.markerFormData.unavailableTime.trim();
+
+    if (!name || !address || !contactInfo || !availableTime || !unavailableTime) {
+      console.warn('[OfficeMapMarkerPage.updateCurrentMarker] Marker update blocked: required fields are missing.');
+      return;
+    }
+
+    const userId = this.userID || this.auth3.getCurrentUser()?.uid || null;
+    if (!userId) {
+      console.warn('[OfficeMapMarkerPage.updateCurrentMarker] Marker update blocked: no user ID available.');
+      return;
+    }
+
+    const storedProfile = (this.readStoredUserProfile && this.readStoredUserProfile()) || null;
+    const payload = this.buildMarkerPayload(userId, storedProfile, this.selectedMarkerForEdit);
+    const markerId = this.editingMarkerId;
+
+    if (!markerId) {
+      console.warn('[OfficeMapMarkerPage.updateCurrentMarker] Marker update blocked: no marker id available.');
+      return;
+    }
+
+    try {
+      const updatePayload = {
+        ...payload,
+        updated: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        markerId,
+      };
+
+      await this.updateMarkerInFirestore(markerId, updatePayload);
+      console.log('[OfficeMapMarkerPage.updateCurrentMarker] Office location marker updated:', markerId);
+      this.closeMarkerCreationDialog();
+      await this.loadOfficeLocationMarkers();
+    } catch (error) {
+      console.error('[OfficeMapMarkerPage.updateCurrentMarker] Failed to update office location marker:', error);
+    }
   }
 
   /**

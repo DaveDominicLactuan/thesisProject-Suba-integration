@@ -46,6 +46,15 @@
 <!-- Combined control bar (top on top, bottom below) -->
 <div class="control-bar">
   <div class="top-bar">
+     <div class="func-action" (click)="openProcessWindow()">
+          <div class="spinner-container-rect" [class.has-processed-images]="processedGlowActive">
+          <svg *ngIf="isProcessing" class="rect-spinner" width="70" height="40">
+            <rect x="2" y="2" width="66" height="36" rx="12" ry="12" class="rect-spinner-path" />
+          </svg>
+          <div class="center-value-rect">{{ photosProcessed }}/{{ photosTaken }}</div>
+          <div class="red-circle" [ngClass]="{ 'green': photosProcessed === photosTaken, 'red': photosProcessed < photosTaken }"></div>
+        </div>
+      </div>
     <!-- <button class="back-btn" type="button" (click)="onBack()">
       <img src="assets/wArrow.png" alt="Back" class="back-icon" />
     </button> -->
@@ -73,6 +82,14 @@
           <div class="center-value-rect">{{ photosProcessed }}/{{ photosTaken }}</div>
           <div class="red-circle" [ngClass]="{ 'green': photosProcessed === photosTaken, 'red': photosProcessed < photosTaken }"></div>
         </div>
+      </div>
+
+      <!-- Upload and Finish blocks (now siblings of the spinner block for even spacing) -->
+      <div class="func-action" (click)="reprocessSelectedImage()">
+        <button class="function-btn icon-btn" aria-label="Reprocess Selected Image">
+          <img src="assets/upload_img2.png" alt="Upload" class="action-icon" />
+        </button>
+        <div class="action-label">Reprocess Selected</div>
       </div>
 
       <!-- Upload and Finish blocks (now siblings of the spinner block for even spacing) -->

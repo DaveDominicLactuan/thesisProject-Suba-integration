@@ -1361,6 +1361,60 @@ export class ImageStorageService {
     this.persistSessions();
     return s;
   }
+
+  /** Persist a session snapshot and its related images to browser storage. */
+  async saveSessionSnapshotToBrowserStorage(sessionId: string, storageTarget: 'local' | 'session' = 'local'): Promise<boolean> {
+    const session = this.getSession(sessionId);
+    if (!session) {
+      console.warn('[ImageStorageService] saveSessionSnapshotToBrowserStorage: session not found', sessionId);
+      return false;
+    }
+
+    const images = (session.imageKeys || [])
+      .map(key => this.images.find(image => image.filename === key || image.original === key || (image.withBoxes && image.withBoxes === key)))
+      .filter((image): image is StoredImage => !!image)
+      .map(image => ({
+        ...image,
+        original: image.original,
+        withBoxes: image.withBoxes,
+        boxes: Array.isArray(image.boxes) ? [...image.boxes] : image.boxes,
+        prediction: image.prediction ? { ...image.prediction, boxes: Array.isArray(image.prediction.boxes) ? [...image.prediction.boxes] : image.prediction.boxes } : image.prediction,
+        correctedPrediction: image.correctedPrediction ? { ...image.correctedPrediction, boxes: Array.isArray(image.correctedPrediction.boxes) ? [...image.correctedPrediction.boxes] : image.correctedPrediction.boxes } : image.correctedPrediction
+      }));
+
+    const payload = {
+      session: {
+        ...session,
+        imageKeys: [...(session.imageKeys || [])]
+      },
+      images,
+      savedAt: new Date().toISOString()
+    };
+
+    const storageKey = `image-session-snapshot:${sessionId}`;
+    const targets: Array<globalThis.Storage> = [];
+
+    if (typeof window !== 'undefined') {
+      if (storageTarget === 'local') {
+        targets.push(window.localStorage, window.sessionStorage);
+      } else {
+        targets.push(window.sessionStorage, window.localStorage);
+      }
+    }
+
+    for (const target of targets) {
+      try {
+        target.setItem(storageKey, JSON.stringify(payload));
+        await this.persistSessions();
+        return true;
+      } catch (e) {
+        console.warn('[ImageStorageService] Failed to save session snapshot to browser storage', e);
+      }
+    }
+
+    await this.persistSessions();
+    return false;
+  }
   
   //returns the sessions array by creating and returning a new array 
   // that contains all the elements of the this.sessions array.
