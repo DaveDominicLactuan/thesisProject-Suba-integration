@@ -6343,7 +6343,10 @@ onMsgBubbleTap(message: Message): void {
     for (const markerData of this.officeLocationMarkerData) {
       try {
         const markerTitle = this.buildOfficeMarkerTitle(markerData);
-        const marker = L.marker([markerData.latitude, markerData.longitude], { icon: this.testMarkerIcon })
+        const markerIcon = this.isIncomingMarkerLocation(markerData)
+          ? this.tapMarkerIcon
+          : this.testMarkerIcon;
+        const marker = L.marker([markerData.latitude, markerData.longitude], { icon: markerIcon })
           .addTo(mapInstance)
           .bindPopup(`<strong>${markerTitle}</strong>`);
 
@@ -6401,6 +6404,27 @@ onMsgBubbleTap(message: Message): void {
     console.log('[ChatPage.userOfficeLocationMarker] Stored markers rendered on map.', {
       markerCount: this.officeLocationLeafletMarkers.length
     });
+  }
+
+  private isIncomingMarkerLocation(markerData: OfficeLocationMarkerData): boolean {
+    if (!this.pendingMapLocation) {
+      return false;
+    }
+
+    const markerLatitude = Number(markerData?.latitude);
+    const markerLongitude = Number(markerData?.longitude);
+    const incomingLatitude = Number(this.pendingMapLocation.latitude);
+    const incomingLongitude = Number(this.pendingMapLocation.longitude);
+
+    if (!Number.isFinite(markerLatitude) || !Number.isFinite(markerLongitude)) {
+      return false;
+    }
+
+    const epsilon = 0.000001;
+    return (
+      Math.abs(markerLatitude - incomingLatitude) <= epsilon &&
+      Math.abs(markerLongitude - incomingLongitude) <= epsilon
+    );
   }
 
   private async loadAndRenderOfficeLocationMarkers(): Promise<void> {
@@ -6560,7 +6584,12 @@ onMsgBubbleTap(message: Message): void {
         this.applyEffectiveTileLayerMode();
         this.bindMapTapCapture();
         this.map.setView(center, 15);
-        await this.markUserLocation(this.map, coordinates, this.pendingMapLocation?.label ? `Marker: ${this.pendingMapLocation.label}` : 'You are here!');
+        await this.markUserLocation(
+          this.map,
+          coordinates,
+          this.pendingMapLocation?.label ? `Marker: ${this.pendingMapLocation.label}` : 'You are here!',
+          this.incomingMarkerLocationActive ? this.tapMarkerIcon : this.userLocationIcon
+        );
         // Start background online refresh (won't block map display since markers & tiles are already visible)
         void this.runStaggeredOnlineBootstrap(bootstrapId);
         return;
@@ -6590,7 +6619,12 @@ onMsgBubbleTap(message: Message): void {
       console.log('[ChatPage.initMap] Rendering local marker cache immediately with offline tiles (before any internet checks).');
       this.renderLocalMarkerCacheImmediately();
       
-      await this.markUserLocation(this.map, coordinates, this.pendingMapLocation?.label ? `Marker: ${this.pendingMapLocation.label}` : 'You are here!');
+      await this.markUserLocation(
+        this.map,
+        coordinates,
+        this.pendingMapLocation?.label ? `Marker: ${this.pendingMapLocation.label}` : 'You are here!',
+        this.incomingMarkerLocationActive ? this.tapMarkerIcon : this.userLocationIcon
+      );
       
       // Start background online refresh (won't block display since markers & tiles are already rendered)
       // If online & location detected, refreshes markers from Firestore and stores them locally
@@ -6602,7 +6636,12 @@ onMsgBubbleTap(message: Message): void {
     }
   }
 
-  async markUserLocation(map: L.Map, coordinates?: { latitude: number; longitude: number } | null, popupText: string = 'You are here!') {
+  async markUserLocation(
+    map: L.Map,
+    coordinates?: { latitude: number; longitude: number } | null,
+    popupText: string = 'You are here!',
+    iconOverride?: L.Icon
+  ) {
       console.log('[ChatPage.markUserLocation] Marking user location...', { coordinatesFromCaller: coordinates });
       try {
         const resolvedCoordinates = coordinates ?? await this.getCurrentCoordinates();
@@ -6624,7 +6663,7 @@ onMsgBubbleTap(message: Message): void {
           //   .bindPopup('You are here!')
           //   .openPopup();
           this.userLocationMarker = L.marker([latitude, longitude], {
-  icon: this.userLocationIcon
+  icon: iconOverride || this.userLocationIcon
 })
   .addTo(map)
   .bindPopup(popupText)

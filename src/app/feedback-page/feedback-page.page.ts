@@ -2046,6 +2046,11 @@ addEntry() {
   //create a Promise that resolves after user action (Save/Cancel)
   async showSaveSessionPrompt(entry: any): Promise<void> {
     return new Promise((resolve) => {
+      const currentSession = this.selectedSessionId
+        ? (this.sessions.find((session) => session?.id === this.selectedSessionId) || null)
+        : (this.sessions.length > 0 ? this.sessions[0] : null);
+      const currentSessionName = typeof currentSession?.name === 'string' ? currentSession.name.trim() : '';
+      const hasExistingSessionName = currentSessionName.length > 0;
 
       // Create full-screen overlay element and style it
       const overlay = document.createElement('div');
@@ -2067,24 +2072,27 @@ addEntry() {
       box.style.padding = '18px';
       box.style.borderRadius = '8px';
       box.style.minWidth = '300px';
+      box.style.width = '95%';
       box.style.boxShadow = '0 6px 30px rgba(0,0,0,0.3)';
 
       //Title for inactive state
       const title = document.createElement('div');
-      title.innerText = 'Save current session with a';
+      title.innerText = hasExistingSessionName
+        ? 'Save changes and updated selected session'
+        : 'Save current session with a';
       title.style.fontWeight = '700';
       title.style.marginBottom = '4px';
       title.style.fontSize = '16px';
 
-      const titleSubtext = document.createElement('div');
-      titleSubtext.innerText = 'session name';
-      titleSubtext.style.fontWeight = '700';
-      titleSubtext.style.marginBottom = '12px';
-      titleSubtext.style.fontSize = '16px';
+      // const titleSubtext = document.createElement('div');
+      // titleSubtext.innerText = hasExistingSessionName ? 'selected session name' : 'session name';
+      // titleSubtext.style.fontWeight = '700';
+      // titleSubtext.style.marginBottom = '12px';
+      // titleSubtext.style.fontSize = '16px';
 
       const input = document.createElement('input');
       input.type = 'text';
-      input.placeholder = `Session ${new Date().toLocaleString()}`;
+      input.placeholder = hasExistingSessionName ? currentSessionName : `Session ${new Date().toLocaleString()}`;
       input.style.width = '100%';
       input.style.padding = '8px';
       input.style.marginBottom = '12px';
@@ -2111,7 +2119,7 @@ addEntry() {
       cancelBtn.style.fontWeight = '600';
 
       const saveBtn = document.createElement('button');
-      saveBtn.innerText = 'Save';
+  saveBtn.innerText = hasExistingSessionName ? 'Update' : 'Save';
       saveBtn.style.padding = '8px 16px';
       saveBtn.style.width = '120px';
       saveBtn.style.height = '40px';
@@ -2657,7 +2665,7 @@ addEntry() {
       btnRow.appendChild(saveBtn);
 
       box.appendChild(title);
-      box.appendChild(titleSubtext);
+      // box.appendChild(titleSubtext);
       box.appendChild(input);
       box.appendChild(btnRow);
       overlay.appendChild(box);

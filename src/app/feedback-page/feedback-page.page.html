@@ -45,7 +45,7 @@
     </div>
 
     <!-- Confirm button at the top left corner (hidden if engineer has checked session) -->
-    <div class="back-button-container2" *ngIf="!engineerLookedSessionChecked && userRole === 'engineer'">
+    <div class="back-button-container2" >
       <button class="back-btn2" type="button" (click)="saveCurrentStoredImageAndGoHome()">
         <img src="assets/Check_Black.png" alt="Back" class="back-icon" />
       </button>

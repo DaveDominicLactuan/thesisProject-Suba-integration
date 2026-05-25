@@ -336,8 +336,32 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
         return;
       }
 
-      const filename = selected.fileImageName || selected.filename || this.selectedImageTitle || `selected-${Date.now()}.jpg`;
-      await this.processDataUrl(dataUrl, filename);
+      const originalDeleteKey = selected.filename || selected.fileImageName || selected.original || selected.withBoxes || '';
+      const reprocessFilename = `reprocess-${Date.now()}.jpg`;
+
+      // Reprocess first so the replacement image is saved before removing the original.
+      const reprocessedEntry = await this.processDataUrl(dataUrl, reprocessFilename, false, false, false);
+
+      if (originalDeleteKey) {
+        const removed = await this.imageStorage.deleteImage(originalDeleteKey);
+        if (!removed && selected.original && selected.original !== originalDeleteKey) {
+          await this.imageStorage.deleteImage(selected.original);
+        }
+      }
+
+      await this.updatePhotoCounts();
+      try {
+        await this.loadStoredImages();
+        await this.loadSessions();
+        await this.refreshDisplayedImages();
+      } catch (refreshErr) {
+        console.warn('[UploadImagePage] reprocessSelectedImage refresh failed', refreshErr);
+      }
+
+      this.selectedThumbSrc = (reprocessedEntry as any)?.original || dataUrl;
+      this.selectedImageSelectionKey = (reprocessedEntry as any)?.filename || reprocessFilename;
+      this.selectedImageTitle = (reprocessedEntry as any)?.filename || reprocessFilename;
+      setTimeout(() => this.detectCenterThumbnail(), 60);
     } catch (e) {
       console.warn('[UploadImagePage] reprocessSelectedImage failed', e);
       alert('Failed to reprocess the selected image. See console for details.');
@@ -457,13 +481,21 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
   }
 
   /** Helper to process a data URL (image) — runs inference and stores the image */
-  async processDataUrl(dataUrl: string, filename: string) {
+  async processDataUrl(
+    dataUrl: string,
+    filename: string,
+    bumpCounters: boolean = true,
+    addToCapturedImages: boolean = true,
+    refreshCountsAfterSave: boolean = true
+  ) {
     // Log the current image being processed
     console.log(`🖼️ [UploadImagePage] Current image name is: ${filename}`);
     // Update UI
     this.imagePreview = dataUrl;
     //prepend to captured images for thumbnail scroller
-    this.capturedImages.unshift(dataUrl);
+    if (addToCapturedImages) {
+      this.capturedImages.unshift(dataUrl);
+    }
     // detect center thumbnail after UI update
     setTimeout(() => this.detectCenterThumbnail(), 60);
     //set processing as true to show indicator
@@ -596,10 +628,14 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
           console.warn('[UploadImagePage] Failed to save user-scoped Firestore data', e);
         }
       }
-      // Increment upload counter for this session
-      this.imagesUploadedThisSession += 1;
-      // keep counters in sync with persistent storage
-      await this.updatePhotoCounts();
+      // Count only true new uploads/captures as session additions.
+      if (bumpCounters) {
+        this.imagesUploadedThisSession += 1;
+      }
+      // keep counters in sync with persistent storage unless the caller will refresh later
+      if (refreshCountsAfterSave) {
+        await this.updatePhotoCounts();
+      }
       // Force UI update and center detection with longer delay to ensure DOM is ready
       setTimeout(() => {
         // Trigger change detection

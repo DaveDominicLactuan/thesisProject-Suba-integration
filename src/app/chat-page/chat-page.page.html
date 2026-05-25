@@ -248,9 +248,9 @@
         <div class="header-title">
           <span>Message</span>
         </div>
-        <button class="menu-btn" (click)="openAttachmentSheet()">
+        <!-- <button class="menu-btn" (click)="openAttachmentSheet()">
           <ion-icon name="ellipsis-horizontal-outline"></ion-icon>
-        </button>
+        </button> -->
       </div>
       <div class="bottom-section">
         <div class="conv-user">
@@ -264,9 +264,9 @@
             </div>
           </div>
         </div>
-        <button class="call-btn">
+        <!-- <button class="call-btn">
           <ion-icon name="call-outline"></ion-icon>
-        </button>
+        </button> -->
       </div>
     </div>
 
@@ -652,10 +652,10 @@
                 <ion-icon name="location-outline"></ion-icon>
                 <span>{{ selectedMapEngineer?.address || selectedMapEngineer?.markerPayload?.address || 'Office Address' }}</span>
               </div>
-              <div class="map-sheet-avail">
+              <!-- <div class="map-sheet-avail">
                 <ion-icon name="time-outline"></ion-icon>
                 <span>{{ selectedMapEngineer?.availableTime || selectedMapEngineer?.markerPayload?.availableTime || 'Available: 8AM Tue' }}</span>
-              </div>
+              </div> -->
               <button class="map-sheet-chat-btn" (click)="openChatFromMapSheet($event)">
                 <ion-icon name="chatbubble-outline"></ion-icon>
                 Chat

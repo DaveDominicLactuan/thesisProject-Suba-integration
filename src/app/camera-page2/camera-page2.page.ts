@@ -95,7 +95,9 @@ export class CameraPage2Page implements AfterViewInit {
   isLevelEnabled: boolean = false;
   isPhoneLeveled: boolean = false;
   levelRollDeg: number = 0;
-  private levelThresholdDeg: number = 0.85;
+  // Hysteresis keeps the level indicator from flickering near center.
+  private levelGreenEnterThresholdDeg: number = 1.5;
+  private levelGreenExitThresholdDeg: number = 2.2;
   private levelTargetRoll: number = 0; // Target roll angle for smooth interpolation
   private levelSmoothingFactor: number = 0.68; // More responsive, but still smoothed (0-1)
   private levelAnimationFrameId?: number; // RAF ID for cleanup
@@ -116,6 +118,14 @@ export class CameraPage2Page implements AfterViewInit {
   flashDurationMs: number = 120; // visual flash length
   cooldownMs: number = 500; // minimum time between pictures
   private backButtonSub: any; // hardware back handler
+  private updateLevelIndicatorState(absRollDeg: number): void {
+    const threshold = this.isPhoneLeveled
+      ? this.levelGreenExitThresholdDeg
+      : this.levelGreenEnterThresholdDeg;
+
+    this.isPhoneLeveled = !this.levelMotionSettling && absRollDeg <= threshold;
+  }
+
   private orientationHandler = (event: DeviceOrientationEvent) => {
     if (!this.isLevelEnabled) return;
     if (typeof event.gamma !== 'number') return;
@@ -136,7 +146,8 @@ export class CameraPage2Page implements AfterViewInit {
     // Apply dead zone filtering: ignore small movements
     const changeDelta = Math.abs(boundedRoll - this.lastProcessedRoll);
     if (changeDelta < this.deadZoneDeg) {
-      if (Math.abs(boundedRoll) <= this.levelThresholdDeg) {
+      const absRollDeg = Math.abs(boundedRoll);
+      if (absRollDeg <= this.levelGreenEnterThresholdDeg) {
         if (this.levelSettleTimer) {
           clearTimeout(this.levelSettleTimer);
           this.levelSettleTimer = undefined;
@@ -145,10 +156,8 @@ export class CameraPage2Page implements AfterViewInit {
         this.levelTargetRoll = 0;
         this.levelRollDeg = 0;
         this.lastProcessedRoll = boundedRoll;
-        this.isPhoneLeveled = true;
-      } else {
-        this.isPhoneLeveled = Math.abs(this.levelRollDeg) <= this.levelThresholdDeg && !this.levelMotionSettling;
       }
+      this.updateLevelIndicatorState(absRollDeg);
       return; // Ignore small noise
     }
     
@@ -177,7 +186,7 @@ export class CameraPage2Page implements AfterViewInit {
         if (Math.abs(this.levelRollDeg - this.levelTargetRoll) <= this.levelResyncThresholdDeg) {
           this.levelRollDeg = this.levelTargetRoll;
         }
-        this.isPhoneLeveled = Math.abs(this.levelRollDeg) <= this.levelThresholdDeg;
+        this.updateLevelIndicatorState(Math.abs(this.levelRollDeg));
       }, this.levelSettleDelayMs);
     } else {
       this.levelMotionSettling = false;
@@ -192,7 +201,7 @@ export class CameraPage2Page implements AfterViewInit {
     this.lastProcessedRoll = targetRoll; // Track processed value for velocity calculation
     
     // Update level status
-    this.isPhoneLeveled = !this.levelMotionSettling && Math.abs(this.levelRollDeg) <= this.levelThresholdDeg;
+    this.updateLevelIndicatorState(Math.abs(this.levelRollDeg));
   };
   // session management
   sessions: any[] = [];
@@ -314,6 +323,12 @@ export class CameraPage2Page implements AfterViewInit {
     // Prevent spamming the shutter: if currently cooling down, ignore
     if (this.isCooldown) {
       console.log('[CameraPage2] takePicture blocked: cooldown active');
+      return;
+    }
+
+    // When the level guide is active, only allow capture while the phone is level.
+    if (this.isLevelEnabled && !this.isPhoneLeveled) {
+      console.log('[CameraPage2] takePicture blocked: phone is not level');
       return;
     }
 
@@ -474,11 +489,19 @@ export class CameraPage2Page implements AfterViewInit {
    * End-to-end pipeline for a provided dataUrl: preprocess → inference → store.
    * Updates session state via ImageStorageService and refreshes thumbnails/counters.
    */
-  async processDataUrl(dataUrl: string, originalName?: string, bumpCounters: boolean = true) {
+  async processDataUrl(
+    dataUrl: string,
+    originalName?: string,
+    bumpCounters: boolean = true,
+    addToCapturedImages: boolean = true,
+    refreshCountsAfterSave: boolean = true
+  ) {
     // Log the current image being processed
     console.log(`🖼️ [CameraPage2] Current image name is: ${originalName || 'Unknown'}`);
     // mimic upload-image-page behaviour: preprocess, run inference, store
-    this.capturedImages.unshift(dataUrl);
+    if (addToCapturedImages) {
+      this.capturedImages.unshift(dataUrl);
+    }
     // bump counters early so spinner shows while processing unless caller already did so
     if (bumpCounters) this.photosTaken += 1;
     this.isProcessing = true;
@@ -601,11 +624,15 @@ export class CameraPage2Page implements AfterViewInit {
       } catch (e) {
         console.warn('[CameraPage2] Failed to add image to session or refresh display', e);
       }
-      // Increment upload counter for this session
-      this.imagesUploadedThisSession += 1;
+      // Count only true new uploads/captures as session additions.
+      if (bumpCounters) {
+        this.imagesUploadedThisSession += 1;
+      }
       // update UI counters from authoritative storage
       if (prediction) this.photosProcessed += 1;
-      await this.updatePhotoCounts();
+      if (refreshCountsAfterSave) {
+        await this.updatePhotoCounts();
+      }
       return entry;
     };
 
@@ -1026,7 +1053,7 @@ export class CameraPage2Page implements AfterViewInit {
         this.levelTargetRoll = 0;
       }
 
-      this.isPhoneLeveled = !this.levelMotionSettling && Math.abs(this.levelRollDeg) <= this.levelThresholdDeg;
+      this.updateLevelIndicatorState(Math.abs(this.levelRollDeg));
 
       // Schedule next frame
       this.levelAnimationFrameId = window.requestAnimationFrame(updateLevel);
@@ -1587,7 +1614,34 @@ export class CameraPage2Page implements AfterViewInit {
     }
 
     try {
-      await this.processDataUrl(selectedImage.dataUrl, selectedImage.originalName);
+      const selectedKey = this.selectedImageSelectionKey || this.selectedThumbSrc || '';
+      const originalEntry = this.storedImages.find(image => this.getImageSelectionKey(image) === selectedKey)
+        || this.storedImages.find(image => image.original === selectedImage.dataUrl || image.withBoxes === selectedImage.dataUrl);
+      const originalDeleteKey = originalEntry?.filename || originalEntry?.original || originalEntry?.withBoxes || selectedImage.dataUrl;
+      const reprocessFilename = `reprocess-${Date.now()}.jpg`;
+
+      // Reprocess first so the new image exists before deleting the original one.
+      const reprocessedEntry = await this.processDataUrl(selectedImage.dataUrl, reprocessFilename, false, false, false);
+
+      if (originalDeleteKey) {
+        const removed = await this.imageStorage.deleteImage(originalDeleteKey);
+        if (!removed && originalEntry?.original && originalEntry.original !== originalDeleteKey) {
+          await this.imageStorage.deleteImage(originalEntry.original);
+        }
+      }
+
+      await this.updatePhotoCounts();
+      try {
+        await this.loadStoredImages();
+        await this.loadSessions();
+        await this.refreshDisplayedImages();
+      } catch (refreshErr) {
+        console.warn('[CameraPage2] reprocessSelectedImage refresh failed', refreshErr);
+      }
+
+      this.selectedThumbSrc = (reprocessedEntry as any)?.original || selectedImage.dataUrl;
+      this.selectedImageSelectionKey = (reprocessedEntry as any)?.filename || reprocessFilename;
+      this.selectedImageTitle = (reprocessedEntry as any)?.filename || reprocessFilename;
     } catch (err) {
       console.warn('[CameraPage2] reprocessSelectedImage failed', err);
       alert('Failed to reprocess selected image. See console for details.');

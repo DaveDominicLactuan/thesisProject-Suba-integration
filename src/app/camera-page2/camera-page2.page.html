@@ -120,7 +120,7 @@
         class="shutter-btn"
         [class.shutter-btn-green]="isLevelEnabled && isPhoneLeveled"
         (click)="takePicture()"
-        [disabled]="isCooldown"
+        [disabled]="isCooldown || (isLevelEnabled && !isPhoneLeveled)"
       ></button>
 
       <!-- Thumbnails on the right (render from stored images) -->
