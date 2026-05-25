@@ -158,6 +158,12 @@ position: absolute;
   bottom: 8px;               /* match your bottom spacing */
   z-index: 50;   }
 
+.shutter-btn.shutter-btn-green {
+  background: #25c75a;
+  border-color: #ffffff;
+  box-shadow: 0 6px 20px rgba(37, 199, 90, 0.38);
+}
+
 .thumbnail-scroll { display:flex; gap:10px; align-items:center; max-width:110px; margin-left: 10px; }
 .thumbnail { width:56px; height:56px; border-radius:8px; object-fit:cover; border:2px solid #fff; box-shadow:0 6px 18px rgba(0,0,0,0.12); }
 

@@ -143,25 +143,6 @@
            (mouseup)="onChatItemPressEnd($event)"
            (mouseleave)="onChatItemPressEnd($event)"
            (touchend)="onChatItemPressEnd($event)">
-        <!-- Chat Options Overlay (Bottom Sheet) -->
-        <div *ngIf="showChatOptionsOverlay" class="chat-options-overlay" [ngStyle]="{'transform': 'translateY(' + chatOptionsOverlayY + 'px)'}"
-             (mousedown)="onOverlayDragStart($event)" (touchstart)="onOverlayDragStart($event)">
-          <div class="chat-options-drag-handle"></div>
-          <div class="chat-options-list">
-            <button class="chat-options-row" (click)="onDeleteChatOption()">
-              <ion-icon name="trash-outline"></ion-icon>
-              <span>Delete</span>
-            </button>
-            <!-- <button class="chat-options-row" (click)="onNotifyChatOption()">
-              <ion-icon name="notifications-outline"></ion-icon>
-              <span>Notify</span>
-            </button> -->
-            <button class="chat-options-row chat-options-close" (click)="closeChatOptionsOverlay()">
-              <ion-icon name="close-outline"></ion-icon>
-              <span>Close</span>
-            </button>
-          </div>
-        </div>
         <div class="chat-avatar">
           <ng-container *ngIf="c.avatar; else avatarInitials">
             <img [src]="c.avatar" alt="avatar" />
@@ -181,6 +162,34 @@
     <div class="chat-list-bottom-art" aria-hidden="true">
       <div class="chat-list-bottom-art-outer"></div>
       <div class="chat-list-bottom-art-inner"></div>
+    </div>
+
+    <!-- Chat Options Overlay (fixed bottom sheet, shown once outside the list) -->
+    <div
+      *ngIf="showChatOptionsOverlay"
+      class="chat-options-overlay"
+      [ngStyle]="{ 'transform': 'translateY(' + chatOptionsOverlayY + 'px)' }"
+    >
+      <div class="chat-options-backdrop" (click)="closeChatOptionsOverlay()"></div>
+      <div class="chat-options-sheet" (click)="$event.stopPropagation()">
+        <div class="chat-options-drag-handle"></div>
+        <div class="chat-options-icon-badge" [class.is-loading]="chatOptionsDeleteInProgress" aria-hidden="true">
+          <ion-spinner *ngIf="chatOptionsDeleteInProgress; else deleteIcon" name="crescent"></ion-spinner>
+          <ng-template #deleteIcon>
+            <ion-icon name="trash-outline"></ion-icon>
+          </ng-template>
+        </div>
+        <h2 class="chat-options-title">Delete chat</h2>
+        <p class="chat-options-description">This will permanently delete the chat history.</p>
+        <button
+          type="button"
+          class="chat-options-row chat-options-delete-button"
+          (click)="onDeleteChatOption()"
+          [disabled]="chatOptionsDeleteInProgress"
+        >
+          {{ chatOptionsDeleteInProgress ? 'Deleting...' : 'Delete' }}
+        </button>
+      </div>
     </div>
   </ng-container>
 
@@ -239,9 +248,9 @@
         <div class="header-title">
           <span>Message</span>
         </div>
-        <button class="menu-btn" (click)="openAttachmentSheet()">
+        <!-- <button class="menu-btn" (click)="openAttachmentSheet()">
           <ion-icon name="ellipsis-horizontal-outline"></ion-icon>
-        </button>
+        </button> -->
       </div>
       <div class="bottom-section">
         <div class="conv-user">
@@ -255,9 +264,9 @@
             </div>
           </div>
         </div>
-        <button class="call-btn">
+        <!-- <button class="call-btn">
           <ion-icon name="call-outline"></ion-icon>
-        </button>
+        </button> -->
       </div>
     </div>
 
@@ -643,10 +652,10 @@
                 <ion-icon name="location-outline"></ion-icon>
                 <span>{{ selectedMapEngineer?.address || selectedMapEngineer?.markerPayload?.address || 'Office Address' }}</span>
               </div>
-              <div class="map-sheet-avail">
+              <!-- <div class="map-sheet-avail">
                 <ion-icon name="time-outline"></ion-icon>
                 <span>{{ selectedMapEngineer?.availableTime || selectedMapEngineer?.markerPayload?.availableTime || 'Available: 8AM Tue' }}</span>
-              </div>
+              </div> -->
               <button class="map-sheet-chat-btn" (click)="openChatFromMapSheet($event)">
                 <ion-icon name="chatbubble-outline"></ion-icon>
                 Chat

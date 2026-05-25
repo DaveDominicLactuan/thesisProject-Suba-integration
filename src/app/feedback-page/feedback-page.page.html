@@ -8,10 +8,19 @@
 <!-- S3 Loading Modal (Outside ion-content for proper z-index/display on device) -->
 <div *ngIf="showSessionLoadingWindow" class="session-loading-overlay" aria-live="polite" aria-busy="true">
   <div class="session-loading-card">
-    <div class="session-loading-spinner" aria-hidden="true"></div>
+    <!-- Show spinner only if no error -->
+    <div *ngIf="!sessionLoadingHasError" class="session-loading-spinner" aria-hidden="true"></div>
+    
+    <!-- Error indicator if loading failed -->
+    <div *ngIf="sessionLoadingHasError" class="session-loading-error-icon" aria-hidden="true">
+      <span style="font-size: 48px; color: #ff3333;">⚠</span>
+    </div>
+    
     <h2>{{ sessionLoadingMessage }}</h2>
     <p>{{ sessionLoadingDetail }}</p>
-    <div class="session-loading-progress" *ngIf="sessionLoadingTotal > 0">
+    
+    <!-- Progress Section (only show if not in error state) -->
+    <div class="session-loading-progress" *ngIf="sessionLoadingTotal > 0 && !sessionLoadingHasError">
       <div class="session-loading-progress-track">
         <div
           class="session-loading-progress-fill"
@@ -35,12 +44,12 @@
       </button>
     </div>
 
-    <!-- Confirm button at the top left corner -->
-<div class="back-button-container2">
-  <button class="back-btn2" type="button" (click)="saveCurrentStoredImageAndGoHome()">
-    <img src="assets/Check_Black.png" alt="Back" class="back-icon" />
-  </button>
-</div>
+    <!-- Confirm button at the top left corner (hidden if engineer has checked session) -->
+    <div class="back-button-container2" >
+      <button class="back-btn2" type="button" (click)="saveCurrentStoredImageAndGoHome()">
+        <img src="assets/Check_Black.png" alt="Back" class="back-icon" />
+      </button>
+    </div>
 
     <div class="page-body" [class.engineer-checked-background]="engineerLookedSessionChecked">
       <!-- Scrollable image gallery with margin-top -->

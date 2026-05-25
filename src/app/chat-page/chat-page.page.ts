@@ -5,7 +5,7 @@ import { AuthService } from '../services/auth.service';
 import { NavController, Platform } from '@ionic/angular';
 import { User } from 'firebase/auth';
 import { Auth3Service } from '../services/auth3.service';
-import { Firestore, collection, doc, getDoc, query, where, getDocs, setDoc } from '@angular/fire/firestore';
+import { Firestore, collection, doc, getDoc, query, where, getDocs, setDoc, deleteDoc } from '@angular/fire/firestore';
 import { ImageStorageService } from '../services/image-storage.service';
 import { Chat, ChatService, Message, TypingState } from '../services/chat.service';
 import { PresenceService } from '../services/presence.service';
@@ -57,6 +57,7 @@ export class ChatPagePage implements OnInit, OnDestroy {
   private chatOptionsDragActive = false;
   private chatOptionsMinDragToClose = 80;
   private chatOptionsSelectedChat: any = null;
+  chatOptionsDeleteInProgress = false;
   receiverUserId: string | any;
   newRecepientUserId: string | any;
   sessionImageObjectCounter: number = 0;
@@ -65,6 +66,7 @@ export class ChatPagePage implements OnInit, OnDestroy {
       if (this.chatOptionsLongPressTimer) clearTimeout(this.chatOptionsLongPressTimer);
       this.chatOptionsLongPressTimer = setTimeout(() => {
         this.chatOptionsSelectedChat = chat;
+        console.log('[ChatPage.chatOptions] Long-press selected chat object:', chat);
         this.showChatOptionsOverlay = true;
         this.chatOptionsOverlayY = 0;
       }, 420); // 420ms for long-press
@@ -122,41 +124,46 @@ export class ChatPagePage implements OnInit, OnDestroy {
       return 0;
     }
 
-    async closeChatOptionsOverlay(removeSelectedChat: boolean = false): Promise<void> {
-      const selectedChat = this.chatOptionsSelectedChat;
+    async closeChatOptionsOverlay(): Promise<void> {
       this.showChatOptionsOverlay = false;
       this.chatOptionsOverlayY = 0;
       this.chatOptionsSelectedChat = null;
       this.chatOptionsDragStartY = null;
       this.chatOptionsDragCurrentY = null;
       this.chatOptionsDragActive = false;
+    }
 
-      if (!removeSelectedChat || !selectedChat?.chatId) {
+    // Placeholder logic for options
+    async onDeleteChatOption(): Promise<void> {
+      const selectedChat = this.chatOptionsSelectedChat;
+      console.log('[ChatPage.onDeleteChatOption] Selected chat object:', selectedChat);
+
+      if (!selectedChat?.chatId) {
+        console.warn('[ChatPage.onDeleteChatOption] No chat selected for deletion.');
+        await this.closeChatOptionsOverlay();
         return;
       }
 
-      const currentUid = await this.resolveCurrentUid();
-      if (!currentUid) {
-        console.warn('[ChatPage] Unable to delete selected chat preview: missing current uid.');
+      if (this.chatOptionsDeleteInProgress) {
         return;
       }
+
+      this.chatOptionsDeleteInProgress = true;
 
       try {
-        await this.chatService.clearChatForUser(selectedChat.chatId, currentUid);
+        await this.chatService.deleteChat(selectedChat.chatId);
         this.chats = this.chats.filter((chat) => chat?.chatId !== selectedChat.chatId);
 
         if (this.currentChatId === selectedChat.chatId) {
           this.closeChat();
         }
       } catch (error) {
-        console.error('[ChatPage] Failed to delete selected chat preview:', error);
-        alert('Unable to delete this conversation right now. Please try again.');
+        console.error('[ChatPage.onDeleteChatOption] Failed to delete chat from Firestore:', error);
+        alert('Unable to delete this chat right now. Please try again.');
+      } finally {
+        this.chatOptionsDeleteInProgress = false;
+        await this.closeChatOptionsOverlay();
       }
-    }
-
-    // Placeholder logic for options
-    onDeleteChatOption() {
-      void this.closeChatOptionsOverlay(true);
     }
     onNotifyChatOption() {
       alert('Notify option pressed (placeholder).');
@@ -1978,6 +1985,28 @@ export class ChatPagePage implements OnInit, OnDestroy {
       this.isAttachmentCopyInProgress = false;
       this.attachmentDebugState = 'completed';
       this.selectedAttachmentForDebug = copiedSession;
+
+      // Send a confirmation message in the current chat with the new session id attached
+      try {
+        if (this.currentChatId) {
+          const senderId = this.auth3.getCurrentUser()?.uid || this.userID || '';
+          const sharedSessionId = copiedSession?.id || null;
+          await this.chatService.sendMessage(this.currentChatId, {
+            senderId,
+            receiverId,
+            text: 'File shared successfully',
+            sharedSessionId,
+            metadata: {
+              sharedSessionId
+            }
+          });
+          console.log('[ChatPage.confirmAttachmentShareCopy] Sent confirmation message with sharedSessionId', sharedSessionId);
+        } else {
+          console.warn('[ChatPage.confirmAttachmentShareCopy] No current chat to send confirmation message to.');
+        }
+      } catch (sendErr) {
+        console.warn('[ChatPage.confirmAttachmentShareCopy] Failed to send confirmation message', sendErr);
+      }
     } catch (error) {
       console.error('[ChatPage.confirmAttachmentShareCopy] Failed to copy session:', error);
       this.isAttachmentCopyInProgress = false;
@@ -2308,10 +2337,10 @@ export class ChatPagePage implements OnInit, OnDestroy {
       this.closeAttachmentSheet();
 
       // Auto-send success message
-      this.messageText = 'File shared successfully';
-      setTimeout(() => {
-        this.sendMessage();
-      }, 500);
+      // this.messageText = 'File shared successfully';
+      // setTimeout(() => {
+      //   this.sendMessage();
+      // }, 500);
 
       // Request location permission for location-based features
       console.log('[ChatPage] Requesting location permission for enhanced features...');
@@ -2652,6 +2681,7 @@ export class ChatPagePage implements OnInit, OnDestroy {
     accuracy: number;
     timestamp: string;
   } | null = null;
+  private incomingMarkerLocationActive = false;
   private isBackgroundLocationFetchActive = false;
   private backgroundLocationFetchInterval?: ReturnType<typeof setInterval>;
 
@@ -3051,11 +3081,16 @@ ngOnInit(): void {
       this.refreshCacheWarmStatus(cachedUid);
     });
 
-    // Load user location from storage and start background marker fetch
-    this.loadUserLocationAndStartBackgroundFetch(cachedUid);
+    // Only bootstrap the user's own location when the map is not being driven by an incoming office marker.
+    if (!this.incomingMarkerLocationActive) {
+      // Load user location from storage and start background marker fetch
+      this.loadUserLocationAndStartBackgroundFetch(cachedUid);
 
-    // Get and save current location if available
-    void this.getAndSaveCurrentLocation();
+      // Get and save current location if available
+      void this.getAndSaveCurrentLocation();
+    } else {
+      console.log('[ChatPage.ngOnInit] Incoming marker location active; skipping user location bootstrap.');
+    }
   }
 
   this.initialize();
@@ -3114,7 +3149,20 @@ private loadIncomingMapLocation(): void {
 
   if (this.pendingMapLocation) {
     this.activeTab = 'location';
+    this.incomingMarkerLocationActive = true;
+    this.currentUserLocation = {
+      latitude: this.pendingMapLocation.latitude,
+      longitude: this.pendingMapLocation.longitude,
+      accuracy: 0,
+      timestamp: new Date().toISOString()
+    };
     console.log('[ChatPage.loadIncomingMapLocation] Incoming map location loaded:', this.pendingMapLocation);
+
+    try {
+      sessionStorage.removeItem('selectedMarkerLocation');
+    } catch (error) {
+      console.warn('[ChatPage.loadIncomingMapLocation] Failed to clear stored marker location:', error);
+    }
   }
 }
 
@@ -3869,6 +3917,38 @@ getMessageStatusLabel(message: Message): 'Sent' | 'Delivered' | 'Read' {
 
   // Additional methods can be added here
 onMsgBubbleTap(message: Message): void {
+  try {
+    console.log('[ChatPage.onMsgBubbleTap] senderId:', message?.senderId);
+    console.log('[ChatPage.onMsgBubbleTap] receiverId:', message?.receiverId);
+  } catch (e) {
+    console.warn('[ChatPage.onMsgBubbleTap] Failed to read senderId from message', e);
+  }
+
+  // If this message carries a shared session id, log it too (use any cast to avoid TS errors)
+  try {
+    const m: any = message as any;
+    const sessionId = m?.sharedSessionId || m?.copiedSessionId || m?.sessionId || m?.metadata?.sharedSessionId;
+    if (sessionId) {
+      const currentUserId = (this.auth3.getCurrentUser()?.uid || this.userID || '').toString().trim();
+      const messageReceiverId = (m?.receiverId || m?.metadata?.receiverId || '').toString().trim();
+
+      if (!currentUserId || !messageReceiverId || currentUserId !== messageReceiverId) {
+        console.log('[ChatPage.onMsgBubbleTap] Navigation blocked: receiverId does not match current user.', {
+          currentUserId,
+          messageReceiverId,
+          sessionId
+        });
+        return;
+      }
+
+      console.log('[ChatPage.onMsgBubbleTap] sharedSessionId:', sessionId);
+      this.goSessionPage(sessionId);
+      return;
+    }
+  } catch (e) {
+    console.warn('[ChatPage.onMsgBubbleTap] Failed to read sharedSessionId from message', e);
+  }
+
   this.tappedMessageId = this.tappedMessageId === (message.id ?? null) ? null : (message.id ?? null);
 }
 
@@ -4222,7 +4302,12 @@ onMsgBubbleTap(message: Message): void {
   }
 
   /** Navigate to sessions list page. */
-  goSessionPage() {
+  goSessionPage(sessionId?: string) {
+    if (sessionId) {
+      this.router.navigate(['/session-page'], { queryParams: { sessionId } });
+      return;
+    }
+
     this.router.navigate(['/session-page']);
     console.log('pdf 2 page');
   }
@@ -4587,6 +4672,11 @@ onMsgBubbleTap(message: Message): void {
    * Checks if user has location enabled and fetches markers within radius bounds.
    */
   private loadUserLocationAndStartBackgroundFetch(userId: string): void {
+    if (this.incomingMarkerLocationActive) {
+      console.log('[ChatPage.backgroundFetch] Incoming marker location active; skipping stored user location bootstrap.');
+      return;
+    }
+
     try {
       const locationKey = `user_sidebar_location_${userId}`;
       const storedLocation = localStorage.getItem(locationKey);
@@ -4669,6 +4759,16 @@ onMsgBubbleTap(message: Message): void {
    * Called during initialization to populate the stored location.
    */
   private async getAndSaveCurrentLocation(): Promise<{ latitude: number; longitude: number } | null> {
+    if (this.incomingMarkerLocationActive) {
+      console.log('[ChatPage.getAndSaveCurrentLocation] Incoming marker location active; skipping current location save.');
+      return this.pendingMapLocation
+        ? {
+            latitude: this.pendingMapLocation.latitude,
+            longitude: this.pendingMapLocation.longitude
+          }
+        : null;
+    }
+
     try {
       console.log('[ChatPage.getAndSaveCurrentLocation] Attempting to fetch and save current location...');
       const location = await this.getCurrentCoordinates();
@@ -6050,7 +6150,7 @@ onMsgBubbleTap(message: Message): void {
     }
 
     // Check if location was unavailable but is now available
-    if (!this.lastLocationStatus && locationNow) {
+    if (!this.incomingMarkerLocationActive && !this.lastLocationStatus && locationNow) {
       console.log('[ChatPage.checkAndRecoverServices] Location access recovered! Fetching and updating user location...');
       try {
         const coords = await this.getCurrentCoordinates();
@@ -6243,7 +6343,10 @@ onMsgBubbleTap(message: Message): void {
     for (const markerData of this.officeLocationMarkerData) {
       try {
         const markerTitle = this.buildOfficeMarkerTitle(markerData);
-        const marker = L.marker([markerData.latitude, markerData.longitude], { icon: this.testMarkerIcon })
+        const markerIcon = this.isIncomingMarkerLocation(markerData)
+          ? this.tapMarkerIcon
+          : this.testMarkerIcon;
+        const marker = L.marker([markerData.latitude, markerData.longitude], { icon: markerIcon })
           .addTo(mapInstance)
           .bindPopup(`<strong>${markerTitle}</strong>`);
 
@@ -6301,6 +6404,27 @@ onMsgBubbleTap(message: Message): void {
     console.log('[ChatPage.userOfficeLocationMarker] Stored markers rendered on map.', {
       markerCount: this.officeLocationLeafletMarkers.length
     });
+  }
+
+  private isIncomingMarkerLocation(markerData: OfficeLocationMarkerData): boolean {
+    if (!this.pendingMapLocation) {
+      return false;
+    }
+
+    const markerLatitude = Number(markerData?.latitude);
+    const markerLongitude = Number(markerData?.longitude);
+    const incomingLatitude = Number(this.pendingMapLocation.latitude);
+    const incomingLongitude = Number(this.pendingMapLocation.longitude);
+
+    if (!Number.isFinite(markerLatitude) || !Number.isFinite(markerLongitude)) {
+      return false;
+    }
+
+    const epsilon = 0.000001;
+    return (
+      Math.abs(markerLatitude - incomingLatitude) <= epsilon &&
+      Math.abs(markerLongitude - incomingLongitude) <= epsilon
+    );
   }
 
   private async loadAndRenderOfficeLocationMarkers(): Promise<void> {
@@ -6460,7 +6584,12 @@ onMsgBubbleTap(message: Message): void {
         this.applyEffectiveTileLayerMode();
         this.bindMapTapCapture();
         this.map.setView(center, 15);
-        await this.markUserLocation(this.map, coordinates, this.pendingMapLocation?.label ? `Marker: ${this.pendingMapLocation.label}` : 'You are here!');
+        await this.markUserLocation(
+          this.map,
+          coordinates,
+          this.pendingMapLocation?.label ? `Marker: ${this.pendingMapLocation.label}` : 'You are here!',
+          this.incomingMarkerLocationActive ? this.tapMarkerIcon : this.userLocationIcon
+        );
         // Start background online refresh (won't block map display since markers & tiles are already visible)
         void this.runStaggeredOnlineBootstrap(bootstrapId);
         return;
@@ -6490,7 +6619,12 @@ onMsgBubbleTap(message: Message): void {
       console.log('[ChatPage.initMap] Rendering local marker cache immediately with offline tiles (before any internet checks).');
       this.renderLocalMarkerCacheImmediately();
       
-      await this.markUserLocation(this.map, coordinates, this.pendingMapLocation?.label ? `Marker: ${this.pendingMapLocation.label}` : 'You are here!');
+      await this.markUserLocation(
+        this.map,
+        coordinates,
+        this.pendingMapLocation?.label ? `Marker: ${this.pendingMapLocation.label}` : 'You are here!',
+        this.incomingMarkerLocationActive ? this.tapMarkerIcon : this.userLocationIcon
+      );
       
       // Start background online refresh (won't block display since markers & tiles are already rendered)
       // If online & location detected, refreshes markers from Firestore and stores them locally
@@ -6502,7 +6636,12 @@ onMsgBubbleTap(message: Message): void {
     }
   }
 
-  async markUserLocation(map: L.Map, coordinates?: { latitude: number; longitude: number } | null, popupText: string = 'You are here!') {
+  async markUserLocation(
+    map: L.Map,
+    coordinates?: { latitude: number; longitude: number } | null,
+    popupText: string = 'You are here!',
+    iconOverride?: L.Icon
+  ) {
       console.log('[ChatPage.markUserLocation] Marking user location...', { coordinatesFromCaller: coordinates });
       try {
         const resolvedCoordinates = coordinates ?? await this.getCurrentCoordinates();
@@ -6524,7 +6663,7 @@ onMsgBubbleTap(message: Message): void {
           //   .bindPopup('You are here!')
           //   .openPopup();
           this.userLocationMarker = L.marker([latitude, longitude], {
-  icon: this.userLocationIcon
+  icon: iconOverride || this.userLocationIcon
 })
   .addTo(map)
   .bindPopup(popupText)

@@ -1,5 +1,6 @@
 import { Component, OnInit, OnDestroy } from '@angular/core';
 import { Router } from '@angular/router';
+import { ActivatedRoute } from '@angular/router';
 import { FormBuilder, FormGroup, Validators } from '@angular/forms';
 import { AuthService } from '../services/auth.service';
 import { NavController, Platform } from '@ionic/angular';
@@ -61,9 +62,10 @@ export class SessionPagePage implements OnInit, OnDestroy {
   private readonly MAX_SESSION_IDS = 5;
   private sessionIdTrackingKey = 'sessionIdTracking';
   private sessionIdListKey = 'storedSessionIds';
+  private highlightedSessionId: string | null = null;
 
   /** Inject auth, router, and image storage services for navigation and data. */
-  constructor(private formBuilder: FormBuilder, private router: Router, private authService: AuthService, private navCtrl: NavController, private auth3: Auth3Service, private imageStorage: ImageStorageService, private platform: Platform) {
+  constructor(private formBuilder: FormBuilder, private router: Router, private route: ActivatedRoute, private authService: AuthService, private navCtrl: NavController, private auth3: Auth3Service, private imageStorage: ImageStorageService, private platform: Platform) {
 
   }
 
@@ -77,6 +79,8 @@ ngOnInit(): void {
 private async initialize(): Promise<void> {
   console.log('[SessionPage.initialize] ===== PAGE INIT START =====');
   try {
+    this.highlightedSessionId = this.route.snapshot.queryParamMap.get('sessionId') || null;
+
     const storedProfile = this.readStoredUserProfile();
     if (storedProfile) {
       this.userID = storedProfile.userID || null;
@@ -322,9 +326,11 @@ private startUserSyncInBackground(userId: string): void {
       this.sessions = filteredSessions.map((sess: any) => {
         const keys = Array.isArray(sess.imageKeys) ? sess.imageKeys : [];
         const imageCount = keys.reduce((acc: number, k: string) => acc + (allImages.findIndex(ai => ai.filename === k) !== -1 ? 1 : 0), 0);
-        return { ...sess, imageCount };
+        const sessionId = (sess?.id || sess?.sessionId || '').toString();
+        return { ...sess, imageCount, isHighlightedSession: !!this.highlightedSessionId && sessionId === this.highlightedSessionId };
       });
       this.applySessionSort(this.currentSort);
+      this.prioritizeHighlightedSession();
       console.log('[SessionPage.loadSessions] Displaying', this.sessions.length, 'sessions for user', currentUserID);
       // if Image Storage Service recorded a last created session or last used/created session,
       //  show its name at top of the summary list
@@ -346,6 +352,31 @@ private startUserSyncInBackground(userId: string): void {
       this.sessions = [];
     } finally {
       this.isSessionsLoading = false;
+    }
+  }
+
+  private prioritizeHighlightedSession(): void {
+    if (!this.highlightedSessionId || !Array.isArray(this.sessions) || this.sessions.length === 0) {
+      return;
+    }
+
+    const targetIndex = this.sessions.findIndex((session: any) => {
+      const sessionId = (session?.id || session?.sessionId || '').toString();
+      return sessionId === this.highlightedSessionId;
+    });
+
+    if (targetIndex > 0) {
+      const [targetSession] = this.sessions.splice(targetIndex, 1);
+      console.log('[SessionPage.prioritizeHighlightedSession] Found matching session for chat-page sessionId:', {
+        sessionId: this.highlightedSessionId,
+        session: targetSession
+      });
+      this.sessions.unshift(targetSession);
+    } else if (targetIndex === 0) {
+      console.log('[SessionPage.prioritizeHighlightedSession] Found matching session already at the top for chat-page sessionId:', {
+        sessionId: this.highlightedSessionId,
+        session: this.sessions[0]
+      });
     }
   }
 

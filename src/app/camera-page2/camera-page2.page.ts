@@ -71,6 +71,13 @@ export class CameraPage2Page implements AfterViewInit {
   savedImage: StoredImage | null = null;
   selectedThumbSrc: string | null = null;
   selectedImageTitle: string = '';
+  private selectedImageSelectionKey: string = '';
+  get selectedImageKey(): string {
+    return this.selectedImageSelectionKey || this.selectedThumbSrc || '';
+  }
+  getImageSelectionKey(img: StoredImage): string {
+    return img.filename || img.withBoxes || img.original;
+  }
   // Toggle state to switch original vs withBoxes in overlay context
   showWithBoxes: boolean = false;
   // Overlay helpers for updating UI after center detection
@@ -88,46 +95,113 @@ export class CameraPage2Page implements AfterViewInit {
   isLevelEnabled: boolean = false;
   isPhoneLeveled: boolean = false;
   levelRollDeg: number = 0;
-  private levelThresholdDeg: number = 1.0;
+  // Hysteresis keeps the level indicator from flickering near center.
+  private levelGreenEnterThresholdDeg: number = 1.5;
+  private levelGreenExitThresholdDeg: number = 2.2;
   private levelTargetRoll: number = 0; // Target roll angle for smooth interpolation
-  private levelSmoothingFactor: number = 0.4; // Increased from 0.15 for more responsive movement (0-1)
+  private levelSmoothingFactor: number = 0.68; // More responsive, but still smoothed (0-1)
   private levelAnimationFrameId?: number; // RAF ID for cleanup
   private lastRawRoll: number = 0; // Track last raw value for velocity calculation
-  private deadZoneDeg: number = 0.3; // Ignore movements smaller than this to filter noise
+  private deadZoneDeg: number = 0.14; // Ignore movements smaller than this to filter noise
   private velocityDampingFactor: number = 0.7; // Apply damping to sudden changes (0-1, higher = more damping)
   private lastProcessedRoll: number = 0; // Track the last applied roll for velocity calculation
-  private extremeChangeThreshold: number = 15; // Flag changes > this as potential sporadic movements
+  private extremeChangeThreshold: number = 18; // Flag changes > this as potential sporadic movements
+  private levelMotionSettling: boolean = false;
+  private levelLastSampleAt: number = 0;
+  private levelSettleTimer?: any;
+  private levelSettleDelayMs: number = 120;
+  private levelResyncThresholdDeg: number = 0.08;
+  private levelVelocityThresholdDegPerSec: number = 85;
+  private levelSnapThresholdDeg: number = 0.18;
+  private levelFastFollowFloor: number = 0.72;
+  private levelFastFollowCeil: number = 0.94;
   flashDurationMs: number = 120; // visual flash length
   cooldownMs: number = 500; // minimum time between pictures
   private backButtonSub: any; // hardware back handler
+  private updateLevelIndicatorState(absRollDeg: number): void {
+    const threshold = this.isPhoneLeveled
+      ? this.levelGreenExitThresholdDeg
+      : this.levelGreenEnterThresholdDeg;
+
+    this.isPhoneLeveled = !this.levelMotionSettling && absRollDeg <= threshold;
+  }
+
   private orientationHandler = (event: DeviceOrientationEvent) => {
     if (!this.isLevelEnabled) return;
     if (typeof event.gamma !== 'number') return;
 
     const rawRoll = event.gamma;
     const boundedRoll = Math.max(-45, Math.min(45, rawRoll));
+    const now = performance.now();
+    const elapsedMs = this.levelLastSampleAt > 0 ? Math.max(16, now - this.levelLastSampleAt) : 16;
+    const rawDelta = boundedRoll - this.lastRawRoll;
+    const velocityDegPerSec = Math.abs(rawDelta) / elapsedMs * 1000;
+    const velocityFactor = Math.min(1, velocityDegPerSec / 180);
+    const followFactor = this.levelMotionSettling
+      ? this.levelFastFollowCeil
+      : Math.min(this.levelFastFollowCeil, this.levelFastFollowFloor + (velocityFactor * 0.22));
+    this.levelLastSampleAt = now;
+    this.lastRawRoll = boundedRoll;
     
     // Apply dead zone filtering: ignore small movements
     const changeDelta = Math.abs(boundedRoll - this.lastProcessedRoll);
     if (changeDelta < this.deadZoneDeg) {
+      const absRollDeg = Math.abs(boundedRoll);
+      if (absRollDeg <= this.levelGreenEnterThresholdDeg) {
+        if (this.levelSettleTimer) {
+          clearTimeout(this.levelSettleTimer);
+          this.levelSettleTimer = undefined;
+        }
+        this.levelMotionSettling = false;
+        this.levelTargetRoll = 0;
+        this.levelRollDeg = 0;
+        this.lastProcessedRoll = boundedRoll;
+      }
+      this.updateLevelIndicatorState(absRollDeg);
       return; // Ignore small noise
     }
     
     // Detect and dampen extreme/sporadic movements
+    const isSporadicMovement = changeDelta > this.extremeChangeThreshold || velocityDegPerSec > this.levelVelocityThresholdDegPerSec;
     let targetRoll = boundedRoll;
-    if (changeDelta > this.extremeChangeThreshold) {
+    if (isSporadicMovement) {
       // Large sudden change detected - apply velocity damping
-      // Blend between current and new value to prevent jitter
-      targetRoll = this.lastProcessedRoll + (boundedRoll - this.lastProcessedRoll) * this.velocityDampingFactor;
-      console.log('[Level] Extreme movement detected, applying damping:', {changeDelta, original: boundedRoll, damped: targetRoll});
+      // Blend between the displayed line and the new sensor value to prevent jitter while still following motion.
+      targetRoll = this.levelRollDeg + (boundedRoll - this.levelRollDeg) * followFactor;
+      this.levelMotionSettling = true;
+      console.log('[Level] Extreme movement detected, applying damping:', {
+        changeDelta,
+        velocityDegPerSec,
+        original: boundedRoll,
+        damped: targetRoll,
+      });
+
+      if (this.levelSettleTimer) {
+        clearTimeout(this.levelSettleTimer);
+      }
+      this.levelSettleTimer = setTimeout(() => {
+        if (!this.isLevelEnabled) return;
+        this.levelMotionSettling = false;
+        this.levelTargetRoll = this.lastRawRoll;
+        if (Math.abs(this.levelRollDeg - this.levelTargetRoll) <= this.levelResyncThresholdDeg) {
+          this.levelRollDeg = this.levelTargetRoll;
+        }
+        this.updateLevelIndicatorState(Math.abs(this.levelRollDeg));
+      }, this.levelSettleDelayMs);
+    } else {
+      this.levelMotionSettling = false;
     }
     
     // Update target for smooth interpolation loop
+    if (!isSporadicMovement && Math.abs(boundedRoll - this.levelRollDeg) <= this.levelSnapThresholdDeg) {
+      targetRoll = boundedRoll;
+    }
+
     this.levelTargetRoll = targetRoll;
     this.lastProcessedRoll = targetRoll; // Track processed value for velocity calculation
     
     // Update level status
-    this.isPhoneLeveled = Math.abs(rawRoll) <= this.levelThresholdDeg;
+    this.updateLevelIndicatorState(Math.abs(this.levelRollDeg));
   };
   // session management
   sessions: any[] = [];
@@ -155,7 +229,8 @@ export class CameraPage2Page implements AfterViewInit {
         if (img) {
           // update selected thumbnail reference and title
           this.selectedThumbSrc = img.withBoxes || img.original;
-          this.selectedImageTitle = img.filename ?? '';
+          this.selectedImageSelectionKey = this.getImageSelectionKey(img);
+          this.selectedImageTitle = this.getShortImageTitle(img.filename ?? '');
         }
       });
     } catch (e) {
@@ -248,6 +323,12 @@ export class CameraPage2Page implements AfterViewInit {
     // Prevent spamming the shutter: if currently cooling down, ignore
     if (this.isCooldown) {
       console.log('[CameraPage2] takePicture blocked: cooldown active');
+      return;
+    }
+
+    // When the level guide is active, only allow capture while the phone is level.
+    if (this.isLevelEnabled && !this.isPhoneLeveled) {
+      console.log('[CameraPage2] takePicture blocked: phone is not level');
       return;
     }
 
@@ -408,14 +489,28 @@ export class CameraPage2Page implements AfterViewInit {
    * End-to-end pipeline for a provided dataUrl: preprocess → inference → store.
    * Updates session state via ImageStorageService and refreshes thumbnails/counters.
    */
-  async processDataUrl(dataUrl: string, originalName?: string, bumpCounters: boolean = true) {
+  async processDataUrl(
+    dataUrl: string,
+    originalName?: string,
+    bumpCounters: boolean = true,
+    addToCapturedImages: boolean = true,
+    refreshCountsAfterSave: boolean = true
+  ) {
     // Log the current image being processed
     console.log(`🖼️ [CameraPage2] Current image name is: ${originalName || 'Unknown'}`);
     // mimic upload-image-page behaviour: preprocess, run inference, store
-    this.capturedImages.unshift(dataUrl);
+    if (addToCapturedImages) {
+      this.capturedImages.unshift(dataUrl);
+    }
     // bump counters early so spinner shows while processing unless caller already did so
     if (bumpCounters) this.photosTaken += 1;
     this.isProcessing = true;
+    let finalizationClaimed = false;
+    const claimFinalization = () => {
+      if (finalizationClaimed) return false;
+      finalizationClaimed = true;
+      return true;
+    };
 
     const maxBytes = 900_000;
 
@@ -510,8 +605,12 @@ export class CameraPage2Page implements AfterViewInit {
         (entry as any).boxes = [];
         (entry as any).detectionMessage = 'Box rendering failed';
       }
-      //store image entry via image storage service
-          await this.imageStorage.addImage(entry, this.selectedSessionId || undefined);
+      //store image entry via image storage service, but only once per invocation
+      if (!claimFinalization()) {
+        console.warn('[CameraPage2] Skipping persist because processing was already finalized');
+        return entry;
+      }
+      await this.imageStorage.addImage(entry, this.selectedSessionId || undefined);
       // Debug: log the full entry after processing and storage
       console.log('[CameraPage2] processDataUrl saved entry:', entry);
       // also add to active session if one exists
@@ -525,11 +624,15 @@ export class CameraPage2Page implements AfterViewInit {
       } catch (e) {
         console.warn('[CameraPage2] Failed to add image to session or refresh display', e);
       }
-      // Increment upload counter for this session
-      this.imagesUploadedThisSession += 1;
+      // Count only true new uploads/captures as session additions.
+      if (bumpCounters) {
+        this.imagesUploadedThisSession += 1;
+      }
       // update UI counters from authoritative storage
       if (prediction) this.photosProcessed += 1;
-      await this.updatePhotoCounts();
+      if (refreshCountsAfterSave) {
+        await this.updatePhotoCounts();
+      }
       return entry;
     };
 
@@ -556,6 +659,10 @@ export class CameraPage2Page implements AfterViewInit {
           sessionId: this.selectedSessionId || undefined
         };
         try {
+          if (!claimFinalization()) {
+            console.warn('[CameraPage2] Skipping timeout fallback because processing was already finalized');
+            return;
+          }
           await this.imageStorage.addImage(entry, this.selectedSessionId || undefined);
           try {
             if (this.selectedSessionId && typeof (this.imageStorage.addImageToSession) === 'function') {
@@ -894,8 +1001,15 @@ export class CameraPage2Page implements AfterViewInit {
       this.isPhoneLeveled = false;
       this.levelRollDeg = 0;
       this.levelTargetRoll = 0;
+      this.levelMotionSettling = false;
+      this.levelLastSampleAt = 0;
       // Initialize processed roll to current value to establish baseline
       this.lastProcessedRoll = 0;
+      this.lastRawRoll = 0;
+      if (this.levelSettleTimer) {
+        clearTimeout(this.levelSettleTimer);
+        this.levelSettleTimer = undefined;
+      }
       
       // Add event listener for raw orientation data
       window.addEventListener('deviceorientation', this.orientationHandler, true);
@@ -917,18 +1031,29 @@ export class CameraPage2Page implements AfterViewInit {
 
       // Smooth interpolation using linear interpolation (lerp)
       const angleDelta = this.levelTargetRoll - this.levelRollDeg;
+      const smoothing = this.levelMotionSettling ? this.levelFastFollowCeil : this.levelSmoothingFactor;
       
       // Only update if there's a meaningful change to avoid excessive redraws
       if (Math.abs(angleDelta) > 0.01) {
         // Apply improved smoothing with faster responsiveness
-        this.levelRollDeg += angleDelta * this.levelSmoothingFactor;
+        this.levelRollDeg += angleDelta * smoothing;
         
         // Ensure we stay within reasonable bounds to prevent drift
         this.levelRollDeg = Math.max(-45, Math.min(45, this.levelRollDeg));
+        if (!this.levelMotionSettling && Math.abs(this.levelTargetRoll - this.levelRollDeg) <= this.levelSnapThresholdDeg) {
+          this.levelRollDeg = this.levelTargetRoll;
+        }
       } else if (Math.abs(angleDelta) > 0) {
         // Snap to target if very close to avoid oscillation
         this.levelRollDeg = this.levelTargetRoll;
       }
+
+      if (!this.levelMotionSettling && Math.abs(this.levelRollDeg) <= this.levelSnapThresholdDeg) {
+        this.levelRollDeg = 0;
+        this.levelTargetRoll = 0;
+      }
+
+      this.updateLevelIndicatorState(Math.abs(this.levelRollDeg));
 
       // Schedule next frame
       this.levelAnimationFrameId = window.requestAnimationFrame(updateLevel);
@@ -944,6 +1069,12 @@ export class CameraPage2Page implements AfterViewInit {
     this.levelRollDeg = 0;
     this.levelTargetRoll = 0;
     this.lastProcessedRoll = 0; // Reset processed roll on disable
+    this.levelMotionSettling = false;
+    this.levelLastSampleAt = 0;
+    if (this.levelSettleTimer) {
+      clearTimeout(this.levelSettleTimer);
+      this.levelSettleTimer = undefined;
+    }
     
     // Cancel RAF loop
     if (this.levelAnimationFrameId) {
@@ -992,6 +1123,10 @@ export class CameraPage2Page implements AfterViewInit {
     console.log('openMore pressed (stub)');
   }
 
+  openTestOverlay() {
+    this.showTestOverlay();
+  }
+
   /**
    * Show a simple overlay/modal used for quick tests.
    */
@@ -1021,7 +1156,11 @@ export class CameraPage2Page implements AfterViewInit {
       // box.style.background = '#fff';
       box.style.border = '1px solid transparent';
       box.style.background = 'linear-gradient(#fff, #fff) padding-box, linear-gradient(to right, #ff512f, #f09819) border-box';
-      box.style.padding = '12px';
+      // box.style.padding = '15px';
+      box.style.paddingTop = '10px';
+      box.style.paddingBottom = '15px';
+      box.style.paddingLeft = '15px';
+      box.style.paddingRight = '15px';
       box.style.borderRadius = '8px';
       box.style.minWidth = '280px';
       box.style.maxWidth = '92vw';
@@ -1034,21 +1173,27 @@ export class CameraPage2Page implements AfterViewInit {
       box.style.gap = '12px';
       box.style.overflow = 'hidden';
 
-      // Top bar: title on the left, toggle on the right
+      // Top bar: title on the left, close action on the right
       const topBar = document.createElement('div');
       topBar.style.display = 'flex';
-      topBar.style.justifyContent = 'space-between';
+      topBar.style.justifyContent = 'end';
       topBar.style.alignItems = 'center';
       topBar.style.width = '100%';
-      topBar.style.padding = '4px 8px';
+      topBar.style.padding = '4px 8px 0';
+      topBar.style.gap = '12px';
 
       const title = document.createElement('div');
       title.textContent = this.getShortImageTitle(this.selectedImageTitle) || 'No Image Selected';
       title.style.fontWeight = '600';
-      title.style.marginBottom = '4px';
+      title.style.marginBottom = '0';
       title.style.color = 'black';
       title.style.marginTop = '10px';
       title.style.flex = '0 1 auto';
+      title.style.width = '220px';
+      title.style.maxWidth = '220px';
+      title.style.whiteSpace = 'nowrap';
+      title.style.overflow = 'hidden';
+      title.style.textOverflow = 'ellipsis';
       this._overlayTitleEl = title;
 
       const toggleWrapper = document.createElement('div');
@@ -1056,7 +1201,7 @@ export class CameraPage2Page implements AfterViewInit {
       toggleWrapper.style.display = 'flex';
       toggleWrapper.style.alignItems = 'center';
       toggleWrapper.style.gap = '10px';
-      toggleWrapper.style.margin = '10px 0';
+      toggleWrapper.style.margin = '10px 0 0';
       toggleWrapper.style.flex = '0 0 auto';
 
       const labelEl = document.createElement('label');
@@ -1079,8 +1224,46 @@ export class CameraPage2Page implements AfterViewInit {
       labelEl.appendChild(sliderEl);
       toggleWrapper.appendChild(labelEl);
 
-      topBar.appendChild(title);
-      topBar.appendChild(toggleWrapper);
+      // keep the close button in the top bar (above the toggle row)
+      const closeBtn = document.createElement('button');
+      closeBtn.type = 'button';
+      closeBtn.setAttribute('aria-label', 'Close overlay');
+      closeBtn.style.width = '28px';
+      closeBtn.style.height = '28px';
+      closeBtn.style.borderRadius = '9999px';
+      closeBtn.style.border = '1px solid #f2a15a';
+      closeBtn.style.background = '#fff';
+      closeBtn.style.color = '#ff8a2a';
+      closeBtn.style.fontSize = '18px';
+      closeBtn.style.fontWeight = '600';
+      closeBtn.style.lineHeight = '1';
+      closeBtn.style.display = 'flex';
+      closeBtn.style.alignItems = 'center';
+      closeBtn.style.justifyContent = 'center';
+      closeBtn.style.cursor = 'pointer';
+      closeBtn.textContent = '×';
+      closeBtn.onclick = () => { cleanupOverlay(); };
+
+      topBar.appendChild(closeBtn);
+
+      // Toggle row: place the toggle on the left and the filename on the right
+      const toggleRow = document.createElement('div');
+      toggleRow.style.display = 'flex';
+      toggleRow.style.justifyContent = 'space-between';
+      toggleRow.style.alignItems = 'center';
+      toggleRow.style.width = '100%';
+      toggleRow.style.padding = '0 8px';
+      toggleRow.style.marginTop = '2px';
+      // left: the toggle control
+      toggleRow.appendChild(toggleWrapper);
+      // right: move the title into the toggle row so it's aligned with the toggle
+      title.style.marginTop = '0';
+      title.style.marginBottom = '0';
+      title.style.flex = '0 0 auto';
+      title.style.textAlign = 'right';
+      title.style.width = '180px';
+      title.style.maxWidth = '180px';
+      toggleRow.appendChild(title);
        
 
       const thumbContainer = document.createElement('div');
@@ -1103,6 +1286,9 @@ export class CameraPage2Page implements AfterViewInit {
       thumbScroll.style.height = '490px';
       thumbScroll.style.maxHeight = '90vh';
       thumbScroll.style.boxSizing = 'border-box';
+      thumbScroll.style.position = 'relative';
+      thumbScroll.style.top = '-20px';
+
 
       const updateThumbnails = () => {
         const thumbnails = thumbScroll.querySelectorAll('img.thumbnail2');
@@ -1117,11 +1303,28 @@ export class CameraPage2Page implements AfterViewInit {
               imageElement.src = this.showWithBoxes ? (entry as any).withBoxes || entry.original : entry.original;
             }
           }
+          const imageKey = imageElement.dataset['overlayKey'] || imageElement.dataset['storedIndex'] || imageElement.dataset['index'] || imageElement.src;
           // update border highlighting
-          imageElement.style.border = imageElement.src === this.selectedThumbSrc ? '3px solid #2ecc71' : '2px solid #fff';
+          imageElement.style.border = imageKey === this.selectedImageKey ? '3px solid #2ecc71' : '2px solid #fff';
         });
       };
       this._overlayUpdateThumbs = updateThumbnails;
+
+      const reprocessSelectedOverlayImage = async () => {
+        const selectedImage = this.getSelectedOverlayImageData();
+        if (!selectedImage) {
+          console.warn('[CameraPage2] reprocessSelectedOverlayImage: no image selected');
+          alert('No image selected to reprocess');
+          return;
+        }
+
+        try {
+          await this.processDataUrl(selectedImage.dataUrl, selectedImage.originalName);
+        } catch (err) {
+          console.warn('[CameraPage2] reprocessSelectedOverlayImage failed', err);
+          alert('Failed to reprocess selected image. See console for details.');
+        }
+      };
 
       // Prefer storedImages (persisted) when available so we can toggle between original/withBoxes
       //checks if there is stored images and if so create thumbnails for each stored image
@@ -1143,11 +1346,13 @@ export class CameraPage2Page implements AfterViewInit {
           img.style.boxShadow = '0 0 6px rgba(0,0,0,0.12)';
           img.style.cursor = 'pointer';
           img.dataset['storedIndex'] = String(idx);
+          img.dataset['overlayKey'] = this.getImageSelectionKey(entry);
           img.src = this.showWithBoxes ? (entry as any).withBoxes || entry.original : entry.original;
-          img.style.border = img.src === this.selectedThumbSrc ? '3px solid #2ecc71' : '2px solid #fff';
+          img.style.border = img.dataset['overlayKey'] === this.selectedImageKey ? '3px solid #2ecc71' : '2px solid #fff';
           img.onclick = () => {
             this.selectedThumbSrc = img.src;
-            this.selectedImageTitle = entry.filename || `Stored ${idx + 1}`;
+            this.selectedImageSelectionKey = img.dataset['overlayKey'] || this.getImageSelectionKey(entry);
+            this.selectedImageTitle = this.getShortImageTitle(entry.filename || `Stored ${idx + 1}`);
             title.textContent = this.selectedImageTitle;
             updateThumbnails();
           };
@@ -1181,8 +1386,10 @@ export class CameraPage2Page implements AfterViewInit {
           img.style.boxShadow = '0 0 6px rgba(0,0,0,0.12)';
           img.style.cursor = 'pointer';
           img.dataset['index'] = String(idx);
+          img.dataset['overlayKey'] = `captured-${idx}`;
           img.onclick = () => {
             this.selectedThumbSrc = src;
+            this.selectedImageSelectionKey = `captured-${idx}`;
             this.selectedImageTitle = `Captured ${idx + 1}`;
             title.textContent = this.selectedImageTitle;
             updateThumbnails();
@@ -1199,6 +1406,7 @@ export class CameraPage2Page implements AfterViewInit {
       btnRow.style.width = '100%';
       btnRow.style.display = 'flex';
       btnRow.style.justifyContent = 'space-between';
+      btnRow.style.gap = '8px';
 
       const deleteBtn = document.createElement('button');
       deleteBtn.className = 'function-btn';
@@ -1227,6 +1435,33 @@ export class CameraPage2Page implements AfterViewInit {
       deleteIcon.src = 'assets/Trash.png';
       deleteBtn.appendChild(deleteText);
       deleteBtn.appendChild(deleteIcon);
+
+      const reprocessBtn = document.createElement('button');
+      reprocessBtn.className = 'function-btn';
+      reprocessBtn.type = 'button';
+      reprocessBtn.style.display = 'flex';
+      reprocessBtn.style.alignItems = 'center';
+      reprocessBtn.style.justifyContent = 'center';
+      reprocessBtn.style.height = '40px';
+      reprocessBtn.style.borderRadius = '10px';
+      reprocessBtn.style.border = '1px solid transparent';
+      reprocessBtn.style.background = 'linear-gradient(#fff, #fff) padding-box, linear-gradient(to right, #ff512f, #f09819) border-box';
+      reprocessBtn.style.color = '#ff7a00';
+
+      const reprocessText = document.createTextNode('Reprocess Image');
+      const reprocessIcon = document.createElement('span');
+      reprocessIcon.textContent = '↻';
+      reprocessIcon.style.display = 'inline-flex';
+      reprocessIcon.style.alignItems = 'center';
+      reprocessIcon.style.justifyContent = 'center';
+      reprocessIcon.style.width = '20px';
+      reprocessIcon.style.height = '20px';
+      reprocessIcon.style.marginLeft = '8px';
+      reprocessIcon.style.fontSize = '18px';
+      reprocessIcon.style.fontWeight = '700';
+      reprocessBtn.appendChild(reprocessText);
+      reprocessBtn.appendChild(reprocessIcon);
+
       // local cleanup helper unsubscribes overlay back-button subscription and removes overlay
       let overlayBackBtnSub: any = null;
       const cleanupOverlay = () => {
@@ -1243,44 +1478,21 @@ export class CameraPage2Page implements AfterViewInit {
         cleanupOverlay();
       };
 
-      const closeBtn = document.createElement('button');
-      closeBtn.className = 'function-btn';
-      closeBtn.type = 'button';
-      closeBtn.style.display = 'flex';
-      closeBtn.style.alignItems = 'center';
-      closeBtn.style.justifyContent = 'center';
-      closeBtn.style.height = '40px';
-      closeBtn.style.borderRadius = '10px';
-       closeBtn.style.background = '#ddd';
-      closeBtn.style.color = '#111';
-      closeBtn.style.border = '1px solid transparent';
-      closeBtn.style.background = 'linear-gradient(#fff, #fff) padding-box, linear-gradient(to right, #ff512f, #f09819) border-box';
-      closeBtn.style.color = '#111';
-      
-
-      // text + inline check SVG icon for close
-      const closeText = document.createTextNode('Close');
-      const closeIcon = document.createElement('img');
-      closeIcon.className = 'action-icon';
-      closeIcon.style.width = '20px';
-      closeIcon.style.height = '20px';
-      closeIcon.style.marginLeft = '8px';
-
-      // use project asset for check/close icon
-      closeIcon.src = 'assets/Check_Black.png';
-      closeBtn.appendChild(closeText);
-      closeBtn.appendChild(closeIcon);
-      closeBtn.onclick = () => { cleanupOverlay(); };
+      reprocessBtn.onclick = () => {
+        void reprocessSelectedOverlayImage();
+        cleanupOverlay();
+      };
 
       // make buttons visually fill available space like in bottom-top-row
       deleteBtn.style.flex = '1 1 auto';
-      closeBtn.style.flex = '1 1 auto';
+      reprocessBtn.style.flex = '1 1 auto';
       deleteBtn.style.marginRight = '8px';
 
       btnRow.appendChild(deleteBtn);
-      btnRow.appendChild(closeBtn);
+      btnRow.appendChild(reprocessBtn);
 
       box.appendChild(topBar);
+      box.appendChild(toggleRow);
       box.appendChild(thumbContainer);
       box.appendChild(btnRow);
       overlay.appendChild(box);
@@ -1342,6 +1554,7 @@ export class CameraPage2Page implements AfterViewInit {
     //Purpose: obtain the image source and update selectedThumbSrc.
     if (!closestImg) return;
     const src = (closestImg as HTMLImageElement).src;
+    const overlayKey = (closestImg as HTMLImageElement).dataset['overlayKey'] || '';
     // Prefer storedImages (which may have withBoxes) when resolving title
     let newTitle = src;
     const storedIdx = this.storedImages ? this.storedImages.findIndex(s => (s as any).withBoxes === src || s.original === src) : -1;
@@ -1353,13 +1566,86 @@ export class CameraPage2Page implements AfterViewInit {
     }
 
     this.selectedThumbSrc = src;
-    this.selectedImageTitle = newTitle;
+    this.selectedImageSelectionKey = overlayKey || src;
+    this.selectedImageTitle = this.getShortImageTitle(newTitle);
     // Update overlay title if present
     if (this._overlayTitleEl) this._overlayTitleEl.textContent = this.selectedImageTitle;
     // Refresh borders to reflect new selection
     if (this._overlayUpdateThumbs) this._overlayUpdateThumbs();
 
     console.log('[CameraPage2] Center thumbnail selected:', { title: newTitle, src });
+  }
+
+  private getSelectedOverlayImageData(): { dataUrl: string; originalName?: string } | null {
+    const src = this.selectedThumbSrc || '';
+    const selectionKey = this.selectedImageSelectionKey || '';
+    if (!src) {
+      return null;
+    }
+
+    const storedImage = this.storedImages.find(image => this.getImageSelectionKey(image) === selectionKey) || this.storedImages.find(image => image.original === src || image.withBoxes === src);
+    if (storedImage) {
+      return {
+        dataUrl: storedImage.original,
+        originalName: storedImage.fileImageName || storedImage.filename || this.selectedImageTitle || undefined
+      };
+    }
+
+    const capturedIndex = selectionKey.startsWith('captured-') ? parseInt(selectionKey.replace('captured-', ''), 10) : this.capturedImages.indexOf(src);
+    if (capturedIndex !== -1) {
+      return {
+        dataUrl: this.capturedImages[capturedIndex],
+        originalName: this.selectedImageTitle || `Captured ${capturedIndex + 1}`
+      };
+    }
+
+    return {
+      dataUrl: src,
+      originalName: this.selectedImageTitle || undefined
+    };
+  }
+
+  async reprocessSelectedImage() {
+    const selectedImage = this.getSelectedOverlayImageData();
+    if (!selectedImage) {
+      console.warn('[CameraPage2] reprocessSelectedImage: no image selected');
+      alert('No image selected to reprocess');
+      return;
+    }
+
+    try {
+      const selectedKey = this.selectedImageSelectionKey || this.selectedThumbSrc || '';
+      const originalEntry = this.storedImages.find(image => this.getImageSelectionKey(image) === selectedKey)
+        || this.storedImages.find(image => image.original === selectedImage.dataUrl || image.withBoxes === selectedImage.dataUrl);
+      const originalDeleteKey = originalEntry?.filename || originalEntry?.original || originalEntry?.withBoxes || selectedImage.dataUrl;
+      const reprocessFilename = `reprocess-${Date.now()}.jpg`;
+
+      // Reprocess first so the new image exists before deleting the original one.
+      const reprocessedEntry = await this.processDataUrl(selectedImage.dataUrl, reprocessFilename, false, false, false);
+
+      if (originalDeleteKey) {
+        const removed = await this.imageStorage.deleteImage(originalDeleteKey);
+        if (!removed && originalEntry?.original && originalEntry.original !== originalDeleteKey) {
+          await this.imageStorage.deleteImage(originalEntry.original);
+        }
+      }
+
+      await this.updatePhotoCounts();
+      try {
+        await this.loadStoredImages();
+        await this.loadSessions();
+        await this.refreshDisplayedImages();
+      } catch (refreshErr) {
+        console.warn('[CameraPage2] reprocessSelectedImage refresh failed', refreshErr);
+      }
+
+      this.selectedThumbSrc = (reprocessedEntry as any)?.original || selectedImage.dataUrl;
+      this.selectedImageSelectionKey = (reprocessedEntry as any)?.filename || reprocessFilename;
+      this.selectedImageTitle = (reprocessedEntry as any)?.filename || reprocessFilename;
+    } catch (err) {
+      console.warn('[CameraPage2] reprocessSelectedImage failed', err);
+      alert('Failed to reprocess selected image. See console for details.');
+    }
   }
 
   /**
@@ -1513,7 +1799,8 @@ export class CameraPage2Page implements AfterViewInit {
       console.warn('onStoredThumbClick failed:', e);
     }
     this.selectedThumbSrc = img.withBoxes || img.original;
-    this.selectedImageTitle = img.filename ?? '';
+    this.selectedImageSelectionKey = this.getImageSelectionKey(img);
+    this.selectedImageTitle = this.getShortImageTitle(img.filename ?? '');
   }
 
   /** Load all StoredImage entries from the ImageStorageService and update local list */
@@ -1539,7 +1826,7 @@ export class CameraPage2Page implements AfterViewInit {
         const cur = (this.imageStorage as any).getCurrentImage ? (this.imageStorage as any).getCurrentImage() : null;
         if (cur) {
           this.selectedThumbSrc = cur.withBoxes || cur.original;
-          this.selectedImageTitle = cur.filename ?? '';
+          this.selectedImageTitle = this.getShortImageTitle(cur.filename ?? '');
         }
       } catch (e) {
         // ignore
@@ -1651,8 +1938,8 @@ export class CameraPage2Page implements AfterViewInit {
         if (choice === 'stay' || choice === null) return;
       }
 
-      if (this.selectedSessionId && this.sessionIsPristine === false && typeof (this.imageStorage as any).promptAndSaveSession === 'function') {
-        try { await (this.imageStorage as any).promptAndSaveSession(this.selectedSessionId); } catch (e) { /* ignore */ }
+      if (this.selectedSessionId && this.sessionIsPristine === false && typeof (this.imageStorage as any).saveSessionSnapshotToBrowserStorage === 'function') {
+        try { await (this.imageStorage as any).saveSessionSnapshotToBrowserStorage(this.selectedSessionId, 'local'); } catch (e) { /* ignore */ }
       }
       this.router.navigate(['/home-page2']);
     } catch (e) {

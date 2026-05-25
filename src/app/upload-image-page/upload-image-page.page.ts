@@ -71,6 +71,7 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
   showWithBoxes = false;
   selectedImage: string = '';
   selectedImageTitle: string = '';
+  private selectedImageSelectionKey: string = '';
   includeTestAssets = true; // set to false after testing to remove placeholder assets
   // debug panel and selected prediction
   showDebugPanel = false;
@@ -80,6 +81,21 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
   scaledBoxes: ScaledBox[] = [];
   selectedThumbSrc: string | null = null;
   private _thumbScrollTimeout: any = null;
+
+  get selectedImageKey(): string {
+    return this.selectedImageSelectionKey || this.selectedThumbSrc || this.selectedImage || '';
+  }
+
+  getImageSelectionKey(img: any, index?: number): string {
+    if (!img) return typeof index === 'number' ? `item-${index}` : '';
+    if (img.filename) return img.filename;
+    if (img.fileName) return img.fileName;
+    if (img.key) return img.key;
+    if (typeof index === 'number') {
+      return img.original === img.withBoxes ? `item-${index}` : `item-${index}-${img.original || img.withBoxes || ''}`;
+    }
+    return img.original || img.withBoxes || '';
+  }
   // sessions list for session selection UI
   sessions: any[] = [];
   selectedSessionId: string | null = null;
@@ -108,6 +124,7 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
       this.imageStorage.getCurrentImage$().subscribe(img => {
         if (img) {
           this.selectedThumbSrc = img.withBoxes ?? img.original;
+          this.selectedImageSelectionKey = this.getImageSelectionKey(img);
           this.selectedImageTitle = img.filename ?? '';
         }
       });
@@ -244,11 +261,111 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
     // Respect the current toggle: show boxed version when toggled on, otherwise show original
     // update the selected thumbnail src and title with respect to the toggle, and auto-scroll to center
     this.selectedThumbSrc = this.showWithBoxes ? (img.withBoxes ?? img.original) : (img.original ?? img.withBoxes ?? '');
+    this.selectedImageSelectionKey = this.getImageSelectionKey(img);
     this.selectedImageTitle = img.filename ?? img.fileName ?? '';
     
     // Auto-scroll to center the selected thumbnail or item (Android Recent Apps style).  
     // after a short delay let the DOM update then center the clicked thumbnail in the scroller.
     setTimeout(() => this.scrollThumbnailIntoView(), 100);
+  }
+
+  /** Resolve the currently selected stored image record for actions like reprocess */
+  private resolveSelectedStoredImage(): StoredImage | null {
+    try {
+      const current = typeof (this.imageStorage as any).getCurrentImage === 'function'
+        ? (this.imageStorage as any).getCurrentImage()
+        : null;
+      if (current) {
+        return current as StoredImage;
+      }
+
+      const lookupKeys = [
+        this.selectedImageSelectionKey,
+        this.selectedThumbSrc,
+        this.selectedImage,
+        this.selectedImageTitle
+      ];
+
+      for (const key of lookupKeys) {
+        if (!key) continue;
+
+        const found = typeof (this.imageStorage as any).getEntryForImage === 'function'
+          ? (this.imageStorage as any).getEntryForImage(key)
+          : null;
+        if (found) {
+          return found as StoredImage;
+        }
+
+        const local = this.imagePaths.find((img: any) =>
+          img && (
+            img.fileName === key ||
+            img.filename === key ||
+            img.original === key ||
+            img.withBoxes === key
+          )
+        );
+        if (local) {
+          return {
+            original: local.original,
+            withBoxes: local.withBoxes,
+            timestamp: new Date().toISOString(),
+            filename: local.fileName || local.filename || `selected-${Date.now()}.jpg`,
+            prediction: local.rawPrediction,
+          } as StoredImage;
+        }
+      }
+    } catch (e) {
+      console.warn('[UploadImagePage] resolveSelectedStoredImage failed', e);
+    }
+
+    return null;
+  }
+
+  /** Reprocess the currently selected image through the normal upload pipeline */
+  async reprocessSelectedImage() {
+    try {
+      const selected = this.resolveSelectedStoredImage();
+      if (!selected) {
+        alert('No image selected to reprocess');
+        return;
+      }
+
+      const dataUrl = selected.original || selected.withBoxes || this.selectedThumbSrc || '';
+      if (!dataUrl) {
+        alert('The selected image does not contain data that can be reprocessed');
+        return;
+      }
+
+      const originalDeleteKey = selected.filename || selected.fileImageName || selected.original || selected.withBoxes || '';
+      const reprocessFilename = `reprocess-${Date.now()}.jpg`;
+
+      // Reprocess first so the replacement image is saved before removing the original.
+      const reprocessedEntry = await this.processDataUrl(dataUrl, reprocessFilename, false, false, false);
+
+      if (originalDeleteKey) {
+        const removed = await this.imageStorage.deleteImage(originalDeleteKey);
+        if (!removed && selected.original && selected.original !== originalDeleteKey) {
+          await this.imageStorage.deleteImage(selected.original);
+        }
+      }
+
+      await this.updatePhotoCounts();
+      try {
+        await this.loadStoredImages();
+        await this.loadSessions();
+        await this.refreshDisplayedImages();
+      } catch (refreshErr) {
+        console.warn('[UploadImagePage] reprocessSelectedImage refresh failed', refreshErr);
+      }
+
+      this.selectedThumbSrc = (reprocessedEntry as any)?.original || dataUrl;
+      this.selectedImageSelectionKey = (reprocessedEntry as any)?.filename || reprocessFilename;
+      this.selectedImageTitle = (reprocessedEntry as any)?.filename || reprocessFilename;
+      setTimeout(() => this.detectCenterThumbnail(), 60);
+    } catch (e) {
+      console.warn('[UploadImagePage] reprocessSelectedImage failed', e);
+      alert('Failed to reprocess the selected image. See console for details.');
+    }
   }
 
   /** Scroll the thumbnail carousel to center the selected item */
@@ -263,8 +380,8 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
     // Find the selected image element
     let selectedImg: HTMLImageElement | null = null;
     images.forEach(img => {
-      const src = img.src || img.getAttribute('src');
-      if (src === this.selectedThumbSrc) {
+      const key = img.getAttribute('data-overlay-key') || '';
+      if (key === this.selectedImageKey) {
         selectedImg = img as HTMLImageElement;
       }
     });
@@ -364,13 +481,21 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
   }
 
   /** Helper to process a data URL (image) — runs inference and stores the image */
-  async processDataUrl(dataUrl: string, filename: string) {
+  async processDataUrl(
+    dataUrl: string,
+    filename: string,
+    bumpCounters: boolean = true,
+    addToCapturedImages: boolean = true,
+    refreshCountsAfterSave: boolean = true
+  ) {
     // Log the current image being processed
     console.log(`🖼️ [UploadImagePage] Current image name is: ${filename}`);
     // Update UI
     this.imagePreview = dataUrl;
     //prepend to captured images for thumbnail scroller
-    this.capturedImages.unshift(dataUrl);
+    if (addToCapturedImages) {
+      this.capturedImages.unshift(dataUrl);
+    }
     // detect center thumbnail after UI update
     setTimeout(() => this.detectCenterThumbnail(), 60);
     //set processing as true to show indicator
@@ -378,6 +503,12 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
     // yield to the event loop so the spinner can render/animate before heavy work
     await this.sleep(50);
     try { this.cdr.detectChanges(); } catch (e) { /* ignore */ }
+    let finalizationClaimed = false;
+    const claimFinalization = () => {
+      if (finalizationClaimed) return false;
+      finalizationClaimed = true;
+      return true;
+    };
 
     //set for tracking inference success/failure
     let inferenceCalled = false;
@@ -466,7 +597,11 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
         (entry as any).boxes = [];
         (entry as any).detectionMessage = 'Box rendering failed';
       }
-      //store image entry via image storage service
+      //store image entry via image storage service, but only once per invocation
+      if (!claimFinalization()) {
+        console.warn('[UploadImagePage] Skipping persist because processing was already finalized');
+        return entry;
+      }
       await this.imageStorage.addImage(entry, this.selectedSessionId || undefined);
       // Debug: log the full entry after processing and storage
       console.log('[UploadImagePage] processDataUrl saved entry:', entry);
@@ -493,10 +628,14 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
           console.warn('[UploadImagePage] Failed to save user-scoped Firestore data', e);
         }
       }
-      // Increment upload counter for this session
-      this.imagesUploadedThisSession += 1;
-      // keep counters in sync with persistent storage
-      await this.updatePhotoCounts();
+      // Count only true new uploads/captures as session additions.
+      if (bumpCounters) {
+        this.imagesUploadedThisSession += 1;
+      }
+      // keep counters in sync with persistent storage unless the caller will refresh later
+      if (refreshCountsAfterSave) {
+        await this.updatePhotoCounts();
+      }
       // Force UI update and center detection with longer delay to ensure DOM is ready
       setTimeout(() => {
         // Trigger change detection
@@ -526,6 +665,10 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
             userId: userId,
             sessionId: this.selectedSessionId || undefined
           };
+          if (!claimFinalization()) {
+            console.warn('[UploadImagePage] Skipping timeout fallback because processing was already finalized');
+            return;
+          }
           await this.imageStorage.addImage(entry, this.selectedSessionId || undefined);
           try {
             if (this.selectedSessionId && typeof (this.imageStorage.addImageToSession) === 'function') {
@@ -798,8 +941,8 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
         }
       } else {
         // Session has images or no active session, navigate normally
-        if (this.selectedSessionId && this.sessionIsPristine === false && typeof (this.imageStorage as any).promptAndSaveSession === 'function') {
-          try { await (this.imageStorage as any).promptAndSaveSession(this.selectedSessionId); } catch (e) { /* ignore */ }
+        if (this.selectedSessionId && this.sessionIsPristine === false && typeof (this.imageStorage as any).saveSessionSnapshotToBrowserStorage === 'function') {
+          try { await (this.imageStorage as any).saveSessionSnapshotToBrowserStorage(this.selectedSessionId, 'local'); } catch (e) { /* ignore */ }
         }
         this.router.navigate(['/home-page2']);
       }
@@ -1006,8 +1149,8 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
     }
 
     try {
-      if (this.selectedSessionId && this.sessionIsPristine === false && typeof (this.imageStorage as any).saveSessionWithImagesToFirestore === 'function') {
-        try { await (this.imageStorage as any).saveSessionWithImagesToFirestore(this.selectedSessionId); } catch (e) { /* ignore */ }
+      if (this.selectedSessionId && this.sessionIsPristine === false && typeof (this.imageStorage as any).saveSessionSnapshotToBrowserStorage === 'function') {
+        try { await (this.imageStorage as any).saveSessionSnapshotToBrowserStorage(this.selectedSessionId, 'local'); } catch (e) { /* ignore */ }
       }
       this.router.navigateByUrl('/home-page2');
     } catch (e) {
@@ -1199,6 +1342,7 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
     const imgEl: any = closestImg;
     const src = (imgEl && (imgEl.src || (imgEl.getAttribute && imgEl.getAttribute('src')))) || '';
     this.selectedThumbSrc = src;
+    this.selectedImageSelectionKey = (imgEl && imgEl.dataset && imgEl.dataset['overlayKey']) || src;
     
     //Resolve a title from stored images or captured images
     //Purpose: map the src to a friendly filename/title, fallback to captured index or src.
