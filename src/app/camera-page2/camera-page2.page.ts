@@ -72,6 +72,7 @@ export class CameraPage2Page implements AfterViewInit {
   selectedThumbSrc: string | null = null;
   selectedImageTitle: string = '';
   private selectedImageSelectionKey: string = '';
+  private lastReprocessedSelectionKey: string | null = null;
   get selectedImageKey(): string {
     return this.selectedImageSelectionKey || this.selectedThumbSrc || '';
   }
@@ -88,6 +89,9 @@ export class CameraPage2Page implements AfterViewInit {
   isProcessWindowOpen: boolean = false;
 
   scaledBoxes = [];
+  isReprocessInProgress: boolean = false;
+  private _reprocessLockTimer?: any;
+  private readonly reprocessTimeoutMs: number = 15000;
   // Cooldown and flash UI for capture
   isCooldown: boolean = false;
   showFlash: boolean = false;
@@ -323,12 +327,6 @@ export class CameraPage2Page implements AfterViewInit {
     // Prevent spamming the shutter: if currently cooling down, ignore
     if (this.isCooldown) {
       console.log('[CameraPage2] takePicture blocked: cooldown active');
-      return;
-    }
-
-    // When the level guide is active, only allow capture while the phone is level.
-    if (this.isLevelEnabled && !this.isPhoneLeveled) {
-      console.log('[CameraPage2] takePicture blocked: phone is not level');
       return;
     }
 
@@ -1606,6 +1604,7 @@ export class CameraPage2Page implements AfterViewInit {
   }
 
   async reprocessSelectedImage() {
+    // === Guard 1: Check if user has an image selected ===
     const selectedImage = this.getSelectedOverlayImageData();
     if (!selectedImage) {
       console.warn('[CameraPage2] reprocessSelectedImage: no image selected');
@@ -1613,24 +1612,100 @@ export class CameraPage2Page implements AfterViewInit {
       return;
     }
 
+    // === Guard 2: Check if already reprocessing ===
+    if (this.isReprocessInProgress) {
+      console.warn('[CameraPage2] reprocessSelectedImage blocked: already in progress');
+      return;
+    }
+
+    // === Guard 3: Check if this is the ONLY image in an active session ===
+    if (this.selectedSessionId) {
+      const activeSession = this.sessions?.find(s => s.id === this.selectedSessionId);
+      const imageCountInSession = activeSession?.imageKeys?.length || 0;
+      if (imageCountInSession <= 1) {
+        console.warn('[CameraPage2] reprocessSelectedImage blocked: cannot reprocess the only image in an active session');
+        alert('Cannot reprocess the only image in a session. Please keep at least one image, or create a new session.');
+        return;
+      }
+    }
+
+    // === Guard 4: Check if counters are already at 0/0 (circuit breaker) ===
+    if (this.photosTaken === 0 && this.photosProcessed === 0) {
+      console.warn('[CameraPage2] reprocessSelectedImage blocked: counters are already at 0/0 (circuit breaker)');
+      alert('Session state is invalid (0 photos). Reload the page and try again.');
+      return;
+    }
+
+    this.isReprocessInProgress = true;
+    if (this._reprocessLockTimer) {
+      clearTimeout(this._reprocessLockTimer);
+    }
+    this._reprocessLockTimer = setTimeout(() => {
+      this.isReprocessInProgress = false;
+      this._reprocessLockTimer = undefined;
+      console.warn('[CameraPage2] reprocessSelectedImage lock timeout released');
+    }, this.reprocessTimeoutMs);
+
     try {
       const selectedKey = this.selectedImageSelectionKey || this.selectedThumbSrc || '';
       const originalEntry = this.storedImages.find(image => this.getImageSelectionKey(image) === selectedKey)
         || this.storedImages.find(image => image.original === selectedImage.dataUrl || image.withBoxes === selectedImage.dataUrl);
       const originalDeleteKey = originalEntry?.filename || originalEntry?.original || originalEntry?.withBoxes || selectedImage.dataUrl;
+      const sourceSelectionKey = selectedKey || originalEntry?.filename || originalEntry?.original || '';
+
+      // === Guard 5: Check for duplicate reprocess attempt on same image ===
+      if (sourceSelectionKey && this.lastReprocessedSelectionKey === sourceSelectionKey) {
+        console.warn('[CameraPage2] reprocessSelectedImage blocked: selection already reprocessed in this session');
+        alert('This image has already been reprocessed. Please select a different image.');
+        return;
+      }
+
       const reprocessFilename = `reprocess-${Date.now()}.jpg`;
+
+      console.log('[CameraPage2] Starting reprocess:', { originalDeleteKey, photosTaken: this.photosTaken, photosProcessed: this.photosProcessed });
 
       // Reprocess first so the new image exists before deleting the original one.
       const reprocessedEntry = await this.processDataUrl(selectedImage.dataUrl, reprocessFilename, false, false, false);
 
-      if (originalDeleteKey) {
-        const removed = await this.imageStorage.deleteImage(originalDeleteKey);
-        if (!removed && originalEntry?.original && originalEntry.original !== originalDeleteKey) {
-          await this.imageStorage.deleteImage(originalEntry.original);
+      // === Guard 6: Verify counters didn't collapse before deletion ===
+      if (this.photosTaken === 0 || this.photosProcessed === 0) {
+        console.error('[CameraPage2] reprocessSelectedImage: counters collapsed during reprocess! Aborting deletion.');
+        console.log('[CameraPage2] State:', { photosTaken: this.photosTaken, photosProcessed: this.photosProcessed, originalDeleteKey });
+        // Do NOT delete the original image if counters collapsed
+        await this.updatePhotoCounts();
+        alert('Reprocessing detected a counter issue. Original image preserved. Please refresh and retry.');
+        return;
+      }
+
+      const isReprocessGeneratedSelection = String(originalDeleteKey).startsWith('reprocess-');
+      if (originalDeleteKey && !isReprocessGeneratedSelection) {
+        try {
+          const removed = await this.imageStorage.deleteImage(originalDeleteKey);
+          if (!removed && originalEntry?.original && originalEntry.original !== originalDeleteKey) {
+            await this.imageStorage.deleteImage(originalEntry.original);
+          }
+        } catch (deleteErr) {
+          console.warn('[CameraPage2] reprocessSelectedImage deletion attempt failed', deleteErr);
+          // Continue even if deletion fails; the new reprocessed entry is safely stored
         }
       }
 
       await this.updatePhotoCounts();
+
+      // === Guard 7: Final counter validation after update ===
+      if (this.photosTaken === 0) {
+        console.error('[CameraPage2] reprocessSelectedImage: photosTaken collapsed to 0 after deletion!');
+        console.log('[CameraPage2] Attempting recovery...');
+        // Force a full reload from storage
+        try {
+          await this.loadStoredImages();
+          await this.loadSessions();
+          await this.refreshDisplayedImages();
+        } catch (recoveryErr) {
+          console.error('[CameraPage2] recovery failed', recoveryErr);
+        }
+      }
+
       try {
         await this.loadStoredImages();
         await this.loadSessions();
@@ -1639,12 +1714,21 @@ export class CameraPage2Page implements AfterViewInit {
         console.warn('[CameraPage2] reprocessSelectedImage refresh failed', refreshErr);
       }
 
-      this.selectedThumbSrc = (reprocessedEntry as any)?.original || selectedImage.dataUrl;
+      this.lastReprocessedSelectionKey = sourceSelectionKey || null;
+      this.selectedThumbSrc = (reprocessedEntry as any)?.withBoxes || (reprocessedEntry as any)?.original || selectedImage.dataUrl;
       this.selectedImageSelectionKey = (reprocessedEntry as any)?.filename || reprocessFilename;
       this.selectedImageTitle = (reprocessedEntry as any)?.filename || reprocessFilename;
+
+      console.log('[CameraPage2] reprocessSelectedImage completed successfully');
     } catch (err) {
-      console.warn('[CameraPage2] reprocessSelectedImage failed', err);
+      console.error('[CameraPage2] reprocessSelectedImage failed', err);
       alert('Failed to reprocess selected image. See console for details.');
+    } finally {
+      if (this._reprocessLockTimer) {
+        clearTimeout(this._reprocessLockTimer);
+        this._reprocessLockTimer = undefined;
+      }
+      this.isReprocessInProgress = false;
     }
   }
 
@@ -1881,6 +1965,7 @@ export class CameraPage2Page implements AfterViewInit {
   goToFeedBackPage() {
     const params: any = {};
     if (this.selectedSessionId) params.sessionId = this.selectedSessionId;
+    params.source = 'camera-page2';
     this.router.navigate(['/feedback-page'], { queryParams: params });
     console.log('Navigating to Feedback page', params);
   }

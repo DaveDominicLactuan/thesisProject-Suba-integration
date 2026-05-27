@@ -85,8 +85,8 @@
       </div>
 
       <!-- Upload and Finish blocks (now siblings of the spinner block for even spacing) -->
-      <div class="func-action" (click)="reprocessSelectedImage()">
-        <button class="function-btn icon-btn" aria-label="Reprocess Selected Image">
+      <div class="func-action" (click)="!isProcessing && !isReprocessInProgress && reprocessSelectedImage()">
+          <button class="function-btn icon-btn" aria-label="Reprocess Selected Image" [disabled]="isProcessing || isReprocessInProgress">
           <img src="assets/upload_img2.png" alt="Upload" class="action-icon" />
         </button>
         <div class="action-label">Reprocess Selected</div>

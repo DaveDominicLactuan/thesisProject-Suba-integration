@@ -200,7 +200,7 @@
 
         
 
-        <div class="button-group">
+        <div *ngIf="userRole === 'engineer'" class="button-group">
               <button class="sign-in-button" (click)="viewResults()">View Results</button>
               <!-- <button class="sign-in-button" (click)="saveCurrentStoredImageAndGoHome()">Save Session</button> -->
             </div>

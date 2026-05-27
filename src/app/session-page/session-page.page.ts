@@ -753,6 +753,7 @@ private startUserSyncInBackground(userId: string): void {
       // Build params and navigate
       const params: any = {};
       if (session && session.id) params.sessionId = session.id;
+      params.source = 'session-page';
       this.router.navigate(['/feedback-page'], { queryParams: params });
     } catch (e) {
       console.error('[SessionPage] loadAndNavigateToSession failed:', e);

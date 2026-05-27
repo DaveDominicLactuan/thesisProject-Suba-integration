@@ -386,7 +386,8 @@ export class ChatPagePage implements OnInit, OnDestroy {
                   timestamp: session.created || new Date().toISOString(),
                   attachmentType: 'session',
                   // Preserve the engineer-checked flag so attachments carry the session state
-                  engineerCheckedSession: !!session.engineerCheckedSession
+                  engineerCheckedSession: !!session.engineerCheckedSession,
+                  notes: !!session.notes ? session.notes : 'No notes available' // Handle missing notes field gracefully
                 });
               }
             }
@@ -1434,6 +1435,15 @@ export class ChatPagePage implements OnInit, OnDestroy {
     }
 
     console.log("start of confirmAttachmentShareCopy with the session", selectedSession, "Engineer Checked Session:", selectedSession.engineerCheckedSession);
+    
+    // Validate and log notes field early
+    const sessionNotes = selectedSession.notes || '';
+    console.log("start of confirmAttachmentShareCopy with the session", selectedSession, "Session notes:", {
+      notesValue: sessionNotes,
+      notesType: typeof selectedSession.notes,
+      notesExists: 'notes' in selectedSession,
+      notesLength: typeof sessionNotes === 'string' ? sessionNotes.length : 'N/A'
+    });
 
     const currentUserId = this.auth3.getCurrentUser()?.uid || this.userID;
     if (!currentUserId) {
@@ -1500,6 +1510,16 @@ export class ChatPagePage implements OnInit, OnDestroy {
     copiedSession.imageKeys = [];
     // Preserve engineer-checked flag from the source session
     copiedSession.engineerCheckedSession = !!selectedSession.engineerCheckedSession;
+    // Preserve notes field from the source session
+    copiedSession.notes = sessionNotes;
+
+    console.log('[ChatPage.confirmAttachmentShareCopy] Prepared copiedSession with preserved fields', {
+      copiedSessionId: copiedSession.id,
+      copiedSessionUserId: copiedSession.userId,
+      copiedSessionNotes: copiedSession.notes,
+      copiedSessionNotesLength: typeof copiedSession.notes === 'string' ? copiedSession.notes.length : 'N/A',
+      engineerCheckedSession: copiedSession.engineerCheckedSession
+    });
 
     try {
       this.isAttachmentCopyInProgress = true;
@@ -1949,6 +1969,17 @@ export class ChatPagePage implements OnInit, OnDestroy {
     
       console.log("Selected Session", selectedSession, "Selected Session EngineerChecked", selectedSession.engineerCheckedSession);
 
+      // Verify notes field before saving to Firestore
+      console.log('[ChatPage.confirmAttachmentShareCopy] Verifying notes field before Firestore save', {
+        sourceSessionNotes: selectedSession.notes || '',
+        copiedSessionNotes: copiedSession.notes || '',
+        notesWillBeSaved: {
+          notes: copiedSession.notes,
+          notesType: typeof copiedSession.notes,
+          notesLength: typeof copiedSession.notes === 'string' ? copiedSession.notes.length : 0
+        }
+      });
+
       console.log('[ChatPage.confirmAttachmentShareCopy] Preparing Firestore session save with sanitized IDs', {
         copiedSessionId: copiedSession.id,
         copiedSessionUserId: copiedSession.userId,
@@ -1961,6 +1992,17 @@ export class ChatPagePage implements OnInit, OnDestroy {
       await service.saveSessionWithImagesToFirestore(copiedSession.id, receiverId);
 
       this.updateCopyProgress(100, 'Session copy completed');
+
+      // Final verification of notes field after save
+      console.log('[ChatPage.confirmAttachmentShareCopy] Post-save notes verification', {
+        originalSessionNotes: selectedSession.notes || '(empty)',
+        copiedSessionNotes: copiedSession.notes || '(empty)',
+        originalNotesLength: typeof selectedSession.notes === 'string' ? selectedSession.notes.length : 0,
+        copiedNotesLength: typeof copiedSession.notes === 'string' ? copiedSession.notes.length : 0
+      });
+
+      console.log("Original Session Notes", selectedSession.notes);
+      console.log("Copied Session Notes", copiedSession.notes);
 
       console.log('[ChatPage.confirmAttachmentShareCopy] ===== SESSION COPY WORKFLOW COMPLETE =====');
       console.log('[ChatPage.confirmAttachmentShareCopy] Original session:', selectedSession);

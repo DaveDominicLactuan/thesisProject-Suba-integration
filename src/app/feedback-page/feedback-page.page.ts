@@ -85,6 +85,7 @@ private lastImageTitleDebugAt: number = 0;
 
   // routeSessionId holds session id passed via query param from Camera page
   routeSessionId?: string | null = null;
+  routeSource?: string | null = null;
 
   @ViewChild('scrollContainer', { static: false }) scrollContainer!: ElementRef;
   @ViewChild('zoomImageElement', { static: false }) zoomImageElement?: ElementRef;
@@ -226,8 +227,9 @@ private lastImageTitleDebugAt: number = 0;
 
     // Initialize sessions then refresh the displayed images from the active session
     setTimeout(() => {
-      // If a session id was passed using query param use it
+      // If a session id or source was passed using query param use it
       try { this.routeSessionId = this.route.snapshot.queryParamMap.get('sessionId'); } catch (e) { this.routeSessionId = null; }
+      try { this.routeSource = this.route.snapshot.queryParamMap.get('source'); } catch (e) { this.routeSource = null; }
       this.loadSessions()
           .then(() => this.refreshDisplayedImages())
         .then(() => {
@@ -2050,7 +2052,12 @@ addEntry() {
         ? (this.sessions.find((session) => session?.id === this.selectedSessionId) || null)
         : (this.sessions.length > 0 ? this.sessions[0] : null);
       const currentSessionName = typeof currentSession?.name === 'string' ? currentSession.name.trim() : '';
-      const hasExistingSessionName = currentSessionName.length > 0;
+      const isSessionPageSource = this.routeSource === 'session-page';
+      const shouldUseSaveMode = !isSessionPageSource && currentSessionName.startsWith('Session');
+      const titleText = shouldUseSaveMode
+        ? 'Save current session with a file name'
+        : 'Save changes and updated selected session';
+      const saveButtonText = shouldUseSaveMode ? 'Save' : 'Update';
 
       // Create full-screen overlay element and style it
       const overlay = document.createElement('div');
@@ -2077,9 +2084,7 @@ addEntry() {
 
       //Title for inactive state
       const title = document.createElement('div');
-      title.innerText = hasExistingSessionName
-        ? 'Save changes and updated selected session'
-        : 'Save current session with a';
+      title.innerText = titleText;
       title.style.fontWeight = '700';
       title.style.marginBottom = '4px';
       title.style.fontSize = '16px';
@@ -2092,7 +2097,7 @@ addEntry() {
 
       const input = document.createElement('input');
       input.type = 'text';
-      input.placeholder = hasExistingSessionName ? currentSessionName : `Session ${new Date().toLocaleString()}`;
+      input.placeholder = currentSessionName || `Session ${new Date().toLocaleString()}`;
       input.style.width = '100%';
       input.style.padding = '8px';
       input.style.marginBottom = '12px';
@@ -2119,7 +2124,7 @@ addEntry() {
       cancelBtn.style.fontWeight = '600';
 
       const saveBtn = document.createElement('button');
-  saveBtn.innerText = hasExistingSessionName ? 'Update' : 'Save';
+        saveBtn.innerText = saveButtonText;
       saveBtn.style.padding = '8px 16px';
       saveBtn.style.width = '120px';
       saveBtn.style.height = '40px';

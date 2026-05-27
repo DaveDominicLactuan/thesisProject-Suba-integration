@@ -81,6 +81,10 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
   scaledBoxes: ScaledBox[] = [];
   selectedThumbSrc: string | null = null;
   private _thumbScrollTimeout: any = null;
+  private lastReprocessedSelectionKey: string | null = null;
+  isReprocessInProgress: boolean = false;
+  private _reprocessLockTimer?: any;
+  private readonly reprocessTimeoutMs: number = 15000;
 
   get selectedImageKey(): string {
     return this.selectedImageSelectionKey || this.selectedThumbSrc || this.selectedImage || '';
@@ -323,33 +327,111 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
 
   /** Reprocess the currently selected image through the normal upload pipeline */
   async reprocessSelectedImage() {
+    // === Guard 1: Check if already reprocessing ===
+    if (this.isReprocessInProgress) {
+      console.warn('[UploadImagePage] reprocessSelectedImage blocked: already in progress');
+      return;
+    }
+
+    // === Guard 2: Check if user has an image selected ===
+    const selected = this.resolveSelectedStoredImage();
+    if (!selected) {
+      alert('No image selected to reprocess');
+      return;
+    }
+
+    // === Guard 3: Check if this is the ONLY image in an active session ===
+    if (this.selectedSessionId) {
+      const activeSession = this.sessions?.find(s => s.id === this.selectedSessionId);
+      const imageCountInSession = activeSession?.imageKeys?.length || 0;
+      if (imageCountInSession <= 1) {
+        console.warn('[UploadImagePage] reprocessSelectedImage blocked: cannot reprocess the only image in an active session');
+        alert('Cannot reprocess the only image in a session. Please keep at least one image, or create a new session.');
+        return;
+      }
+    }
+
+    // === Guard 4: Check if counters are already at 0/0 (circuit breaker) ===
+    if (this.photosTaken === 0 && this.photosProcessed === 0) {
+      console.warn('[UploadImagePage] reprocessSelectedImage blocked: counters are already at 0/0 (circuit breaker)');
+      alert('Session state is invalid (0 photos). Reload the page and try again.');
+      return;
+    }
+
+    // === Guard 5: Check for duplicate reprocess attempt on same image ===
+    const sourceSelectionKey = this.selectedImageSelectionKey || this.selectedThumbSrc || selected.filename || selected.original || '';
+    if (sourceSelectionKey && this.lastReprocessedSelectionKey === sourceSelectionKey) {
+      console.warn('[UploadImagePage] reprocessSelectedImage blocked: selection already reprocessed in this session');
+      alert('This image has already been reprocessed. Please select a different image.');
+      return;
+    }
+
+    // === Guard 6: Validate data URL exists ===
+    const dataUrl = selected.original || selected.withBoxes || this.selectedThumbSrc || '';
+    if (!dataUrl) {
+      alert('The selected image does not contain data that can be reprocessed');
+      return;
+    }
+
+    // All guards passed, proceed with reprocessing
+    this.isReprocessInProgress = true;
+    if (this._reprocessLockTimer) {
+      clearTimeout(this._reprocessLockTimer);
+    }
+    this._reprocessLockTimer = setTimeout(() => {
+      this.isReprocessInProgress = false;
+      this._reprocessLockTimer = undefined;
+      console.warn('[UploadImagePage] reprocessSelectedImage lock timeout released');
+    }, this.reprocessTimeoutMs);
+
     try {
-      const selected = this.resolveSelectedStoredImage();
-      if (!selected) {
-        alert('No image selected to reprocess');
-        return;
-      }
-
-      const dataUrl = selected.original || selected.withBoxes || this.selectedThumbSrc || '';
-      if (!dataUrl) {
-        alert('The selected image does not contain data that can be reprocessed');
-        return;
-      }
-
       const originalDeleteKey = selected.filename || selected.fileImageName || selected.original || selected.withBoxes || '';
       const reprocessFilename = `reprocess-${Date.now()}.jpg`;
+
+      console.log('[UploadImagePage] Starting reprocess:', { originalDeleteKey, photosTaken: this.photosTaken, photosProcessed: this.photosProcessed });
 
       // Reprocess first so the replacement image is saved before removing the original.
       const reprocessedEntry = await this.processDataUrl(dataUrl, reprocessFilename, false, false, false);
 
-      if (originalDeleteKey) {
-        const removed = await this.imageStorage.deleteImage(originalDeleteKey);
-        if (!removed && selected.original && selected.original !== originalDeleteKey) {
-          await this.imageStorage.deleteImage(selected.original);
+      // === Guard 7: Verify counters didn't collapse before deletion ===
+      if (this.photosTaken === 0 || this.photosProcessed === 0) {
+        console.error('[UploadImagePage] reprocessSelectedImage: counters collapsed during reprocess! Aborting deletion.');
+        console.log('[UploadImagePage] State:', { photosTaken: this.photosTaken, photosProcessed: this.photosProcessed, originalDeleteKey });
+        // Do NOT delete the original image if counters collapsed
+        await this.updatePhotoCounts();
+        alert('Reprocessing detected a counter issue. Original image preserved. Please refresh and retry.');
+        return;
+      }
+
+      const isReprocessGeneratedSelection = String(originalDeleteKey).startsWith('reprocess-');
+      if (originalDeleteKey && !isReprocessGeneratedSelection) {
+        try {
+          const removed = await this.imageStorage.deleteImage(originalDeleteKey);
+          if (!removed && selected.original && selected.original !== originalDeleteKey) {
+            await this.imageStorage.deleteImage(selected.original);
+          }
+        } catch (deleteErr) {
+          console.warn('[UploadImagePage] reprocessSelectedImage deletion attempt failed', deleteErr);
+          // Continue even if deletion fails; the new reprocessed entry is safely stored
         }
       }
 
       await this.updatePhotoCounts();
+      
+      // === Guard 8: Final counter validation after update ===
+      if (this.photosTaken === 0) {
+        console.error('[UploadImagePage] reprocessSelectedImage: photosTaken collapsed to 0 after deletion!');
+        console.log('[UploadImagePage] Attempting recovery...');
+        // Force a full reload from storage
+        try {
+          await this.loadStoredImages();
+          await this.loadSessions();
+          await this.refreshDisplayedImages();
+        } catch (recoveryErr) {
+          console.error('[UploadImagePage] recovery failed', recoveryErr);
+        }
+      }
+
       try {
         await this.loadStoredImages();
         await this.loadSessions();
@@ -358,13 +440,22 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
         console.warn('[UploadImagePage] reprocessSelectedImage refresh failed', refreshErr);
       }
 
-      this.selectedThumbSrc = (reprocessedEntry as any)?.original || dataUrl;
+      this.lastReprocessedSelectionKey = sourceSelectionKey || null;
+      this.selectedThumbSrc = (reprocessedEntry as any)?.withBoxes || (reprocessedEntry as any)?.original || dataUrl;
       this.selectedImageSelectionKey = (reprocessedEntry as any)?.filename || reprocessFilename;
       this.selectedImageTitle = (reprocessedEntry as any)?.filename || reprocessFilename;
       setTimeout(() => this.detectCenterThumbnail(), 60);
+
+      console.log('[UploadImagePage] reprocessSelectedImage completed successfully');
     } catch (e) {
-      console.warn('[UploadImagePage] reprocessSelectedImage failed', e);
+      console.error('[UploadImagePage] reprocessSelectedImage failed', e);
       alert('Failed to reprocess the selected image. See console for details.');
+    } finally {
+      if (this._reprocessLockTimer) {
+        clearTimeout(this._reprocessLockTimer);
+        this._reprocessLockTimer = undefined;
+      }
+      this.isReprocessInProgress = false;
     }
   }
 
@@ -907,6 +998,7 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
     try {
       const params: any = {};
       if (this.selectedSessionId) params.sessionId = this.selectedSessionId;
+      params.source = 'upload-image-page';
       this.router.navigate(['/feedback-page'], { queryParams: params });
       console.log('Navigating to Feedback page', params);
     } catch (e) {
