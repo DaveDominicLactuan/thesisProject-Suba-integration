@@ -292,7 +292,6 @@ export class CrackDetectionService {
           const bx2 = b.x + b.w;
           const by2 = b.y + b.h;
 
-          // --- DISTANCE CHECK ---
           const dx = Math.max(
             0,
             Math.max(a.x - bx2, b.x - ax2)
@@ -305,40 +304,7 @@ export class CrackDetectionService {
 
           const dist = Math.sqrt(dx * dx + dy * dy);
 
-          // --- OVERLAP CHECK ---
-          const overlapX = Math.max(
-            0,
-            Math.min(ax2, bx2) - Math.max(a.x, b.x)
-          );
-
-          const overlapY = Math.max(
-            0,
-            Math.min(ay2, by2) - Math.max(a.y, b.y)
-          );
-
-          const overlapArea = overlapX * overlapY;
-
-          // --- CENTER POINTS ---
-          const centerAX = a.x + a.w / 2;
-          const centerAY = a.y + a.h / 2;
-
-          const centerBX = b.x + b.w / 2;
-          const centerBY = b.y + b.h / 2;
-
-          // --- DIAGONAL ALIGNMENT CHECK ---
-          const deltaX = Math.abs(centerAX - centerBX);
-          const deltaY = Math.abs(centerAY - centerBY);
-
-          const diagonalAligned =
-            Math.abs(deltaX - deltaY) < 20;
-
-          // --- FINAL MERGE DECISION ---
-          const shouldMerge =
-            overlapArea > 0 ||
-            dist <= distanceThreshold ||
-            diagonalAligned;
-
-          if (shouldMerge) {
+          if (dist <= distanceThreshold) {
 
             const nx1 = Math.min(a.x, b.x);
             const ny1 = Math.min(a.y, b.y);
