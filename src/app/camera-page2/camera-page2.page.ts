@@ -1487,7 +1487,7 @@ export class CameraPage2Page implements AfterViewInit {
       deleteBtn.style.marginRight = '8px';
 
       btnRow.appendChild(deleteBtn);
-      btnRow.appendChild(reprocessBtn);
+      // btnRow.appendChild(reprocessBtn);
 
       box.appendChild(topBar);
       box.appendChild(toggleRow);

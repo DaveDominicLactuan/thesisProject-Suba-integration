@@ -79,17 +79,6 @@ export class ChatPagePage implements OnInit, OnDestroy {
       }
     }
 
-    // Overlay drag-to-close logic
-    onOverlayDragStart(event: MouseEvent | TouchEvent) {
-      event.stopPropagation();
-      this.chatOptionsDragActive = true;
-      this.chatOptionsDragStartY = this.getEventY(event);
-      this.chatOptionsDragCurrentY = 0;
-      document.addEventListener('mousemove', this.onOverlayDragMove);
-      document.addEventListener('touchmove', this.onOverlayDragMove, { passive: false });
-      document.addEventListener('mouseup', this.onOverlayDragEnd);
-      document.addEventListener('touchend', this.onOverlayDragEnd);
-    }
 
     onOverlayDragMove = (event: MouseEvent | TouchEvent) => {
       if (!this.chatOptionsDragActive || this.chatOptionsDragStartY === null) return;
@@ -184,15 +173,25 @@ export class ChatPagePage implements OnInit, OnDestroy {
   }
 
   onMapSheetDragStart(event: MouseEvent | TouchEvent): void {
+    // Capture the starting Y position when the drag begins.
     this.mapSheetDragStartY = this.getSheetEventY(event);
 
+    // While the pointer moves, compare the current Y position to the start point
+    // and switch the sheet open/closed once the drag passes the configured threshold.
     const moveHandler = (moveEvent: MouseEvent | TouchEvent): void => {
+      // Ignore move events unless a drag started and we still have the start position.
       if (this.mapSheetDragStartY === null) return;
+
+      // Measure how far the pointer moved vertically from where the drag began.
       const deltaY = this.mapSheetDragStartY - this.getSheetEventY(moveEvent);
+
+      // Dragging upward beyond the threshold opens the sheet if it is currently closed.
       if (deltaY > this.mapSheetDragThreshold && !this.isMapBottomSheetActive) {
         this.isMapBottomSheetActive = true;
         console.log('[ChatPage.mapBottomSheet] Drag-up activated. State: Active');
         cleanup();
+
+      // Dragging downward beyond the threshold closes the sheet if it is currently open.
       } else if (deltaY < -this.mapSheetDragThreshold && this.isMapBottomSheetActive) {
         this.isMapBottomSheetActive = false;
         console.log('[ChatPage.mapBottomSheet] Drag-down deactivated. State: Inactive');
@@ -200,11 +199,13 @@ export class ChatPagePage implements OnInit, OnDestroy {
       }
     };
 
+    // When the drag ends, clear the stored start point and remove the temporary listeners.
     const upHandler = (): void => {
       this.mapSheetDragStartY = null;
       cleanup();
     };
 
+    // Remove all document-level listeners so the drag does not keep running after release.
     const cleanup = (): void => {
       document.removeEventListener('mousemove', moveHandler as EventListener);
       document.removeEventListener('touchmove', moveHandler as EventListener);
@@ -212,17 +213,27 @@ export class ChatPagePage implements OnInit, OnDestroy {
       document.removeEventListener('touchend', upHandler);
     };
 
+    // Listen on the document so the drag still works even if the pointer leaves the sheet.
     document.addEventListener('mousemove', moveHandler as EventListener, { passive: true });
     document.addEventListener('touchmove', moveHandler as EventListener, { passive: true });
     document.addEventListener('mouseup', upHandler, { once: true });
     document.addEventListener('touchend', upHandler, { once: true });
   }
 
+  /**
+   * Gets the vertical position from either a touch event or a mouse event.
+   * This lets the drag logic work on both the mobile and desktop.
+   */
   private getSheetEventY(event: MouseEvent | TouchEvent): number {
+    // If this is an active touch event, use the first touch point's Y position.
     if ('touches' in event && event.touches.length > 0) return event.touches[0].clientY;
+
+    // If the touch has already ended, use the last changed touch point's Y position.
     if ('changedTouches' in event && (event as TouchEvent).changedTouches.length > 0) {
       return (event as TouchEvent).changedTouches[0].clientY;
     }
+
+    // Otherwise, fall back to the mouse pointer's Y position.
     return (event as MouseEvent).clientY;
   }
 
@@ -234,82 +245,210 @@ export class ChatPagePage implements OnInit, OnDestroy {
     console.log('[ChatPage.mapBottomSheet] Marker clicked. State: Active', { engineer: markerData });
   }
 
+  /**
+   * Opens a chat from the selected map-sheet engineer.
+   * It stops the click from bubbling, verifies that a valid engineer exists,
+   * and then passes that engineer into the chat-selection flow.
+   */
   openChatFromMapSheet(event: MouseEvent): void {
+    // Prevent the click from also triggering parent sheet or backdrop handlers.
     event.stopPropagation();
+
+    // If nothing is selected, there is no chat target to open.
     if (!this.selectedMapEngineer) return;
 
+    // Try several possible ID fields so the code works with different engineer shapes.
     const selectedId = this.selectedMapEngineer?.id || this.selectedMapEngineer?.uid || this.selectedMapEngineer?.userID || this.selectedMapEngineer?.email;
+
+    // If no usable ID exists, show a message and stop here.
     if (!selectedId) {
       alert('Unable to open chat for this marker because no linked user account was found.');
       return;
     }
 
+    // Open the chat for the currently selected engineer.
     if (this.selectedMapEngineer) {
       void this.selectEngineer(this.selectedMapEngineer);
     }
   }
 
+  /**
+   * Opens the map bottom sheet in detail mode for one/selected engineer.
+   * It prevents parent click handlers from firing, stores the selected engineer, and then shows the sheet in its detail view.
+   */
   openMapSheetEngineerDetail(engineer: any, event?: Event): void {
+    // Stop the click from bubbling up to parent elements.
     event?.stopPropagation();
+
+    // Save the chosen engineer so the sheet can display their information.
     this.selectedMapEngineer = engineer;
+
+    // Switch the sheet into detail mode instead of the list view.
     this.mapSheetViewMode = 'detail';
+
+    // Make sure the bottom sheet is visible.
     this.isMapBottomSheetActive = true;
   }
 
+  /**
+   * Returns the map bottom sheet from the engineer detail view back to the list view.
+   * It stops the click from bubbling, then only switches to list mode when there are multiple engineers to show.
+   */
   backToMapSheetList(event?: Event): void {
+    // Prevent this click from also triggering parent UI handlers.
     event?.stopPropagation();
+
+    // Only show the list view when there is more than one engineer in the sheet.
     if (this.mapSheetAggregatedEngineers.length > 1) {
       this.mapSheetViewMode = 'list';
     }
   }
 
+  /**
+   * Returns a human-readable name for an engineer object.
+   * Preference order: firstName + lastName -> name -> email -> markerTitle -> 'Unknown User'.
+   */
   getMapSheetEngineerName(engineer: any): string {
+    // If the input is missing or not an object, we cannot derive a name.
     if (!engineer || typeof engineer !== 'object') return 'Unknown User';
+
+    // Safely read first and last name, trimming whitespace when present.
     const firstName = typeof engineer.firstName === 'string' ? engineer.firstName.trim() : '';
     const lastName = typeof engineer.lastName === 'string' ? engineer.lastName.trim() : '';
+
+    // Prefer a combined "First Last" when either is present.
     const fullName = `${firstName} ${lastName}`.trim();
     if (fullName) return fullName;
+
+    // Fall back to other properties commonly containing a display name.
     if (typeof engineer.name === 'string' && engineer.name.trim()) return engineer.name.trim();
     if (typeof engineer.email === 'string' && engineer.email.trim()) return engineer.email.trim();
     if (typeof engineer.markerTitle === 'string' && engineer.markerTitle.trim()) return engineer.markerTitle.trim();
+
+    // Final fallback when no usable name-like field exists.
     return 'Unknown User';
   }
 
+  /**
+   * getMapSheetEngineerSubtitle(engineer: any): string
+   *
+   * Line-by-line explanation:
+   * 1) Guard clause: if the input is missing or not an object, return an empty subtitle.
+   * 2) Build `contact` by trying several common phone/contact property names in order,
+   *    returning the first defined/truthy value.
+   * 3) If `contact` is a non-empty string after trimming, return it (preferred subtitle).
+   * 4) Otherwise, if `engineer.email` is a non-empty string, return the trimmed email.
+   * 5) Otherwise, if `engineer.address` is a non-empty string, return the trimmed address.
+   * 6) Final fallback: return the literal 'No contact info'.
+   */
   getMapSheetEngineerSubtitle(engineer: any): string {
+    // 1) Guard: ensure we received an object; otherwise, no subtitle is available.
     if (!engineer || typeof engineer !== 'object') return '';
+
+    // 2) Prefer any available phone/contact-related field. The `||` chain picks the first defined/truthy value.
     const contact = engineer.phoneNumber || engineer.phone || engineer.contactNumber || engineer.mobile || engineer.mobileNumber || engineer.contact;
+
+    // 3) If the contact value is a string and not just whitespace, return it trimmed.
     if (typeof contact === 'string' && contact.trim()) return contact.trim();
+
+    // 4) Fallback to email if present and non-empty.
     if (typeof engineer.email === 'string' && engineer.email.trim()) return engineer.email.trim();
+
+    // 5) Fallback to address if present and non-empty.
     if (typeof engineer.address === 'string' && engineer.address.trim()) return engineer.address.trim();
+
+    // 6) Nothing usable found — return a clear fallback string.
     return 'No contact info';
   }
 
+  /**
+   * getMapSheetEngineerDistanceLabel(engineer: any): string
+   *
+   * Line-by-line explanation:
+   * 1) Convert the engineer's `distanceFromCenterMeters` to a Number (handles strings/undefined).
+   * 2) If the result is not a finite number or is negative, return an empty string (no label).
+   * 3) If the distance is 1000 meters or more, format as kilometers with two decimals.
+   * 4) Otherwise, round to the nearest meter and format as meters.
+   */
   getMapSheetEngineerDistanceLabel(engineer: any): string {
+    // 1) Coerce the possibly-missing value into a Number.
     const distance = Number(engineer?.distanceFromCenterMeters);
+
+    // 2) Guard: if conversion failed (NaN/infinite) or negative distance, don't show a label.
     if (!Number.isFinite(distance) || distance < 0) return '';
+
+    // 3) If 1000m or more, present as kilometers with two decimal places for readability.
     if (distance >= 1000) return `${(distance / 1000).toFixed(2)} km away`;
+
+    // 4) Otherwise present as rounded meters.
     return `${Math.round(distance)} m away`;
   }
 
+  /**
+   * Returns initials for an engineer by deriving a display name then extracting initials.
+   *
+   * Line-by-line explanation:
+   * 1) `getMapSheetEngineerName(engineer)` resolves a human-friendly display name
+   *    (prefers first/last, then name/email/markerTitle, or 'Unknown User').
+   * 2) `getInitials(...)` converts that display name into an initials string (e.g. "John Doe" -> "JD").
+   * 3) The function returns the resulting initials string.
+   */
   getMapSheetEngineerInitials(engineer: any): string {
+    // Derive a display name using the existing helper, then compute initials from it.
     return this.getInitials(this.getMapSheetEngineerName(engineer));
   }
 
   // --- Conversation Attachment Sheet Methods ---
+  /**
+   * toggleAttachmentSheet(): void
+   *
+   * Line-by-line explanation:
+   * 1) Flip the `isAttachmentSheetActive` boolean to open/close the attachment sheet.
+   * 2) Log the new state to the console for debugging, using a ternary to show 'Active' or 'Inactive'.
+   */
   toggleAttachmentSheet(): void {
+    // 1) Toggle the boolean: if it was true -> false, false -> true.
     this.isAttachmentSheetActive = !this.isAttachmentSheetActive;
+
+    // 2) Emit a concise debug message showing the resulting state.
     console.log(`[ChatPage.attachmentSheet] Toggled. State: ${this.isAttachmentSheetActive ? 'Active' : 'Inactive'}`);
   }
 
+  /**
+   * openAttachmentSheet(): Promise<void>
+   *
+   * Line-by-line explanation:
+   * 1) Set the view mode for the attachment sheet to 'grid' so attachments display as tiles.
+   * 2) Mark the attachment sheet as active so the UI renders the sheet.
+   * 3) Load attachments for the current conversation (messages and sessions) before showing details.
+   * 4) Emit a console debug message confirming the sheet is now open.
+   */
   async openAttachmentSheet(): Promise<void> {
+    // 1) Use grid view for the attachment sheet UI (thumbnail grid preferred).
     this.attachmentSheetViewMode = 'grid';
+
+    // 2) Toggle on the sheet visibility flag so templates show the attachment sheet.
     this.isAttachmentSheetActive = true;
+
+    // 3) Ensure the list of attachments is populated before the user inspects them.
     await this.loadConversationAttachments();
+
+    // 4) Helpful debug log to indicate the sheet is open and active.
     console.log('[ChatPage.attachmentSheet] Opened. State: Active');
   }
 
+  /**
+   * closeAttachmentSheet(): void
+   *
+   * Line-by-line explanation:
+   * 1) Set the `isAttachmentSheetActive` flag to false so the UI hides the sheet.
+   * 2) Log a concise debug message indicating the sheet has been closed.
+   */
   closeAttachmentSheet(): void {
+    // 1) Toggle off visibility so templates no longer render the attachment sheet.
     this.isAttachmentSheetActive = false;
+
+    // 2) Emit a debug message for developers to confirm the sheet closed.
     console.log('[ChatPage.attachmentSheet] Closed. State: Inactive');
   }
 
@@ -318,24 +457,40 @@ export class ChatPagePage implements OnInit, OnDestroy {
    * Fetches sessions created by the current user and maps them as attachments.
    * Also validates that sessions belong to the current user to prevent data leaks.
    */
+  /**
+   * loadConversationAttachments(): Promise<void>
+   *
+   * Line-by-line explanation:
+   * 1) Create an empty `attachments` array to collect both message attachments and session objects.
+   * 2) Iterate message list and extract any attachments or inline URLs, normalizing them into a common shape.
+   * 3) Resolve the current user's ID and fetch their saved sessions (if available).
+   * 4) Validate each session belongs to the current user, add valid sessions as attachments, and queue mismatched sessions for deletion.
+   * 5) Clean up mismatched sessions by calling a deletion helper.
+   * 6) Merge message attachments and session attachments, then sort sessions newest-first by created/timestamp.
+   * 7) On any error, log and clear the attachments to avoid stale UI state.
+   */
   async loadConversationAttachments(): Promise<void> {
     try {
+      // 1) Collector for normalized attachments (messages + sessions)
       const attachments: any[] = [];
-      
-      // Load attachments from current conversation messages
-      // Filter messages that contain media/attachments
+
+      // 2) If there are chat messages, inspect each one for attachments or inline media URLs
       if (this.messages && this.messages.length > 0) {
         this.messages.forEach((msg: any) => {
+          // If the message already contains an attachments array, copy those entries and add metadata
           if (msg.attachments && Array.isArray(msg.attachments)) {
             msg.attachments.forEach((attachment: any) => {
               attachments.push({
                 ...attachment,
+                // Keep trace of origin message for later actions (e.g. open, share)
                 messageId: msg.id,
                 senderId: msg.senderId,
                 timestamp: msg.timestamp,
                 attachmentType: 'message'
               });
             });
+
+          // Otherwise, if the message contains an imageUrl or fileUrl, create a minimal attachment object
           } else if (msg.imageUrl || msg.fileUrl) {
             attachments.push({
               url: msg.imageUrl || msg.fileUrl,
@@ -350,18 +505,20 @@ export class ChatPagePage implements OnInit, OnDestroy {
         });
       }
 
-      // Fetch and filter user's session objects
+      // 3) Try to gather the current user's sessions and include them as 'session' attachments
       const currentUserId = this.auth3.getCurrentUser()?.uid || this.userID;
       if (currentUserId) {
         try {
+          // Fetch user sessions from the auth3 service
           const userSessions = await this.auth3.getUserSessions(currentUserId);
           console.log('[ChatPage.loadConversationAttachments] Fetched user sessions:', userSessions.length);
-          
+
           if (userSessions && Array.isArray(userSessions)) {
             const sessionsToDelete: any[] = [];
 
+            // 4) Validate ownership and transform sessions into attachment objects
             for (const session of userSessions) {
-              // Validate that session belongs to the current user
+              // If the session fails the ownership validation, mark for deletion and skip it
               if (!this.validateSessionBelongsToCurrentUser(session)) {
                 console.warn('[ChatPage.loadConversationAttachments] Session does not belong to current user, marking for deletion', {
                   sessionId: session?.id,
@@ -372,7 +529,7 @@ export class ChatPagePage implements OnInit, OnDestroy {
                 continue;
               }
 
-              // Only include sessions owned by the current user
+              // Only include sessions whose `userId` matches the current user
               if (session.userId === currentUserId) {
                 attachments.push({
                   id: session.id,
@@ -385,14 +542,14 @@ export class ChatPagePage implements OnInit, OnDestroy {
                   totalBoundingBoxes: session.totalBoundingBoxes || 0,
                   timestamp: session.created || new Date().toISOString(),
                   attachmentType: 'session',
-                  // Preserve the engineer-checked flag so attachments carry the session state
+                  // Preserve session-specific flags and notes for display
                   engineerCheckedSession: !!session.engineerCheckedSession,
-                  notes: !!session.notes ? session.notes : 'No notes available' // Handle missing notes field gracefully
+                  notes: !!session.notes ? session.notes : 'No notes available'
                 });
               }
             }
 
-            // Clean up any sessions that belong to a different user
+            // 5) Attempt to delete any sessions that clearly belonged to a different user
             if (sessionsToDelete.length > 0) {
               console.warn('[ChatPage.loadConversationAttachments] Found mismatched sessions, cleaning up...', {
                 count: sessionsToDelete.length
@@ -409,754 +566,244 @@ export class ChatPagePage implements OnInit, OnDestroy {
               }
             }
           }
-          
+
           console.log('[ChatPage.loadConversationAttachments] Total attachments (messages + sessions):', attachments.length);
         } catch (error) {
+          // If session fetching fails, we continue with message attachments only
           console.warn('[ChatPage.loadConversationAttachments] Failed to fetch user sessions:', error);
-          // Continue with just message attachments if session fetch fails
         }
       }
 
+      // 6) Normalize and sort attachments: keep session items newest-first based on created/timestamp
       this.conversationAttachments = [...attachments].sort((a, b) => {
         const aIsSession = a?.attachmentType === 'session' || a?.type === 'session';
         const bIsSession = b?.attachmentType === 'session' || b?.type === 'session';
 
-        // Only reorder session items: newest to oldest based on created/timestamp.
+        // Only reorder when both items are sessions: newest (larger timestamp) first
         if (aIsSession && bIsSession) {
           const aMillis = new Date(a?.created || a?.timestamp || 0).getTime() || 0;
           const bMillis = new Date(b?.created || b?.timestamp || 0).getTime() || 0;
           return bMillis - aMillis;
         }
 
+        // Preserve original order for mixed types
         return 0;
       });
     } catch (error) {
+      // 7) On unexpected errors, clear the attachments to avoid showing inconsistent data
       console.error('[ChatPage.loadConversationAttachments] Error loading attachments:', error);
       this.conversationAttachments = [];
     }
   }
 
+  /**
+   * selectAttachment(attachment, event): void
+   *
+   * Line-by-line explanation:
+   * 1) Stop the click event from bubbling so parent/backdrop handlers don't react.
+   * 2) Store the selected attachment on component state for display/actions.
+   * 3) Switch the attachment sheet into 'detail' mode to show full session info.
+   * 4) Log useful debug information about the selected attachment.
+   * 5) If the selection is a session object, call a debug helper to print session internals.
+   */
   selectAttachment(attachment: any, event?: Event): void {
+    // 1) Prevent parent click handlers (backdrop or sheet) from also firing
     event?.stopPropagation();
+
+    // 2) Save the selected attachment so the UI can render its detail view
     this.selectedAttachment = attachment;
+
+    // 3) Move the attachment sheet into the detailed view mode
     this.attachmentSheetViewMode = 'detail';
+
+    // 4) Debug logs to help trace selected object and key properties
     console.log('[ChatPage.selectAttachment] Full session object:', attachment);
     console.log('[ChatPage.selectAttachment] Session ID:', attachment?.id);
     console.log('[ChatPage.selectAttachment] Session Type:', attachment?.type);
     console.log('[ChatPage.selectAttachment] Engineer Checked:', attachment?.engineerCheckedSession);
-    // Optionally trigger debug printing for sessions
+
+    // 5) If the attachment is a session, optionally dump more debug information
     if (attachment?.type === 'session') {
       this.debugPrintAttachmentData(attachment);
     }
   }
 
+  /**
+   * backToAttachmentGrid(event?): void
+   *
+   * Line-by-line explanation:
+   * 1) Stop the click from bubbling to parent/backdrop handlers.
+   * 2) Only switch back to grid view when there are attachments to show.
+   * 3) Update the attachment sheet view mode to 'grid' so thumbnails are displayed.
+   */
   backToAttachmentGrid(event?: Event): void {
+    // 1) Prevent parent click handlers from reacting to this click
     event?.stopPropagation();
+
+    // 2) Guard: only switch to grid when we actually have attachments to display
     if (this.conversationAttachments.length > 0) {
+      // 3) Set view mode to 'grid' so the UI shows the attachment tiles
       this.attachmentSheetViewMode = 'grid';
     }
   }
 
+  /**
+   * getAttachmentPreviewIcon(attachment): string
+   *
+   * Line-by-line explanation:
+   * 1) Safely read `attachment.type` using optional chaining; default to 'file' when missing.
+   * 2) If the type is 'image', return the Ionic icon name for images.
+   * 3) If the type is 'pdf', return the Ionic icon name for documents.
+   * 4) If the type is 'video', return the Ionic icon name for video playback.
+   * 5) If the type is 'session' (a saved session of images), return the multi-image icon.
+   * 6) Otherwise return a generic attachment icon.
+   */
   getAttachmentPreviewIcon(attachment: any): string {
+    // 1) Read the attachment type with a safe fallback to 'file'.
     const type = attachment?.type || 'file';
+
+    // 2) Image attachments -> show image outline icon.
     if (type === 'image') return 'image-outline';
+
+    // 3) PDF attachments -> show document icon.
     if (type === 'pdf') return 'document-outline';
+
+    // 4) Video attachments -> show play-circle icon.
     if (type === 'video') return 'play-circle-outline';
+
+    // 5) Session attachments (collections of images) -> show images icon.
     if (type === 'session') return 'images-outline';
+
+    // 6) Default icon for unknown or other attachment types.
     return 'attach-outline';
   }
 
-  // Open debug dialog for attachment
+  /**
+   * onAttachmentDebugClick(attachment, event): void
+   *
+   * Line-by-line explanation:
+   * 1) If an Event is provided, stop propagation so parent/backdrop handlers won't also react.
+   * 2) Store the clicked attachment on `selectedAttachmentForDebug` so the debug UI can show details.
+   * 3) Open the debug dialog by setting `isAttachmentDebugDialogOpen` to true.
+   * 4) Log a concise debug message for developer tracing.
+   */
   onAttachmentDebugClick(attachment: any, event?: Event): void {
+    // 1) Prevent the click from bubbling to parent elements (backdrop, sheet, etc.)
     if (event) event.stopPropagation();
+
+    // 2) Keep a reference to the attachment we're debugging so the dialog can render its data
     this.selectedAttachmentForDebug = attachment;
+
+    // 3) Show the debug dialog in the UI
     this.isAttachmentDebugDialogOpen = true;
-    console.log('[ChatPage] Attachment debug click detected. Debug info:');
+
+    // 4) Emit a log to help trace when the dialog was opened and which attachment is selected
+    console.log('[ChatPage] Attachment debug click detected. Debug info:', { attachment });
   }
 
-  // Close debug dialog without action
+  /**
+   * closeAttachmentDebugDialog(): void
+   *
+   * Line-by-line explanation:
+   * 1) If an attachment copy/upload operation is in progress, do nothing to avoid interrupting it.
+   * 2) Otherwise, hide the debug dialog and clear the stored debug attachment reference.
+   */
   closeAttachmentDebugDialog(): void {
+    // 1) Protect the dialog from being closed mid-copy to avoid inconsistent state
     if (!this.isAttachmentCopyInProgress) {
+      // 2a) Hide the debug dialog
       this.isAttachmentDebugDialogOpen = false;
+
+      // 2b) Clear the selected debug attachment so the dialog shows no stale data next time
       this.selectedAttachmentForDebug = null;
     }
   }
 
-  // Confirm debug action: copy session to chat recipient with transformed filenames and S3 uploads
-  async confirmAttachmentDebugAction(attachment: any): Promise<void> {
-    console.log('[ChatPage] Attachment share action initiated...');
-    
-    if (attachment?.type !== 'session' || !attachment?.id) {
-      console.error('[ChatPage] Invalid attachment for share operation');
-      alert('Invalid session attachment');
-      return;
-    }
 
-    // SECURITY: Validate that the attachment belongs to the current user
-    if (!this.validateSessionBelongsToCurrentUser(attachment)) {
-      console.error('[ChatPage] SECURITY: Cannot share session - belongs to different user');
-      alert('Security error: Cannot share session from another user');
-      return;
-    }
-
-    // Get receiver's user ID from active chat using multiple fallback strategies
-    // this.receiverUserId: string | null = null;
-
-    // Strategy 1: Use helper function to extract from activeChat
-    this.receiverUserId = this.extractReceiverUserIdFromChat(this.activeChat);
-    if (this.receiverUserId) {
-      console.log('[ChatPage.confirmAttachmentDebugAction] Found receiver ID via extractReceiverUserIdFromChat:', this.receiverUserId);
-    }
-    
-    // Strategy 2: Check if we stored it during openChat
-    if (!this.receiverUserId && (this.activeChat as any)?._recipientUserId) {
-      this.receiverUserId = (this.activeChat as any)._recipientUserId;
-      console.log('[ChatPage.confirmAttachmentDebugAction] Found receiver ID via stored _recipientUserId:', this.receiverUserId);
-    }
-
-    // Strategy 3: Try direct property access on activeChat
-    if (!this.receiverUserId && this.activeChat) {
-      const directProps = ['userId', 'uid', 'userID', 'recipientId', 'recipientUID', 'otherUserId', 'participantId'];
-      for (const prop of directProps) {
-        if ((this.activeChat as any)[prop]) {
-          this.receiverUserId = (this.activeChat as any)[prop];
-          console.log(`[ChatPage.confirmAttachmentDebugAction] Found receiver ID via direct property .${prop}:`, this.receiverUserId);
-          break;
-        }
-      }
-    }
-
-    // Strategy 4: Look up chat from the chats array if we have a chatId
-    if (!this.receiverUserId && this.currentChatId) {
-      const foundChat = this.chats.find((c: any) => c.chatId === this.currentChatId);
-      if (foundChat) {
-        this.receiverUserId = this.extractReceiverUserIdFromChat(foundChat);
-        if (this.receiverUserId) {
-          console.log('[ChatPage.confirmAttachmentDebugAction] Found receiver ID from chats array:', this.receiverUserId);
-        }
-      }
-    }
-
-    // Strategy 5: If activeChat has participants array, extract the "other" user ID
-    if (!this.receiverUserId && this.activeChat?.participants && Array.isArray(this.activeChat.participants)) {
-      const currentUserId = this.auth3.getCurrentUser()?.uid || this.userID;
-      console.log('[ChatPage.confirmAttachmentDebugAction] Participants array:', this.activeChat.participants);
-      console.log('[ChatPage.confirmAttachmentDebugAction] Current user ID:', currentUserId);
-      
-      // Handle both string IDs and objects with uid/userId properties
-      const otherParticipant = this.activeChat.participants.find((p: any) => {
-        // If participant is a string (user ID), compare directly
-        if (typeof p === 'string') {
-          return p !== currentUserId;
-        }
-        // If participant is an object, check uid or userId properties
-        return (p.uid !== currentUserId && p.userId !== currentUserId);
-      });
-      
-      if (otherParticipant) {
-        // Extract the ID appropriately based on type
-        if (typeof otherParticipant === 'string') {
-          this.receiverUserId = otherParticipant;
-        } else {
-          this.receiverUserId = otherParticipant.uid || otherParticipant.userId;
-        }
-        console.log('[ChatPage.confirmAttachmentDebugAction] Found receiver ID from participants array:', this.receiverUserId);
-      }
-    }
-
-    // Strategy 6: Try otherParticipantId if it's different from current user
-    if (!this.receiverUserId && this.activeChat?.otherParticipantId) {
-      const currentUserId = this.auth3.getCurrentUser()?.uid || this.userID;
-      if (this.activeChat.otherParticipantId !== currentUserId) {
-        this.receiverUserId = this.activeChat.otherParticipantId;
-        console.log('[ChatPage.confirmAttachmentDebugAction] Found receiver ID via otherParticipantId:', this.receiverUserId);
-      }
-    }
-    
-    if (!this.receiverUserId) {
-      console.error('[ChatPage.confirmAttachmentDebugAction] Cannot determine receiver user ID after all strategies. Chat details:');
-      console.error('  Active chat:', this.activeChat);
-      console.error('  Is chat open?', this.isChatOpen);
-      console.error('  Current chat ID:', this.currentChatId);
-      console.error('  Chat keys:', this.activeChat ? Object.keys(this.activeChat) : 'No activeChat');
-      console.error('  Chats array length:', this.chats?.length || 0);
-      alert('Error: Cannot determine recipient. Please ensure a chat is properly opened and try again. Check console for debugging details.');
-      return;
-    }
-
-    const currentUserId = this.auth3.getCurrentUser()?.uid || this.userID;
-    
-    if (!currentUserId) {
-      console.error('[ChatPage] Cannot determine current user ID');
-      alert('Error: Cannot determine current user');
-      return;
-    }
-
-    try {
-      this.isAttachmentCopyInProgress = true;
-      this.attachmentDebugState = 'active'; // Transition to active state
-      this.attachmentCopyProgress = 0;
-      this.attachmentCopyStatusText = 'Initializing...';
-
-      console.log('[ChatPage] ====== SESSION SHARE INITIATED ======');
-      console.log('[ChatPage] Sender (current user):', currentUserId);
-      console.log('[ChatPage] Receiver (chat recipient):', this.receiverUserId);
-      console.log('[ChatPage] Original session ID:', attachment.id);
-
-      this.updateCopyProgress(5, 'Loading session data...');
-
-      // Step 1: Debug print original data
-      console.log('[ChatPage] Original attachment:');
-      await this.debugPrintAttachmentData(attachment);
-
-      // Step 2: Create NEW session with unique ID for receiver (copy, not replacement)
-      const newSessionId = `s-${Date.now()}`; // Generate NEW unique session ID
-      console.log('[ChatPage] New copied session ID:', newSessionId);
-      
-      const newSession: any = {
-        id: newSessionId, // NEW session ID (not a replacement of original)
-        name: attachment.name, // Use same name (unique sessionId makes it distinct)
-        imageKeys: [], // Will be populated with new image filenames
-        created: new Date().toISOString(), // New creation timestamp
-        totalBoundingBoxes: attachment.totalBoundingBoxes || 0,
-        userId: this.receiverUserId, // RECEIVER OWNS the copy
-        sessionId: newSessionId
-      };
-
-      this.updateCopyProgress(15, 'Fetching images from S3...');
-
-      // Step 3: Fetch original images and transform for receiver
-      const transformedImages: any[] = [];
-      const sessionImageKeys = attachment.imageKeys || [];
-      const totalImages = sessionImageKeys.length;
-
-      for (let i = 0; i < totalImages; i++) {
-        const imageKey = sessionImageKeys[i];
-        // Try lookup by original (base64) first, then by filename (for copied sessions)
-        let originalImage = (this.imageStorage as any).getEntryForImage(imageKey);
-        if (!originalImage) {
-          // imageKey might be a filename, not a base64 key
-          originalImage = (this.imageStorage as any).getEntryByFilename(imageKey);
-        }
-        
-        if (!originalImage) {
-          console.warn('[ChatPage] Image not found locally:', imageKey);
-          console.warn('[ChatPage] All stored images:', (this.imageStorage as any).getImages().map((img: any) => ({ filename: img.filename, hasOriginal: !!img.original })));
-          continue;
-        }
-
-        console.log('[ChatPage] ✅ Found image:', { imageKey, filename: originalImage.filename, hasOriginal: !!originalImage.original, hasS3Key: !!originalImage.originalS3Key });
-
-        this.updateCopyProgress(
-          15 + ((i) / totalImages) * 30,
-          `Fetching image ${i + 1}/${totalImages} from S3...`
-        );
-
-        // Fetch from S3 if URLs exist
-        let originalDataUrl = originalImage.original;
-        let withBoxesDataUrl = originalImage.withBoxes;
-
-        if (originalImage.originalS3Key) {
-          try {
-            originalDataUrl = await (this.imageStorage as any).fetchS3ObjectAsDataUrl(
-              originalImage.originalS3Key
-            ) || originalImage.original;
-          } catch (e) {
-            console.warn('[ChatPage] Failed to fetch original from S3:', e);
-          }
-        }
-
-        if (originalImage.withBoxesS3Key) {
-          try {
-            withBoxesDataUrl = await (this.imageStorage as any).fetchS3ObjectAsDataUrl(
-              originalImage.withBoxesS3Key
-            ) || originalImage.withBoxes;
-          } catch (e) {
-            console.warn('[ChatPage] Failed to fetch withBoxes from S3:', e);
-          }
-        }
-
-        // Validate that we have image data
-        if (!originalDataUrl && !withBoxesDataUrl) {
-          console.warn('[ChatPage] ❌ No image data available (original and withBoxes are both empty)');
-          console.warn('[ChatPage] Image details:', { 
-            filename: originalImage.filename, 
-            hasOriginal: !!originalImage.original,
-            hasWithBoxes: !!originalImage.withBoxes,
-            hasS3Original: !!originalImage.originalS3Key,
-            hasS3WithBoxes: !!originalImage.withBoxesS3Key
-          });
-          continue;
-        }
-
-        // Transform filename to use receiver's userId
-        const newFilename = this.transformImageFilenameUserId(imageKey, this.receiverUserId);
-        
-        // Transform withBoxes filename if it exists (handle both cases: with/without _withBoxes suffix)
-        let newWithBoxesFilename = newFilename; // Default to same as original if no withBoxes
-        if (originalImage.withBoxes && originalImage.withBoxes !== originalImage.original) {
-          // If withBoxes is different from original, transform it too
-          // First, try to transform the original withBoxes filename if available
-          if (originalImage.filename) {
-            // Derive withBoxes filename from original by replacing userID part
-            newWithBoxesFilename = this.transformImageFilenameUserId(originalImage.filename, this.receiverUserId);
-          } else {
-            // Fallback: just ensure the userId in imageKey is transformed
-            newWithBoxesFilename = this.transformImageFilenameUserId(imageKey, this.receiverUserId);
-          }
-        }
-
-        // Transform S3 keys to use receiver's userId
-        const newOriginalS3Key = originalImage.originalS3Key
-          ? this.transformImageFilenameUserId(originalImage.originalS3Key, this.receiverUserId)
-          : undefined;
-        const newWithBoxesS3Key = originalImage.withBoxesS3Key
-          ? this.transformImageFilenameUserId(originalImage.withBoxesS3Key, this.receiverUserId)
-          : undefined;
-
-        console.log('[ChatPage] Transforming image:');
-        console.log(`  Original key: ${imageKey}`);
-        console.log(`  New key (original): ${newFilename}`);
-        console.log(`  New key (withBoxes): ${newWithBoxesFilename}`);
-        console.log(`  Old userId in key: ${attachment.userId}`);
-        console.log(`  New userId in key: ${this.receiverUserId}`);
-        console.log(`  Original S3 Key: ${originalImage.originalS3Key || 'N/A'}`);
-        console.log(`  New Original S3 Key: ${newOriginalS3Key || 'N/A'}`);
-        console.log(`  Original S3 URL: ${originalImage.originalS3Url || 'N/A'}`);
-
-        const transformedImage = {
-          ...originalImage,
-          original: originalDataUrl,
-          withBoxes: withBoxesDataUrl,
-          filename: newFilename,
-          withBoxesFilename: newWithBoxesFilename, // Store the transformed withBoxes filename
-          userId: this.receiverUserId,
-          sessionId: newSession.id,
-          originalKey: imageKey,
-          // Preserve and transform S3 keys and URLs
-          originalS3Key: newOriginalS3Key || originalImage.originalS3Key,
-          originalS3Url: originalImage.originalS3Url,
-          withBoxesS3Key: newWithBoxesS3Key || originalImage.withBoxesS3Key,
-          withBoxesS3Url: originalImage.withBoxesS3Url,
-          // Preserve storage paths and URLs
-          storagePath: originalImage.storagePath,
-          storageUrl: originalImage.storageUrl,
-          withBoxesStoragePath: originalImage.withBoxesStoragePath,
-          withBoxesStorageUrl: originalImage.withBoxesStorageUrl
-        };
-
-        transformedImages.push(transformedImage);
-      }
-
-      // Set imageKeys - use transformed filenames (preserving the same structure as original session)
-      // The original session's imageKeys contain filenames, so the new session should too
-      newSession.imageKeys = transformedImages.map(img => img.filename);
-      console.log('[ChatPage] ========== SESSION CREATED ==========');
-      console.log('[ChatPage] Full Session Object:', {
-        id: newSession.id,
-        name: newSession.name,
-        userId: newSession.userId,
-        created: newSession.created,
-        imageKeysCount: newSession.imageKeys.length,
-        imageKeysSample: newSession.imageKeys.slice(0, 1).map((k: string) => k.substring(0, 50) + '...')
-      });
-      console.log('[ChatPage] Session Object (Full):', JSON.stringify(newSession, null, 2));
-      console.log('[ChatPage] Transformed Images Count:', transformedImages.length);
-      
-      // Log each transformed image
-      transformedImages.forEach((img, idx) => {
-        console.log(`[ChatPage] ========== TRANSFORMED IMAGE #${idx + 1} ==========`);
-        console.log(`[ChatPage] Image Object:`, {
-          filename: img.filename,
-          userId: img.userId,
-          sessionId: img.sessionId,
-          originalKey: img.originalKey,
-          hasOriginal: !!img.original,
-          originalLength: img.original?.length || 0,
-          hasWithBoxes: !!img.withBoxes,
-          withBoxesLength: img.withBoxes?.length || 0,
-          timestamp: img.timestamp
-        });
-        console.log(`[ChatPage] Full Image #${idx + 1}:`, JSON.stringify({
-          filename: img.filename,
-          userId: img.userId,
-          sessionId: img.sessionId,
-          originalKey: img.originalKey,
-          originalS3Key: img.originalS3Key,
-          withBoxesS3Key: img.withBoxesS3Key,
-          hasOriginal: !!img.original,
-          hasWithBoxes: !!img.withBoxes
-        }, null, 2));
-      });
-
-      // Step 4: Register session FIRST before storing images
-      // This ensures the session exists in the service so saveSessionWithImagesToFirestore can find it
-      this.updateCopyProgress(50, 'Registering session in service...');
-      
-      try {
-        console.log('[ChatPage] Registering new session in service:', {
-          sessionId: newSession.id,
-          sessionName: newSession.name,
-          receiverId: this.receiverUserId,
-          imageCount: transformedImages.length
-        });
-        
-        const svc: any = this.imageStorage;
-        if (typeof svc.registerSession === 'function') {
-          svc.registerSession(newSession);
-          console.log('[ChatPage] ✅ Session registered successfully');
-        } else {
-          console.error('[ChatPage] ❌ registerSession method not found');
-          throw new Error('registerSession method not available');
-        }
-      } catch (e) {
-        console.error('[ChatPage] Session registration FAILED:', e);
-        throw e; // Critical error - cannot proceed
-      }
-
-      // Step 5: Upload transformed images to S3 with new keys
-      this.updateCopyProgress(55, 'Uploading images to S3 with new user ID...');
-      
-      for (let i = 0; i < transformedImages.length; i++) {
-        const image = transformedImages[i];
-        
-        this.updateCopyProgress(
-          55 + ((i) / transformedImages.length) * 15,
-          `Uploading image ${i + 1}/${transformedImages.length} to S3...`
-        );
-
-        try {
-          console.log(`[ChatPage] Uploading image ${i + 1}/${transformedImages.length}:`, {
-            originalFilename: image.originalKey,
-            newFilename: image.filename,
-            newUserId: image.userId
-          });
-          
-          // Upload original image to S3 with new key (only if original data URL exists)
-          if (image.original) {
-            try {
-              console.log(`[ChatPage] 📤 S3 UPLOAD ORIGINAL - Details:`, {
-                filename: image.filename,
-                dataUrlLength: image.original?.length || 0,
-                sessionId: newSession.id
-              });
-              
-              const uploadResult = await (this.imageStorage as any).uploadSessionImageOriginal(
-                image.original,
-                newSession.id,
-                image.filename  // Pass transformed filename
-              );
-              if (uploadResult) {
-                console.log('[ChatPage] ✅ ORIGINAL UPLOADED - S3 Key:', {
-                  s3Key: uploadResult?.s3Key,
-                  url: uploadResult?.url,
-                  filename: image.filename
-                });
-                image.originalS3Key = uploadResult?.s3Key;
-                image.originalS3Url = uploadResult?.url;
-              } else {
-                console.warn('[ChatPage] ⚠️ Upload returned no result for original image');
-              }
-            } catch (e) {
-              console.warn('[ChatPage] Failed to upload original image:', e);
-            }
-          }
-
-          // Upload withBoxes image to S3 with new key (only if withBoxes data URL exists)
-          if (image.withBoxes && image.withBoxes !== image.original) {
-            try {
-              // Use the pre-calculated transformed withBoxes filename
-              const withBoxesFileName = image.withBoxesFilename || 
-                `${image.filename.replace(/(\.jpg|\.png)$/i, '')}_withBoxes${image.filename.match(/(\.jpg|\.png)$/i)?.[0] || '.jpg'}`;
-              
-              console.log('[ChatPage] 📤 S3 UPLOAD WITHBOXES - Details:', {
-                filename: withBoxesFileName,
-                dataUrlLength: image.withBoxes?.length || 0,
-                sessionId: newSession.id
-              });
-              
-              const uploadResult = await (this.imageStorage as any).uploadSessionImageWithBoxes(
-                image.withBoxes,
-                newSession.id,
-                withBoxesFileName  // Pass transformed filename
-              );
-              if (uploadResult) {
-                console.log('[ChatPage] ✅ WITHBOXES UPLOADED - S3 Key:', {
-                  s3Key: uploadResult?.s3Key,
-                  url: uploadResult?.url,
-                  filename: withBoxesFileName
-                });
-                image.withBoxesS3Key = uploadResult?.s3Key;
-                image.withBoxesS3Url = uploadResult?.url;
-              } else {
-                console.warn('[ChatPage] ⚠️ Upload returned no result for withBoxes image');
-              }
-            } catch (e) {
-              console.warn('[ChatPage] Failed to upload withBoxes image:', e);
-            }
-          }
-        } catch (e) {
-          console.warn('[ChatPage] S3 upload warning for image:', image.filename, e);
-        }
-      }
-
-      this.updateCopyProgress(72, 'Storing images locally...');
-
-      // Step 6: Store transformed images using ImageStorageService
-      // CRITICAL: Images must be stored with the ORIGINAL property as the key
-      // so that Firestore save can find them by their original base64 string
-      for (let i = 0; i < transformedImages.length; i++) {
-        const image = transformedImages[i];
-        
-        console.log(`[ChatPage] 💾 STORING IMAGE ${i + 1}/${transformedImages.length} LOCALLY`);
-        console.log(`[ChatPage] Image Before addImage:`, {
-          filename: image.filename,
-          hasOriginal: !!image.original,
-          originalLength: image.original?.length || 0,
-          s3KeyOriginal: image.originalS3Key,
-          s3KeyWithBoxes: image.withBoxesS3Key
-        });
-        console.log(`[ChatPage] Full Image Object Before Store:`, JSON.stringify({
-          filename: image.filename,
-          userId: image.userId,
-          sessionId: image.sessionId,
-          originalS3Key: image.originalS3Key,
-          withBoxesS3Key: image.withBoxesS3Key,
-          hasOriginal: !!image.original,
-          hasWithBoxes: !!image.withBoxes
-        }, null, 2));
-        
-        // Call addImage with only the image parameter
-        await (this.imageStorage as any).addImage(image);
-        
-        console.log(`[ChatPage] ✅ Image ${i + 1} stored to service`);
-        
-        this.updateCopyProgress(
-          72 + ((i + 1) / transformedImages.length) * 12,
-          `Storing image ${i + 1}/${transformedImages.length}...`
-        );
-      }
-
-      this.updateCopyProgress(87, 'Persisting to Firestore...');
-
-      // Step 7: Persist session with transformed images to Firestore
-      // This writes the copied session and all its images to Firestore under receiver's ownership
-      try {
-        console.log('[ChatPage] ========== FIRESTORE SAVE START ==========');
-        console.log('[ChatPage] 📝 FINAL SESSION BEFORE FIRESTORE SAVE:', {
-          sessionId: newSession.id,
-          sessionName: newSession.name,
-          receiverId: this.receiverUserId,
-          imageCount: transformedImages.length,
-          imageKeysCount: newSession.imageKeys.length,
-          imageKeysSample: newSession.imageKeys.slice(0, 2).map((k: string) => k.substring(0, 50) + '...')
-        });
-        console.log('[ChatPage] 📝 COMPLETE SESSION OBJECT:', JSON.stringify(newSession, null, 2));
-        
-        console.log('[ChatPage] 📝 IMAGES TO BE SAVED (Firestore):');
-        transformedImages.forEach((img, idx) => {
-          console.log(`[ChatPage] ========== IMAGE #${idx + 1} FOR FIRESTORE ==========`);
-          console.log(`[ChatPage] Image Details:`, {
-            filename: img.filename,
-            userId: img.userId,
-            sessionId: img.sessionId,
-            originalS3Key: img.originalS3Key,
-            withBoxesS3Key: img.withBoxesS3Key,
-            hasOriginal: !!img.original,
-            hasWithBoxes: !!img.withBoxes
-          });
-          console.log(`[ChatPage] Full Image #${idx + 1}:`, JSON.stringify({
-            filename: img.filename,
-            userId: img.userId,
-            sessionId: img.sessionId,
-            originalS3Key: img.originalS3Key,
-            withBoxesS3Key: img.withBoxesS3Key,
-            timestamp: img.timestamp,
-            prediction: img.prediction
-          }, null, 2));
-        });
-        
-        try {
-          console.log('[ChatPage] 📝 Service storedImages count:', (this.imageStorage as any).getImages().length);
-          console.log('[ChatPage] 📝 Service sessions count:', (this.imageStorage as any).getSessions().length);
-        } catch (err) {
-          console.warn('[ChatPage] Could not get service counts:', err);
-        }
-        
-        await (this.imageStorage as any).saveSessionWithImagesToFirestore(newSession.id, this.receiverUserId);
-        
-        console.log('[ChatPage] ✅ Session and images persisted to Firestore successfully');
-        console.log('[ChatPage] ========== FIRESTORE SAVE COMPLETE ==========');
-      } catch (e) {
-        console.error('[ChatPage] ❌ Firestore persistence FAILED:', e);
-        console.error('[ChatPage] Session was:', newSession);
-        console.error('[ChatPage] Images were:', transformedImages.map(img => ({
-          filename: img.filename,
-          userId: img.userId,
-          sessionId: img.sessionId,
-          s3KeyOriginal: img.originalS3Key,
-          s3KeyWithBoxes: img.withBoxesS3Key
-        })));
-        throw e; // Re-throw to trigger catch block so user knows there was an issue
-      }
-
-      this.updateCopyProgress(100, 'Complete!');
-
-      console.log('[ChatPage] ====== SESSION SHARE COMPLETED ======');
-      console.log('[ChatPage] ORIGINAL SESSION (sender):');
-      console.log(`  - ID: ${attachment.id}`);
-      console.log(`  - Owner (sender): ${attachment.userId} (${currentUserId})`);
-      console.log(`  - Name: ${attachment.name}`);
-      console.log(`  - Images: ${attachment.imageKeys?.length || 0}`);
-      
-      console.log('[ChatPage] NEW SHARED SESSION (receiver):');
-      console.log(`  - ID: ${newSession.id}`);
-      console.log(`  - Owner (receiver): ${this.receiverUserId}`);
-      console.log(`  - Name: ${newSession.name}`);
-      console.log(`  - Images: ${transformedImages.length}`);
-      
-      console.log('[ChatPage] User ID Transformation:');
-      console.log(`  - From: ${attachment.userId}`);
-      console.log(`  - To: ${this.receiverUserId}`);
-      
-      console.log('[ChatPage] Transformed image details:');
-      transformedImages.forEach(img => {
-        console.log(`  - Original filename: ${img.originalKey || 'unknown'}`);
-        console.log(`    New filename: ${img.filename}`);
-        console.log(`    New userId: ${img.userId}`);
-        console.log(`    Original S3 key: ${img.originalS3Key}`);
-        console.log(`    WithBoxes S3 key: ${img.withBoxesS3Key}`);
-        console.log(`    Original S3 URL: ${img.originalS3Url || 'N/A'}`);
-        console.log(`    WithBoxes S3 URL: ${img.withBoxesS3Url || 'N/A'}`);
-      });
-
-      // Verify stored and posted data
-      console.log('[ChatPage] ====== STORAGE & POST VERIFICATION ======');
-      
-      console.log('[ChatPage] SESSION OBJECT - Stored & Posted:');
-      console.log(`  - Session ID: ${newSession.id}`);
-      console.log(`  - Session Name: ${newSession.name}`);
-      console.log(`  - Session Owner (receiver userId): ${newSession.userId}`);
-      console.log(`  - Session Created: ${newSession.created}`);
-      console.log(`  - Total Bounding Boxes: ${newSession.totalBoundingBoxes}`);
-      console.log(`  - Image Keys Count: ${newSession.imageKeys?.length || 0}`);
-      console.log(`  - Image Keys:`);
-      newSession.imageKeys?.forEach((key: string, idx: number) => {
-        console.log(`    [${idx + 1}] ${key}`);
-      });
-
-      console.log('[ChatPage] SESSION IMAGE OBJECTS - Stored & Posted:');
-      transformedImages.forEach((img: any, imgIdx: number) => {
-        console.log(`  [Image ${imgIdx + 1}] ${img.filename}`);
-        console.log(`    - User ID: ${img.userId} (Receiver)`);
-        console.log(`    - Session ID: ${img.sessionId}`);
-        console.log(`    - Timestamp: ${img.timestamp}`);
-        console.log(`    - Original S3 Key (posted): ${img.originalS3Key || 'Not set'}`);
-        console.log(`    - WithBoxes S3 Key (posted): ${img.withBoxesS3Key || 'Not set'}`);
-        console.log(`    - Prediction: ${img.prediction ? JSON.stringify(img.prediction) : 'None'}`);
-        console.log(`    - Total Bounding Boxes: ${img.boxes?.length || 0}`);
-      });
-
-      console.log('[ChatPage] S3 IMAGES - Upload Verification:');
-      transformedImages.forEach((img: any, imgIdx: number) => {
-        console.log(`  [Image ${imgIdx + 1}] ${img.filename}`);
-        console.log(`    - Original Image:`);
-        console.log(`      S3 Key: ${img.originalS3Key || 'Not uploaded'}`);
-        console.log(`      S3 URL: ${img.originalS3Url || 'Not available'}`);
-        console.log(`      Data URL present: ${img.original ? 'Yes' : 'No'}`);
-        console.log(`    - WithBoxes Image:`);
-        console.log(`      S3 Key: ${img.withBoxesS3Key || 'Not uploaded'}`);
-        console.log(`      S3 URL: ${img.withBoxesS3Url || 'Not available'}`);
-        console.log(`      Data URL present: ${img.withBoxes ? 'Yes' : 'No'}`);
-      });
-
-      console.log('[ChatPage] STORAGE SUMMARY:');
-      console.log(`  - Session object posted to receiver's Firestore: ${this.receiverUserId}`);
-      console.log(`  - Total images posted: ${transformedImages.length}`);
-      console.log(`  - S3 original images uploaded: ${transformedImages.filter(img => img.originalS3Url).length}`);
-      console.log(`  - S3 withBoxes images uploaded: ${transformedImages.filter(img => img.withBoxesS3Url).length}`);
-      console.log(`  - Firestore session collection updated: Yes (saveSessionWithImagesToFirestore)`);
-      console.log(`  - Local storage updated: Yes (ImageStorageService.addImage for each)`);
-
-      console.log('[ChatPage] ====== END SESSION SHARE ======');
-
-      setTimeout(() => {
-        this.isAttachmentCopyInProgress = false;
-        this.attachmentDebugState = 'completed'; // Transition to completed state
-        this.attachmentCopyProgress = 0;
-      }, 1000);
-    } catch (e) {
-      console.error('[ChatPage] Error during session share:', e);
-      console.error('[ChatPage] Session share failed with details:');
-      console.error('  - Error name:', (e as any)?.name);
-      console.error('  - Error code:', (e as any)?.code);
-      console.error('  - Error message:', (e as any)?.message);
-      console.error('  - Full error:', e);
-      this.isAttachmentCopyInProgress = false;
-      this.attachmentCopyProgress = 0;
-      
-      // Provide user-friendly error messages based on error type
-      let userMessage = 'Error sharing session. Check console for details.';
-      if ((e as any)?.code === 'permission-denied') {
-        userMessage = 'Permission denied: Unable to save session to recipient. Check Firestore security rules.';
-      } else if ((e as any)?.message?.includes('Cannot determine receiver')) {
-        userMessage = 'Receiver ID determination failed. Ensure you have a valid chat open.';
-      } else if ((e as any)?.message?.includes('Cannot determine current')) {
-        userMessage = 'Current user identification failed. Please re-login and try again.';
-      }
-      
-      alert(userMessage);
-    }
-  }
 
   private resolveAttachmentShareRecipient(): string | null {
-    // Try to use newRecepientUserId first
+    /**
+     * resolveAttachmentShareRecipient()
+     *
+     * Line-by-line explanation:
+     * 1) Prefer `newRecepientUserId` when it has been explicitly set (highest priority).
+     * 2) Otherwise, if `receiverUserId` exists, attempt to normalize/extract original id
+     *    and return it (keeps backwards compatibility with previously stored receiver IDs).
+     * 3) If there is an `activeChat`, try to extract a recipient ID from its structure and
+     *    store it into `receiverUserId` for future use.
+     * 4) Also check `activeChat._recipientUserId` (set during `openChat`) as an alternate source.
+     * 5) As a last resort, fall back to `currentChatId` when present and usable.
+     * 6) If none of the above yields an ID, return `null` to indicate failure to resolve.
+     */
+
+    // 1) Highest priority: explicit new recipient override
     if (this.newRecepientUserId) {
       return this.newRecepientUserId;
     }
 
-    // Fall back to receiverUserId
+    // 2) Re-use an already-known receiver ID (and try to normalize it if extraction isnt applied yet)
     if (this.receiverUserId) {
+      // If we haven't derived the original form yet, attempt to extract it for consistency
       if (!this.newRecepientUserId) {
         this.extractOriginalUserIdFromReceiverUserId();
       }
       return this.receiverUserId;
     }
 
-    // Try to extract from activeChat if available
+    // 3) If an active chat is available, attempt structured extraction
     if (this.activeChat) {
+      // Try the general extraction helper which understands several shapes of chat objects
       const extracted = this.extractReceiverUserIdFromChat(this.activeChat);
       if (extracted) {
+        // Persist the discovered ID for future calls and return it now
         console.log('[ChatPage.resolveAttachmentShareRecipient] Extracted recipient from activeChat:', extracted);
         this.receiverUserId = extracted;
         return extracted;
       }
 
-      // Also check if it's stored as _recipientUserId (set during openChat)
-      if (this.activeChat._recipientUserId) {
-        console.log('[ChatPage.resolveAttachmentShareRecipient] Found recipient in activeChat._recipientUserId:', this.activeChat._recipientUserId);
-        this.receiverUserId = this.activeChat._recipientUserId;
-        return this.activeChat._recipientUserId;
+      // 4) Fallback: a legacy or previously-stored property set during chat open
+      if ((this.activeChat as any)._recipientUserId) {
+        console.log('[ChatPage.resolveAttachmentShareRecipient] Found recipient in activeChat._recipientUserId:', (this.activeChat as any)._recipientUserId);
+        this.receiverUserId = (this.activeChat as any)._recipientUserId;
+        return (this.activeChat as any)._recipientUserId;
       }
     }
 
-    // Last resort: try using chatId if available
+    // 5) Last-resort: use the currentChatId when it looks like a user identifier
     if (this.currentChatId && typeof this.currentChatId === 'string') {
       console.log('[ChatPage.resolveAttachmentShareRecipient] Using currentChatId as fallback:', this.currentChatId);
       this.receiverUserId = this.currentChatId;
       return this.currentChatId;
     }
 
+    // 6) Nothing found
     return null;
   }
 
   private sanitizeRecipientOrReceiverId(value: string | null | undefined): string {
+    /**
+     * sanitizeRecipientOrReceiverId(value): string
+     *
+     * Line-by-line explanation:
+     * 1) If the input is not a string, warn and return an empty string.
+     * 2) Trim surrounding whitespace from the input for consistent processing.
+     * 3) If the trimmed value is short (<=28 chars), consider it already sanitized and return it.
+     * 4) Look for the first underscore occurring at or after index 28 — this indicates a suffix
+     *    appended by some storage formats that should be removed.
+     * 5) If no such underscore exists, return the full trimmed value.
+     * 6) Otherwise slice the string up to that underscore (exclusive) and return the sanitized id.
+     */
+
+    // 1) Reject non-string inputs early with a warning to aid debugging
     if (typeof value !== 'string') {
       console.warn('[ChatPage.sanitizeRecipientOrReceiverId] Non-string value received:', value);
       return '';
     }
 
+    // 2) Trim whitespace for reliable length checks and comparisons
     const trimmed = value.trim();
+
+    // 3) Short IDs are considered already acceptable; return as-is
     if (trimmed.length <= 28) {
       console.log('[ChatPage.sanitizeRecipientOrReceiverId] No sanitization needed (length <= 28)', {
         input: value,
@@ -1166,7 +813,10 @@ export class ChatPagePage implements OnInit, OnDestroy {
       return trimmed;
     }
 
+    // 4) Search for an underscore starting at position 28 — many generated IDs append metadata after this point
     const underscoreIndex = trimmed.indexOf('_', 28);
+
+    // 5) If no underscore found, keep the full trimmed value
     if (underscoreIndex === -1) {
       console.log('[ChatPage.sanitizeRecipientOrReceiverId] No underscore found at/after index 28. Keeping full value.', {
         input: value,
@@ -1176,6 +826,7 @@ export class ChatPagePage implements OnInit, OnDestroy {
       return trimmed;
     }
 
+    // 6) Remove the appended suffix by slicing up to the underscore and return the sanitized result
     const sanitized = trimmed.slice(0, underscoreIndex);
     console.log('[ChatPage.sanitizeRecipientOrReceiverId] Sanitized value by removing suffix starting at underscore.', {
       input: value,
@@ -1189,23 +840,42 @@ export class ChatPagePage implements OnInit, OnDestroy {
     return sanitized;
   }
 
+  /**
+   * getStoredImageForAttachment(imageKey)
+   *
+   * Purpose: Resolve a stored image object that corresponds to the provided
+   * `imageKey` using the injected `imageStorage` service. Prefers a direct
+   * lookup API when available, otherwise scans the cached images and matches
+   * against several candidate identifier fields.
+   *
+   * Returns the matched image object or `null` when not found.
+   */
   private getStoredImageForAttachment(imageKey: string): any | null {
+    // 1) Guard: nothing to do when no key is provided.
     if (!imageKey) {
       return null;
     }
 
+    // 2) Read the configured image storage service (may expose different APIs).
     const service: any = this.imageStorage;
 
+    // 3) If the service exposes a direct lookup helper, prefer that for efficiency.
     if (typeof service.getEntryForImage === 'function') {
+      // 3a) Ask the service for an entry that matches this key/filename.
       const byFilename = service.getEntryForImage(imageKey);
+      // 3b) If we got a result, return it immediately.
       if (byFilename) {
         return byFilename;
       }
     }
 
+    // 4) If no direct lookup exists, try to fetch all stored images and search.
     if (typeof service.getAllImages === 'function') {
+      // 4a) Ensure we have an array to search (service may return undefined).
       const storedImages = service.getAllImages() || [];
+      // 4b) Return the first image where any known identifier matches the key.
       return storedImages.find((img: any) => {
+        // Check multiple candidate properties used by different storage implementations.
         return img?.filename === imageKey
           || img?.original === imageKey
           || img?.withBoxes === imageKey
@@ -1215,67 +885,137 @@ export class ChatPagePage implements OnInit, OnDestroy {
       }) || null;
     }
 
+    // 5) If the service exposes neither helper, we cannot resolve the image.
     return null;
   }
 
+  /**
+   * transformKeyForAttachmentShare(value, recipientUserId): string
+   *
+   * Purpose: When sharing a stored session image with another user, many
+   * image keys/filenames embed a user identifier. This helper attempts to
+   * rewrite the incoming `value` so it references `recipientUserId` instead
+   * of the original user. It prefers simple, detectable patterns first and
+   * falls back to the more robust page-level filename transform helper.
+   */
   private transformKeyForAttachmentShare(value: string, recipientUserId: string): string {
+    // Guard: if either input is falsy, there's nothing to transform — return as-is.
     if (!value || !recipientUserId) {
       return value;
     }
 
+    // Common on-the-wire pattern: filenames that start or contain an explicit
+    // `userID:...sessionId:` segment. The regex captures the `userID:` prefix
+    // and grabs everything up to (but not including) the following `sessionId:`.
     const regex = /(userID:).*?(?=sessionId:)/;
+
+    // If the pattern is present, perform a targeted replace that preserves the
+    // `userID:` label and swaps in the recipient's id. This avoids touching the
+    // rest of the filename/session identifier content.
     if (regex.test(value)) {
       return value.replace(regex, `$1${recipientUserId}`);
     }
 
+    // If the quick pattern didn't match, fall back to the page's more robust
+    // filename transform that understands additional filename shapes.
+    // `transformImageFilenameUserId` will try a non-greedy replacement that
+    // only swaps the first `userID:...sessionId:` chunk it finds.
     const transformedByPageMethod = this.transformImageFilenameUserId(value, recipientUserId);
+
+    // If the helper returned a different string, use it. Otherwise keep the
+    // original value untouched (no safe transformation available).
     if (transformedByPageMethod && transformedByPageMethod !== value) {
       return transformedByPageMethod;
     }
 
+    // Final fallback: nothing matched or transformation did not change the
+    // input — return the original value so callers can decide how to proceed.
     return value;
   }
 
   private changeUserIdPrefixUntilSessionId(filename: string, recipientUserId: string): string {
+    /**
+     * changeUserIdPrefixUntilSessionId(filename, recipientUserId): string
+     *
+     * Purpose: Replace the first `userID:...` segment in a filename with a
+     * provided `recipientUserId`, but only when that segment precedes a
+     * `sessionId:` marker. This ensures we only change the user prefix that
+     * is part of the canonical filename/session identifier and not other parts
+     * of the string.
+     */
+
+    // 1) Guard: if either value is missing, nothing to do — return original.
     if (!filename || !recipientUserId) {
       return filename;
     }
 
+    // 2) If the filename does not start with the expected 'userID:' prefix,
+    //    we avoid making blind replacements and return the original string.
     if (!filename.startsWith('userID:')) {
       return filename;
     }
 
+    // 3) Regex to capture the `userID:` prefix and everything up to the
+    //    subsequent `sessionId:` token (non-greedy). The first capturing
+    //    group is the literal 'userID:' label which we preserve on replace.
     const regex = /(userID:).*?(?=sessionId:)/;
+
+    // 4) If the pattern exists, perform a targeted replacement that keeps the
+    //    'userID:' label and substitutes in the new recipient id only for the
+    //    matched prefix region.
     if (regex.test(filename)) {
       return filename.replace(regex, `$1${recipientUserId}`);
     }
 
+    // 5) If no replaceable pattern was found, return the original filename
+    //    unchanged so callers can handle the lack of transformation.
     return filename;
   }
 
+  /**
+   * copySessionImageForRecipient(originalImage, imageKey, recipientUserId, newSessionId)
+   *
+   * Purpose: Given a source image object (from a session), build a copy
+   * of that image adapted for `recipientUserId` and upload any available
+   * DataURLs (original / withBoxes) into the storage service under keys
+   * transformed for the recipient. Returns the copied image object with
+   * upload metadata populated or `null` when the operation cannot proceed.
+   */
   private async copySessionImageForRecipient(
     originalImage: any,
     imageKey: string,
     recipientUserId: string,
     newSessionId: string
   ): Promise<any | null> {
+    // 1) Service abstraction: image storage providers expose helpers used below
     const service: any = this.imageStorage;
+
+    // 2) Determine effective recipient ID: allow an override stored on the page
+    //    (`this.newRecepientUserId`) but fall back to the provided argument.
     const effectiveRecipientUserId = (this.newRecepientUserId || recipientUserId || '').toString().trim();
 
+    // 3) Guard: we cannot proceed without a recipient user id.
     if (!effectiveRecipientUserId) {
       console.error('[ChatPage.copySessionImageForRecipient] Missing recipient user ID for key:', imageKey);
       return null;
     }
 
+    // 4) Prefer in-object DataURLs when present; otherwise, attempt to fetch
+    //    the referenced S3 objects as DataURLs for upload.
     const originalDataUrl = originalImage?.original || (originalImage?.originalS3Key ? await service.fetchS3ObjectAsDataUrl(originalImage.originalS3Key) : null);
     const withBoxesDataUrl = originalImage?.withBoxes || (originalImage?.withBoxesS3Key ? await service.fetchS3ObjectAsDataUrl(originalImage.withBoxesS3Key) : null);
 
+    // 5) If there is no usable image data to upload, nothing to copy.
     if (!originalDataUrl && !withBoxesDataUrl) {
       return null;
     }
 
+    // 6) Build transformed filenames/keys that reference the recipient user id.
     const sourceFilename = originalImage?.filename || imageKey;
     const transformedFilename = this.transformKeyForAttachmentShare(sourceFilename, effectiveRecipientUserId);
+
+    // 7) For each known S3 key property, attempt to produce a transformed key
+    //    that points to the same logical object for the recipient.
     const transformedOriginalS3Key = originalImage?.originalS3Key
       ? this.transformKeyForAttachmentShare(originalImage.originalS3Key, effectiveRecipientUserId)
       : transformedFilename;
@@ -1289,6 +1029,8 @@ export class ChatPagePage implements OnInit, OnDestroy {
       ? this.transformKeyForAttachmentShare(originalImage.withBoxesStoragePath, effectiveRecipientUserId)
       : transformedWithBoxesFilename;
 
+    // 8) Start composing the copied image object: preserve source metadata,
+    //    but replace filename/user/session fields and attach upload flags.
     const copiedImage: any = {
       ...originalImage,
       original: originalDataUrl || originalImage?.original || '',
@@ -1309,12 +1051,15 @@ export class ChatPagePage implements OnInit, OnDestroy {
       storageUrl: null,
       withBoxesStoragePath: transformedWithBoxesStoragePath,
       withBoxesStorageUrl: null,
+      // Track whether we attempted uploads and whether they succeeded
       originalUploadAttempted: !!originalDataUrl,
       originalUploadSucceeded: false,
       withBoxesUploadAttempted: !!withBoxesDataUrl,
       withBoxesUploadSucceeded: false
     };
 
+    // 9) If we have an original image DataURL, upload it using the storage helper
+    //    and update the copiedImage with returned S3 keys/URLs and success flag.
     if (originalDataUrl) {
       const originalUpload = await service.uploadSessionImageOriginal(originalDataUrl, newSessionId, transformedOriginalS3Key || transformedFilename);
       if (originalUpload) {
@@ -1326,6 +1071,7 @@ export class ChatPagePage implements OnInit, OnDestroy {
       }
     }
 
+    // 10) Similarly, upload the withBoxes DataURL when available and populate metadata.
     if (withBoxesDataUrl) {
       const withBoxesUpload = await service.uploadSessionImageWithBoxes(withBoxesDataUrl, newSessionId, transformedWithBoxesFilename);
       if (withBoxesUpload) {
@@ -1337,6 +1083,8 @@ export class ChatPagePage implements OnInit, OnDestroy {
       }
     }
 
+    // 11) Return the assembled object to the caller so higher-level logic can
+    //     register/store it alongside the copied session.
     return copiedImage;
   }
 
@@ -1344,28 +1092,50 @@ export class ChatPagePage implements OnInit, OnDestroy {
     sessionId: string,
     imageKeys: string[]
   ): Promise<any[]> {
+    /**
+     * fetchSessionImageObjectsFromFirestoreByImageKeys(sessionId, imageKeys)
+     *
+     * Purpose: Query the Firestore `images` collection for documents that
+     * belong to a given `sessionId` and then match those documents against
+     * the provided `imageKeys`. This helps locate image documents that are
+     * related to the session by comparing several candidate identifier fields
+     * (doc id, filename, originalKey, S3 keys).
+     */
+
+    // 1) Validate inputs early: require a session id and a non-empty array
+    //    of image keys (guard against invalid calls).
     if (!sessionId || !Array.isArray(imageKeys) || imageKeys.length === 0) {
       return [];
     }
 
+    // 2) Build a Set of source keys we will match against. Only include
+    //    non-empty string keys to avoid false positives.
     const sourceKeys = new Set(imageKeys.filter((key) => typeof key === 'string' && key.trim().length > 0));
     if (sourceKeys.size === 0) {
       return [];
     }
 
+    // 3) Collector array for matching Firestore image documents.
     const matchedSessionImageObjects: any[] = [];
 
     try {
+      // 4) Query Firestore for all images that belong to the sessionId.
+      //    This limits the documents we need to inspect locally.
       const imagesRef = collection(this.firestore, 'images');
       const imageQuery = query(imagesRef, where('sessionId', '==', sessionId));
       const querySnapshot = await getDocs(imageQuery);
 
+      // 5) For each returned document, assemble a canonical object and then
+      //    test a list of candidate identifier fields to see if any match a
+      //    source key from the original session (doc id is also considered).
       querySnapshot.forEach((docSnap) => {
         const imageDoc: any = {
           firestoreDocId: docSnap.id,
           ...docSnap.data()
         };
 
+        // 6) Candidate identifiers include the Firestore doc id and several
+        //    common properties that may contain the original image key.
         const candidates = [
           docSnap.id,
           imageDoc?.filename,
@@ -1374,12 +1144,15 @@ export class ChatPagePage implements OnInit, OnDestroy {
           imageDoc?.withBoxesS3Key
         ].filter((candidate) => typeof candidate === 'string' && candidate.trim().length > 0);
 
+        // 7) If any candidate appears in the source key set, we consider the
+        //    image document related to the requested session keys.
         const isRelatedToSessionKey = candidates.some((candidate) => sourceKeys.has(candidate));
         if (isRelatedToSessionKey) {
           matchedSessionImageObjects.push(imageDoc);
         }
       });
 
+      // 8) Helpful debug log summarising the fetch and match results.
       console.log('[ChatPage.confirmAttachmentShareCopy] Firestore session image objects fetched from images collection (matched by original session imageKeys):', {
         sessionId,
         requestedImageKeys: Array.from(sourceKeys),
@@ -1387,57 +1160,101 @@ export class ChatPagePage implements OnInit, OnDestroy {
         matchedSessionImageObjects
       });
     } catch (error) {
+      // 9) Non-fatal: if Firestore lookup fails, warn and return what we have
+      //    (which will be empty in this branch). Higher-level logic may
+      //    attempt to fall back to cached/local sources.
       console.warn('[ChatPage.confirmAttachmentShareCopy] Failed to fetch related session image objects from Firestore images collection by imageKeys:', error);
     }
 
+    // 10) Return the array of matched image documents (may be empty).
     return matchedSessionImageObjects;
   }
 
+  /**
+   * printSelectedSessionImageObjectsFromFirestore(selectedSession, imageKeys, sessionImageObjects)
+   *
+   * Line-by-line:
+   * 1) Start a console.group for clearer grouped logs.
+   * 2) Log a summary object for the selected session (id,name,userId,imageKeysCount).
+   * 3) Log the requested imageKeys array (or empty array).
+   * 4) Log the count of matched sessionImageObjects (or 0).
+   * 5) Log the matched sessionImageObjects array (or empty array).
+   * 6) End the console.group.
+   */
   private printSelectedSessionImageObjectsFromFirestore(
     selectedSession: any,
     imageKeys: string[],
     sessionImageObjects: any[]
   ): void {
+    // 1) Group related debug messages for easier collapse/expand in the console.
     console.group('[ChatPage.confirmAttachmentShareCopy] Selected session image objects from Firestore images collection');
+    // 2) Log a compact summary of the selected session.
     console.log('Selected session:', {
+      // 2a) session id or null if missing
       id: selectedSession?.id || null,
+      // 2b) session name or null if missing
       name: selectedSession?.name || null,
+      // 2c) original session owner userId or null if missing
       userId: selectedSession?.userId || null,
+      // 2d) number of image keys requested (safe guard for non-array)
       imageKeysCount: Array.isArray(imageKeys) ? imageKeys.length : 0
     });
+    // 3) Print the requested image keys array, default to empty array when invalid
     console.log('Requested imageKeys:', Array.isArray(imageKeys) ? imageKeys : []);
+    // 4) Show how many image documents matched (safe check for array)
     console.log('Matched image object count:', Array.isArray(sessionImageObjects) ? sessionImageObjects.length : 0);
+    // 5) Dump the matched image objects for inspection (or empty list)
     console.log('Matched image objects:', Array.isArray(sessionImageObjects) ? sessionImageObjects : []);
+    // 6) Close the console group started above
     console.groupEnd();
   }
 
-  // Copy the selected session, its images, and the related S3 objects for the current recipient.
+  /**
+   * confirmAttachmentShareCopy(attachment): Promise<void>
+   *
+   * Purpose: Copy a source session (including all its images from Firestore and S3)
+   * to a recipient user. This involves:
+   * 1) Validating the source session and current user permissions
+   * 2) Resolving and sanitizing the recipient user ID
+   * 3) Creating a new session copy with transformed image keys/filenames for the recipient
+   * 4) Fetching original images from Firestore and S3
+   * 5) Copying S3 objects to new recipient-owned locations
+   * 6) Uploading image metadata to Firestore under the recipient's user ID
+   * 7) Registering the copied session and sending a chat confirmation
+   */
   async confirmAttachmentShareCopy(attachment: any): Promise<void> {
+    // 1) Log start of the entire session copy workflow for debugging
     console.log('[ChatPage.confirmAttachmentShareCopy] ===== SESSION COPY WORKFLOW START =====');
 
+    // 2) Determine which session to copy: explicit argument > debug selection > regular selection
     const selectedSession = attachment || this.selectedAttachmentForDebug || this.selectedAttachment;
+    // 3) Guard: abort if no session was resolved from any source
     if (!selectedSession) {
       console.error('[ChatPage.confirmAttachmentShareCopy] No session selected');
       alert('No session selected');
       return;
     }
 
+    // 4) Validate session shape: must be of type 'session' and have a non-empty id
     if (selectedSession.type !== 'session' || !selectedSession.id) {
       console.error('[ChatPage.confirmAttachmentShareCopy] Invalid session attachment:', selectedSession);
       alert('Invalid session attachment');
       return;
     }
 
+    // 5) SECURITY CHECK: ensure the session belongs to the current (authenticated) user
     if (!this.validateSessionBelongsToCurrentUser(selectedSession)) {
       console.error('[ChatPage.confirmAttachmentShareCopy] SECURITY: session does not belong to the current user');
       alert('Security error: Cannot share session from another user');
       return;
     }
 
+    // 6) Log the starting session object and its engineer-checked flag
     console.log("start of confirmAttachmentShareCopy with the session", selectedSession, "Engineer Checked Session:", selectedSession.engineerCheckedSession);
     
-    // Validate and log notes field early
+    // 7) Extract and preserve the session notes field; default to empty string if missing
     const sessionNotes = selectedSession.notes || '';
+    // 8) Log detailed info about the notes field to aid debugging
     console.log("start of confirmAttachmentShareCopy with the session", selectedSession, "Session notes:", {
       notesValue: sessionNotes,
       notesType: typeof selectedSession.notes,
@@ -1445,14 +1262,18 @@ export class ChatPagePage implements OnInit, OnDestroy {
       notesLength: typeof sessionNotes === 'string' ? sessionNotes.length : 'N/A'
     });
 
+    // 9) Resolve the current authenticated user's ID from auth service or fallback to component userID
     const currentUserId = this.auth3.getCurrentUser()?.uid || this.userID;
+    // 10) Guard: cannot proceed without knowing who is initiating the share
     if (!currentUserId) {
       console.error('[ChatPage.confirmAttachmentShareCopy] Cannot determine current user ID');
       alert('Error: Cannot determine current user');
       return;
     }
 
+    // 11) Attempt to resolve the recipient user ID using helper that tries multiple sources
     const resolvedRecipientUserId = this.resolveAttachmentShareRecipient();
+    // 12) Guard: if no recipient can be determined, show helpful error and abort
     if (!resolvedRecipientUserId) {
       console.error('[ChatPage.confirmAttachmentShareCopy] Cannot determine recipient user ID', {
         activeChat: this.activeChat,
@@ -1465,9 +1286,12 @@ export class ChatPagePage implements OnInit, OnDestroy {
       return;
     }
 
+    // 13) Sanitize the resolved recipient ID (remove suffixes, trim, normalize)
     const recipientUserId = this.sanitizeRecipientOrReceiverId(resolvedRecipientUserId);
+    // 14) Sanitize the previously-stored receiver ID or use the newly-resolved one
     const receiverId = this.sanitizeRecipientOrReceiverId(this.receiverUserId || recipientUserId);
 
+    // 15) Log the sanitization results to track any transformations applied
     console.log('[ChatPage.confirmAttachmentShareCopy] Recipient/receiver ID sanitization result', {
       resolvedRecipientUserId,
       resolvedRecipientUserIdLength: resolvedRecipientUserId.length,
@@ -1481,6 +1305,7 @@ export class ChatPagePage implements OnInit, OnDestroy {
       receiverChanged: receiverId !== (this.receiverUserId || recipientUserId)
     });
 
+    // 16) Guard: both recipient and receiver IDs must be non-empty strings after sanitization
     if (!recipientUserId || !receiverId) {
       console.error('[ChatPage.confirmAttachmentShareCopy] Recipient/receiver ID sanitization resulted in empty value', {
         resolvedRecipientUserId,
@@ -1490,9 +1315,11 @@ export class ChatPagePage implements OnInit, OnDestroy {
       return;
     }
 
+    // 17) Store the sanitized IDs on component state for use by helper functions
     this.receiverUserId = receiverId;
     this.newRecepientUserId = recipientUserId;
 
+    // 18) Log stored IDs to confirm they are now available to all methods
     console.log('[ChatPage.confirmAttachmentShareCopy] Stored sanitized IDs in component state', {
       receiverUserId: this.receiverUserId,
       receiverUserIdLength: (this.receiverUserId || '').toString().length,
@@ -1500,19 +1327,28 @@ export class ChatPagePage implements OnInit, OnDestroy {
       newRecepientUserIdLength: (this.newRecepientUserId || '').toString().length
     });
 
+    // 19) Get reference to the injected image storage service
     const service: any = this.imageStorage;
+    // 20) Generate a new unique session ID based on current timestamp
     const newSessionId = `s-${Date.now()}`;
+    // 21) Deep clone the source session so we can modify it without affecting the original
     const copiedSession: any = JSON.parse(JSON.stringify(selectedSession));
+    // 22) Replace the session ID with the newly-generated one
     copiedSession.id = newSessionId;
+    // 23) Also update the sessionId field (some code may use one or the other)
     copiedSession.sessionId = newSessionId;
+    // 24) Set the recipient user as the owner of the copied session
     copiedSession.userId = recipientUserId;
+    // 25) Update the created timestamp to current time (reflects when copy was made)
     copiedSession.created = new Date().toISOString();
+    // 26) Initialize imageKeys array as empty; will be populated as images are copied
     copiedSession.imageKeys = [];
-    // Preserve engineer-checked flag from the source session
+    // 27) Preserve the engineer-checked flag from the source session (metadata about session review status)
     copiedSession.engineerCheckedSession = !!selectedSession.engineerCheckedSession;
-    // Preserve notes field from the source session
+    // 28) Preserve notes/comments from the source session (user-added descriptive text)
     copiedSession.notes = sessionNotes;
 
+    // 29) Log the prepared copiedSession to verify all fields are set correctly
     console.log('[ChatPage.confirmAttachmentShareCopy] Prepared copiedSession with preserved fields', {
       copiedSessionId: copiedSession.id,
       copiedSessionUserId: copiedSession.userId,
@@ -1521,17 +1357,27 @@ export class ChatPagePage implements OnInit, OnDestroy {
       engineerCheckedSession: copiedSession.engineerCheckedSession
     });
 
+    // 30) Begin try block for the main copy workflow
     try {
+      // 31) Mark that a copy operation is in progress (prevents concurrent operations)
       this.isAttachmentCopyInProgress = true;
+      // 32) Set debug state to 'active' to indicate UI should show progress
       this.attachmentDebugState = 'active';
+      // 33) Initialize progress to 0%
       this.attachmentCopyProgress = 0;
+      // 34) Set initial status message
       this.attachmentCopyStatusText = 'Initializing session copy...';
 
+      // 35) Update UI progress to 5% with initial loading message
       this.updateCopyProgress(5, 'Loading session data...');
 
+      // 36) Extract source image keys from selected session, or use empty array if missing
       const sourceImageKeys = Array.isArray(selectedSession.imageKeys) ? selectedSession.imageKeys : [];
+      // 37) Transform all source image keys to use the recipient's user ID
       copiedSession.imageKeys = sourceImageKeys.map((key: string) => this.transformKeyForAttachmentShare(key, recipientUserId));
+      // 38) Collector array for all successfully copied images
       const copiedImages: any[] = [];
+      // 39) Track upload success/failure for each image (for final reporting)
       const uploadStatusByImage: Array<{
         sourceImageKey: string;
         copiedFilename: string;
@@ -1541,87 +1387,121 @@ export class ChatPagePage implements OnInit, OnDestroy {
         withBoxesUploadSucceeded: boolean;
       }> = [];
 
+      // 40) Update progress to 15% before starting image copy
       this.updateCopyProgress(15, 'Copying session images...');
 
+      // 41) Initialize map to store Firestore image documents indexed by multiple candidate keys
       const firestoreImageObjects = new Map<string, any>();
+      // 42) Initialize map to store images fetched from S3, indexed by original source keys
       const sessionImageObjectsWithFetchedS3ByKey = new Map<string, any>();
+      // 43) Collector array for all image documents fetched from Firestore
       const sourceSessionImageObjectsFromFirestore: any[] = [];
+      // 44) Inner try block for Firestore operations (allows graceful fallback to local cache)
       try {
+        // 45) Query Firestore images collection for documents matching the source session
         const fetchedImageObjects = await this.fetchSessionImageObjectsFromFirestoreByImageKeys(
           selectedSession.id,
           sourceImageKeys
         );
+        // 46) Add all fetched documents to our collector array
         sourceSessionImageObjectsFromFirestore.push(...fetchedImageObjects);
 
+        // 47) Index each fetched image document by all its potential identifier fields
         sourceSessionImageObjectsFromFirestore.forEach((imageDoc: any) => {
+          // 48) Index by Firestore document ID
           const docId = (imageDoc?.firestoreDocId || '').toString();
           if (docId) {
             firestoreImageObjects.set(docId, imageDoc);
           }
+          // 49) Index by filename field
           if (imageDoc?.filename) {
             firestoreImageObjects.set(imageDoc.filename, imageDoc);
           }
+          // 50) Index by originalKey field
           if (imageDoc?.originalKey) {
             firestoreImageObjects.set(imageDoc.originalKey, imageDoc);
           }
+          // 51) Index by S3 key for original image
           if (imageDoc?.originalS3Key) {
             firestoreImageObjects.set(imageDoc.originalS3Key, imageDoc);
           }
+          // 52) Index by S3 key for image with bounding boxes
           if (imageDoc?.withBoxesS3Key) {
             firestoreImageObjects.set(imageDoc.withBoxesS3Key, imageDoc);
           }
         });
 
+        // 53) Debug-print the fetched session image objects before processing
         this.printSelectedSessionImageObjectsFromFirestore(
           selectedSession,
           sourceImageKeys,
           sourceSessionImageObjectsFromFirestore
         );
 
-
-
+        // 54) Log all stored Firestore images for tracing
         console.log('[ChatPage.confirmAttachmentShareCopy] Stored source session image objects from Firestore images collection:', sourceSessionImageObjectsFromFirestore);
 
+        // 55) Collector array for deep-cloned image objects with user/session ID updated
         const copiedSessionImageObjects: any[] = [];
+        // 56) Collector array for images that also have S3 DataURLs fetched
         const copiedSessionImageObjectsWithFetchedS3: any[] = [];
 
+        // 57) Loop through all fetched image documents and prepare copies
         for (let i = 0; i < sourceSessionImageObjectsFromFirestore.length; i++) {
+          // 58) Get current source image document
           const sourceImageObject = sourceSessionImageObjectsFromFirestore[i];
+          // 59) Deep clone the image object so modifications don't affect the original
           const clonedImageObject: any = JSON.parse(JSON.stringify(sourceImageObject || {}));
 
+          // 60) If the filename contains a user ID prefix, transform it to use the recipient ID
           if (typeof clonedImageObject.filename === 'string' && clonedImageObject.filename.trim()) {
             clonedImageObject.filename = this.changeUserIdPrefixUntilSessionId(clonedImageObject.filename, recipientUserId);
           }
 
+          // 61) Update the cloned image to reflect the new owner (recipient user)
           clonedImageObject.userId = recipientUserId;
+          // 62) Update the cloned image to reference the new session
           clonedImageObject.sessionId = newSessionId;
 
+          // 63) Add the cloned (but not yet S3-fetched) image to the collector
           copiedSessionImageObjects.push(clonedImageObject);
 
+          // 64) Extract the S3 key for the original (unmodified) image, or empty string
           const sourceOriginalS3Key = typeof sourceImageObject?.originalS3Key === 'string'
             ? sourceImageObject.originalS3Key
             : '';
+          // 65) Extract the S3 key for the image with bounding boxes, or empty string
           const sourceWithBoxesS3Key = typeof sourceImageObject?.withBoxesS3Key === 'string'
             ? sourceImageObject.withBoxesS3Key
             : '';
 
+          // 66) Fetch the original image from S3 as a DataURL (base64 or blob URL), or null
           const originalDataUrl = sourceOriginalS3Key
             ? await service.fetchS3ObjectAsDataUrl(sourceOriginalS3Key)
             : null;
+          // 67) Fetch the withBoxes image from S3 as a DataURL, or null
           const withBoxesDataUrl = sourceWithBoxesS3Key
             ? await service.fetchS3ObjectAsDataUrl(sourceWithBoxesS3Key)
             : null;
 
+          // 68) Compose an object that includes the cloned data plus fetched S3 DataURLs
+          //  It builds a normalized storedFetchedImageObject by copying clonedImageObject and attaching the fetched DataURLs (original, withBoxes) and S3 key references (originalS3Key, withBoxesS3Key) with sensible fallbacks so later code has a consistent image record for copying/uploading.
           const storedFetchedImageObject: any = {
             ...clonedImageObject,
+            // 68a) Use fetched DataURL, fallback to cloned value, then empty string
             original: originalDataUrl || clonedImageObject.original || '',
+            // 68b) Use fetched DataURL, fallback to cloned value, then empty string
             withBoxes: withBoxesDataUrl || clonedImageObject.withBoxes || '',
+            // 68c) Keep original S3 key reference or mark as null
             originalS3Key: sourceOriginalS3Key || clonedImageObject.originalS3Key || null,
+            // 68d) Keep withBoxes S3 key reference or mark as null
             withBoxesS3Key: sourceWithBoxesS3Key || clonedImageObject.withBoxesS3Key || null
           };
 
+          // 69) Add the complete fetched image object to the collector
           copiedSessionImageObjectsWithFetchedS3.push(storedFetchedImageObject);
 
+          // 70) Build list of all possible identifier candidates for this image
           const lookupCandidates = [
             sourceImageObject?.filename,
             sourceImageObject?.originalKey,
@@ -1630,6 +1510,7 @@ export class ChatPagePage implements OnInit, OnDestroy {
             sourceImageObject?.withBoxesS3Key
           ];
 
+          // 71) Index the fetched image by all valid lookup candidates for later retrieval
           lookupCandidates.forEach((candidate) => {
             if (typeof candidate === 'string' && candidate.trim().length > 0) {
               sessionImageObjectsWithFetchedS3ByKey.set(candidate, storedFetchedImageObject);
@@ -1637,24 +1518,37 @@ export class ChatPagePage implements OnInit, OnDestroy {
           });
         }
 
-        
 
+        
+        // 72) Console group to log the one-to-one image copy with transformations
         console.group('[ChatPage.confirmAttachmentShareCopy] Session image object one-to-one copy with filename/userId transformation');
+        // 73) Log recipient user ID being used
         console.log('recipientUserId:', recipientUserId);
+        // 74) Log all copied session image objects
         console.log('copiedSessionImageObjects:', copiedSessionImageObjects);
+        // 75) End console group
         console.groupEnd();
         
+        // 76) Store the count of images fetched from S3 for use in the S3 copy loop below
         this.sessionImageObjectCounter = copiedSessionImageObjectsWithFetchedS3.length
+        // 77) Console group for logging S3-fetched images
         console.group('[ChatPage.confirmAttachmentShareCopy] Session image objects fetched from S3 and stored');
+        // 78) Log the count of images fetched
         console.log('storedCount:', copiedSessionImageObjectsWithFetchedS3.length);
+        // 79) Log all the fetched image objects
         console.log('copiedSessionImageObjectsWithFetchedS3:', copiedSessionImageObjectsWithFetchedS3);
         
+        // 80) Initialize the image storage service's session ID generator
         this.imageStorage.setGenerateSessionId();
 
+        // 81) Loop through each fetched image to copy its S3 objects and update metadata
         for (let i = 0; i < this.sessionImageObjectCounter; i++) {
 
+          // 82) Log that the loop iteration is executing
           console.log("the loop triggered")
+          // 83) Get current image object being processed
           const imgObj = copiedSessionImageObjectsWithFetchedS3[i];
+          // 84) Log the "old" (pre-transformation) image object state
           console.log(`[ChatPage.confirmAttachmentShareCopy] Old Image object ${i + 1}/${this.sessionImageObjectCounter}:`, {
             filename: imgObj.filename,
 
@@ -1675,40 +1569,51 @@ export class ChatPagePage implements OnInit, OnDestroy {
             userID: imgObj.userId
           });
           
+          // 85) Verify that the original image exists in S3 before attempting to copy
           console.log("Original image from originalS3Key", imgObj.originalS3Key);
           this.imageStorage.verifyImageExists(imgObj.originalS3Key);
+          // 86) Verify that the withBoxes image exists in S3 before attempting to copy
           console.log("WithBoxes image from withBoxesS3Key", imgObj.withBoxesS3Key);
           this.imageStorage.verifyImageExists(imgObj.withBoxesS3Key);
+          // 87) Ensure the image object now shows the recipient as the owner
           imgObj.userId = recipientUserId;
 
           
           
+          // 88) Log the filename before transformation
           console.log("old filename", imgObj.filename);
+          // 89) Transform the filename to use recipient user ID
           const newFilename = this.changeUserID(imgObj.filename, recipientUserId);
+          // 90) Log the newly-transformed filename
           console.log("new filename", newFilename);
+          // 91) Update the image object's filename to the transformed version
           imgObj.filename = newFilename;
+          // 92) Log confirmation that the new filename was applied
           console.log("new filename applied to object", imgObj.filename);
 
 
         
-        //original 
+        // 93) BEGIN ORIGINAL IMAGE COPY OPERATION
           const sourceKey = imgObj.originalS3Key ;
+          // 94) Transform the destination S3 key to use recipient user ID
           const destinationKey = this.changeUserID(imgObj.originalS3Key, recipientUserId);
           
+          // 95) Log source and destination keys for the original image copy
           console.log("originalS3Key", sourceKey);
         console.log("originaldestinationS3Key", destinationKey);
 
-  // Validation
+  // 96) Guard: source and destination must be different (otherwise copy is a no-op)
   if (sourceKey === destinationKey) {
+    // 97) If they're the same, log error and abort the entire function
     console.error("Source and Destination are the same. Change the ID first!");
     return;
   }
 
-  // this.isCopying = true;
+  // 98) Try to copy the original image S3 object
   try {
-    // 2. Execute the internal S3 Copy command
+    // 99) Call imageStorage service to copy the S3 object from source to destination key
     const result = await this.imageStorage.copyFile(sourceKey, destinationKey);
-    // const result = { success: false }; // Mock result for demonstration
+    // 100) Log the result of the copy operation
     console.log('[ChatPage.confirmAttachmentShareCopy] copyFile result (original):', {
       index: i + 1,
       total: this.sessionImageObjectCounter,
@@ -1717,10 +1622,11 @@ export class ChatPagePage implements OnInit, OnDestroy {
       result
     });
     
-    // 3. Generate and log the metadata if the copy was successful
+    // 101) If the copy succeeded, update image metadata with new S3 location
     if (result.success) {
-      // const bucketBaseUrl = 'https://my-angular-test-bucket-12345.s3.ap-southeast-2.amazonaws.com/';
+      // 102) Define base URL for S3 bucket access (note: may be incomplete URL)
       const bucketBaseUrl = 'my-angular-test-bucket-12345'
+      // 103) Compose new metadata object with transformed S3 location
       const newImageMetadata = {
         originalS3Key: destinationKey,
         originalS3Url: `${bucketBaseUrl}${destinationKey}`,
@@ -1728,11 +1634,13 @@ export class ChatPagePage implements OnInit, OnDestroy {
         storageUrl: `${bucketBaseUrl}${destinationKey}`
       };
 
+       // 104) Update the image object with the new S3 location info
        imgObj.originalS3Key = newImageMetadata.originalS3Key,
        imgObj.originalS3Url = newImageMetadata.originalS3Url,
        imgObj.storagePath = newImageMetadata.storagePath,
        imgObj.storageUrl = newImageMetadata.storageUrl,
 
+      // 105) Log success with the new metadata
       console.group('✅ S3 Copy Operation Complete');
       console.log('New Image Metadata:', newImageMetadata);
       console.log('[ChatPage.confirmAttachmentShareCopy] copyFile SUCCESS (original)', {
@@ -1744,6 +1652,7 @@ export class ChatPagePage implements OnInit, OnDestroy {
       });
       
     } else {
+      // 106) If the copy failed, warn and continue (may retry or skip this image)
       console.warn('[ChatPage.confirmAttachmentShareCopy] copyFile FAILED (original)', {
         index: i + 1,
         total: this.sessionImageObjectCounter,
@@ -1753,6 +1662,7 @@ export class ChatPagePage implements OnInit, OnDestroy {
       });
     }
   } catch (error) {
+    // 107) Catch and log any errors thrown during the S3 copy
     console.error('[ChatPage.confirmAttachmentShareCopy] copyFile ERROR (original)', {
       index: i + 1,
       total: this.sessionImageObjectCounter,
@@ -1761,27 +1671,30 @@ export class ChatPagePage implements OnInit, OnDestroy {
       error
     });
   } finally {
-    // this.isCopying = false;
+    // 108) Cleanup (currently no-op but placeholder for future logic)
   }
 
-  //withBoxes
+  // 109) BEGIN WITHBOXES IMAGE COPY OPERATION (same logic as original, but for withBoxes variant)
           const sourceKey2 = imgObj.withBoxesS3Key;
+          // 110) Transform the destination S3 key for withBoxes image
           const destinationKey2 = this.changeUserID(imgObj.withBoxesS3Key, recipientUserId);
           
+          // 111) Log source and destination keys for the withBoxes image copy
           console.log("withBoxesS3Key", sourceKey2);
         console.log("withBoxesdestinationS3Key", destinationKey2);
 
-  // Validation
+  // 112) Guard: source and destination must be different
   if (sourceKey2 === destinationKey2) {
+    // 113) If same, abort entire function
     console.error("Source and Destination are the same. Change the ID first!");
     return;
   }
 
-  // this.isCopying = true;
+  // 114) Try to copy the withBoxes image S3 object
   try {
-    // 2. Execute the internal S3 Copy command
+    // 115) Call imageStorage service to copy the S3 object
     const result = await this.imageStorage.copyFile(sourceKey2, destinationKey2);
-    // const result = { success: false }; // Mock result for demonstration
+    // 116) Log the result
     console.log('[ChatPage.confirmAttachmentShareCopy] copyFile result (withBoxes):', {
       index: i + 1,
       total: this.sessionImageObjectCounter,
@@ -1790,10 +1703,12 @@ export class ChatPagePage implements OnInit, OnDestroy {
       result
     });
     
-    // 3. Generate and log the metadata if the copy was successful
+    // 117) If copy succeeded, update withBoxes metadata
     if (result.success) {
+      // 118) Define bucket base URL
       const bucketBaseUrl = 'https://my-angular-test-bucket-12345.s3.ap-southeast-2.amazonaws.com/';
       
+      // 119) Compose new metadata for withBoxes S3 location
       const newImageMetadata = {
         withBoxesS3Key: destinationKey,
         withBoxesS3Url: `${bucketBaseUrl}${destinationKey}`,
@@ -1801,15 +1716,16 @@ export class ChatPagePage implements OnInit, OnDestroy {
         withBoxesStorageUrl: `${bucketBaseUrl}${destinationKey}`
       };
 
+       // 120) Update image object with new withBoxes S3 location info
        imgObj.withBoxesS3Key = newImageMetadata.withBoxesS3Key,
        imgObj.withBoxesS3Url = newImageMetadata.withBoxesS3Url,
        imgObj.withBoxesStoragePath = newImageMetadata.withBoxesStoragePath,
        imgObj.withBoxesStorageUrl = newImageMetadata.withBoxesStorageUrl,
 
+       // 121) Log updated metadata
        console.log("newImageMetadata", newImageMetadata, "imgObj", imgObj);
 
-       //  imgObj.withBoxes = newImageMetadata.originalS3Url,
-
+       // 122) Log success
       console.group('✅ S3 Copy Operation Complete');
       console.log('New Image Metadata:', newImageMetadata);
       console.log('[ChatPage.confirmAttachmentShareCopy] copyFile SUCCESS (withBoxes)', {
@@ -1821,6 +1737,7 @@ export class ChatPagePage implements OnInit, OnDestroy {
       });
       
     } else {
+      // 123) If copy failed, warn and continue
       console.warn('[ChatPage.confirmAttachmentShareCopy] copyFile FAILED (withBoxes)', {
         index: i + 1,
         total: this.sessionImageObjectCounter,
@@ -1830,6 +1747,7 @@ export class ChatPagePage implements OnInit, OnDestroy {
       });
     }
   } catch (error) {
+    // 124) Catch and log errors
     console.error('[ChatPage.confirmAttachmentShareCopy] copyFile ERROR (withBoxes)', {
       index: i + 1,
       total: this.sessionImageObjectCounter,
@@ -1838,11 +1756,12 @@ export class ChatPagePage implements OnInit, OnDestroy {
       error
     });
   } finally {
-    // this.isCopying = false;
+    // 125) Cleanup placeholder
   }
 
 
 
+          // 126) Log the updated (post-transformation) image object state
           console.log(`[ChatPage.confirmAttachmentShareCopy] new Image object ${i + 1}/${this.sessionImageObjectCounter}:`, {
             filename: imgObj.filename,
             
@@ -1863,10 +1782,13 @@ export class ChatPagePage implements OnInit, OnDestroy {
 
           });
 
+          // 127) Log the complete image object for detailed inspection
           console.log("Full imgObj object:", imgObj)
           
 
+          // 128) Try to save the transformed image metadata to Firestore
           try {
+            // 129) Log the Firestore save attempt with image details
             console.log('[ChatPage.confirmAttachmentShareCopy] Posting imgObj to Firestore via ImageStorageService helper', {
               imageIndex: i + 1,
               totalImages: this.sessionImageObjectCounter,
@@ -1874,21 +1796,26 @@ export class ChatPagePage implements OnInit, OnDestroy {
               imgObj
             });
 
+            // 130) Call service method to post image object to Firestore for the recipient
             const imageDocId = await (this.imageStorage as any).postSampleImageToFirestoreVersion2(imgObj, recipientUserId);
 
+            // 131) If Firestore save returned a document ID, the save succeeded
             if (imageDocId) {
+              // 132) Log successful Firestore save with the returned doc ID
               console.log(`[ChatPage.confirmAttachmentShareCopy] Firestore store SUCCESS for imgObj ${i + 1}/${this.sessionImageObjectCounter}`, {
                 imageDocId,
                 saved: true,
                 imgObj
               });
             } else {
+              // 133) If no doc ID was returned, warn that Firestore save may have failed
               console.warn(`[ChatPage.confirmAttachmentShareCopy] Firestore verify returned no doc ID for imgObj ${i + 1}/${this.sessionImageObjectCounter}`, {
                 saved: false,
                 imgObj
               });
             }
           } catch (storeError) {
+            // 134) Catch and log Firestore save errors
             console.error(`[ChatPage.confirmAttachmentShareCopy] Firestore store FAILED for imgObj ${i + 1}/${this.sessionImageObjectCounter}`, {
               error: storeError,
               imgObj
@@ -1901,38 +1828,55 @@ export class ChatPagePage implements OnInit, OnDestroy {
 
         console.groupEnd();
       } catch (firestoreError) {
+        // Catch Firestore load errors but continue with fallback (step 134)
         console.warn('[ChatPage.confirmAttachmentShareCopy] Unable to load session images from Firestore, falling back to local cache only:', firestoreError);
       }
 
-       
+      // ===== FALLBACK IMAGE COPY (STEPS 135-151) =====
+      // Iterate through source image keys and attempt copy using available sources (Firestore, S3, or local cache)
 
       for (let i = 0; i < sourceImageKeys.length; i++) {
+        // 135) Get the current source image key from the session
         const imageKey = sourceImageKeys[i];
+        
+        // 136) Try to retrieve image from S3-fetched map (primary source for already-fetched data)
         const fetchedImageFromSessionObjects = sessionImageObjectsWithFetchedS3ByKey.get(imageKey) || null;
+        
+        // 137) Try to retrieve image from local storage cache service
         const cachedImage = this.getStoredImageForAttachment(imageKey);
+        
+        // 138) Resolve image priority: fetched > cached > Firestore by key > Firestore by filename > null
         const originalImage = fetchedImageFromSessionObjects
           || cachedImage
           || firestoreImageObjects.get(imageKey)
           || firestoreImageObjects.get(cachedImage?.filename || '')
           || null;
 
+        // 139) Guard: skip this image if no usable source was found
         if (!originalImage) {
           console.warn('[ChatPage.confirmAttachmentShareCopy] Image not found for key:', imageKey);
           continue;
         }
 
+        // 140) Update progress bar: interpolate between 15% and 60% (45% range) based on image index
         this.updateCopyProgress(
           15 + ((i / Math.max(sourceImageKeys.length, 1)) * 45),
           `Copying image ${i + 1}/${sourceImageKeys.length}...`
         );
 
+        // 141) Call helper to copy image for recipient (transforms filenames, handles S3/Firestore upload)
         const copiedImage = await this.copySessionImageForRecipient(originalImage, imageKey, recipientUserId, newSessionId);
+        
+        // 142) Guard: skip if copy failed (no usable data or upload error)
         if (!copiedImage) {
           console.warn('[ChatPage.confirmAttachmentShareCopy] Skipping image because no usable image data was found:', imageKey);
           continue;
         }
 
+        // 143) Add successfully copied image to collector array
         copiedImages.push(copiedImage);
+        
+        // 144) Record upload status (attempted/succeeded flags for original and withBoxes variants)
         uploadStatusByImage.push({
           sourceImageKey: imageKey,
           copiedFilename: copiedImage.filename,
@@ -1942,34 +1886,48 @@ export class ChatPagePage implements OnInit, OnDestroy {
           withBoxesUploadSucceeded: !!copiedImage.withBoxesUploadSucceeded
         });
 
+        // 145) Transform the source key to use recipient user ID
         const transformedOriginalKey = this.transformKeyForAttachmentShare(imageKey, recipientUserId);
+        
+        // 146) Check if this transformed key already exists in the copied session's imageKeys array
         const existingKeyIndex = copiedSession.imageKeys.findIndex((key: string) => key === transformedOriginalKey);
+        
+        // 147) Update existing entry or add new one to the imageKeys array
         if (existingKeyIndex >= 0) {
           copiedSession.imageKeys[existingKeyIndex] = copiedImage.filename;
         } else {
           copiedSession.imageKeys.push(copiedImage.filename);
         }
 
+        // 148) If service has addImage helper, call it to register image locally
         if (typeof service.addImage === 'function') {
           await service.addImage(copiedImage);
         }
       }
 
+      // ===== SESSION REGISTRATION & UPLOAD (STEPS 152-174) =====
+      // Register the copied session locally and upload to Firestore
+
+      // 152) Set totalBoundingBoxes: use copied value > fallback to original > default to 0
       copiedSession.totalBoundingBoxes = copiedSession.totalBoundingBoxes ?? selectedSession.totalBoundingBoxes ?? 0;
 
+      // 153) Call service to register session locally (prefer registerSession, fallback to addSessionIfNotExists)
       if (typeof service.registerSession === 'function') {
         service.registerSession(copiedSession);
       } else if (typeof service.addSessionIfNotExists === 'function') {
         service.addSessionIfNotExists(copiedSession);
       }
 
+      // 154) Update progress to 70% and set status message
       this.updateCopyProgress(70, 'Uploading copied session to Firestore...');
 
+      // 155) Log copied session with engineer-checked flag for debugging
       console.log("Copied Session", copiedSession, "Copied Session EngineerChecked", copiedSession.engineerCheckedSession);
     
+      // 156) Log original session with engineer-checked flag for comparison
       console.log("Selected Session", selectedSession, "Selected Session EngineerChecked", selectedSession.engineerCheckedSession);
 
-      // Verify notes field before saving to Firestore
+      // 157) Verify notes field is present and properly typed before Firestore save
       console.log('[ChatPage.confirmAttachmentShareCopy] Verifying notes field before Firestore save', {
         sourceSessionNotes: selectedSession.notes || '',
         copiedSessionNotes: copiedSession.notes || '',
@@ -1980,6 +1938,7 @@ export class ChatPagePage implements OnInit, OnDestroy {
         }
       });
 
+      // 158) Log final state of sanitized IDs before Firestore save
       console.log('[ChatPage.confirmAttachmentShareCopy] Preparing Firestore session save with sanitized IDs', {
         copiedSessionId: copiedSession.id,
         copiedSessionUserId: copiedSession.userId,
@@ -1989,11 +1948,13 @@ export class ChatPagePage implements OnInit, OnDestroy {
         newRecepientUserIdState: this.newRecepientUserId
       });
 
+      // 159) Call service method to save copied session and images to Firestore under recipient's user ID
       await service.saveSessionWithImagesToFirestore(copiedSession.id, receiverId);
 
+      // 160) Update progress to 100% and set completion message
       this.updateCopyProgress(100, 'Session copy completed');
 
-      // Final verification of notes field after save
+      // 161) Verify notes field persisted correctly after Firestore save
       console.log('[ChatPage.confirmAttachmentShareCopy] Post-save notes verification', {
         originalSessionNotes: selectedSession.notes || '(empty)',
         copiedSessionNotes: copiedSession.notes || '(empty)',
@@ -2001,9 +1962,11 @@ export class ChatPagePage implements OnInit, OnDestroy {
         copiedNotesLength: typeof copiedSession.notes === 'string' ? copiedSession.notes.length : 0
       });
 
+      // 162) Final debug output of notes comparison
       console.log("Original Session Notes", selectedSession.notes);
       console.log("Copied Session Notes", copiedSession.notes);
 
+      // 163) Log workflow completion and full session summary
       console.log('[ChatPage.confirmAttachmentShareCopy] ===== SESSION COPY WORKFLOW COMPLETE =====');
       console.log('[ChatPage.confirmAttachmentShareCopy] Original session:', selectedSession);
       console.log('[ChatPage.confirmAttachmentShareCopy] Copied session:', copiedSession);
@@ -2011,28 +1974,45 @@ export class ChatPagePage implements OnInit, OnDestroy {
       console.log('[ChatPage.confirmAttachmentShareCopy] Firestore image objects used for copy:', Array.from(firestoreImageObjects.values()));
       console.log('[ChatPage.confirmAttachmentShareCopy] Per-image upload status (original/withBoxes):', uploadStatusByImage);
 
+      // 164) Log user IDs for audit trail
       console.log('Receiver user ID:', receiverId);
       console.log('Current user ID:', currentUserId);
 
+      // 165) Filter to find any images where upload was attempted but failed
       const failedUploads = uploadStatusByImage.filter((item) => {
         const originalFailed = item.originalUploadAttempted && !item.originalUploadSucceeded;
         const withBoxesFailed = item.withBoxesUploadAttempted && !item.withBoxesUploadSucceeded;
         return originalFailed || withBoxesFailed;
       });
 
+      // 166) Log warning if any uploads failed (soft warning, workflow still completes)
       if (failedUploads.length > 0) {
         console.warn('[ChatPage.confirmAttachmentShareCopy] Some image uploads did not complete successfully:', failedUploads);
       }
 
+      // ===== CONFIRMATION & CLEANUP (STEPS 175-189) =====
+      // Mark operation complete, close dialogs, send confirmation message, and handle errors
+
+      // 175) Mark the copy operation as complete (no longer in progress)
       this.isAttachmentCopyInProgress = false;
+      
+      // 176) Set debug state to 'completed' for UI to show completion status
       this.attachmentDebugState = 'completed';
+      
+      // 177) Store the copied session as the debug attachment for inspection
       this.selectedAttachmentForDebug = copiedSession;
 
-      // Send a confirmation message in the current chat with the new session id attached
+      // 178) Try to send a confirmation message in the current chat with the shared session ID attached
       try {
+        // 179) Verify a chat is currently open
         if (this.currentChatId) {
+          // 180) Resolve sender ID from current user
           const senderId = this.auth3.getCurrentUser()?.uid || this.userID || '';
+          
+          // 181) Extract the new session ID for attachment to message
           const sharedSessionId = copiedSession?.id || null;
+          
+          // 182) Send confirmation message with shared session metadata
           await this.chatService.sendMessage(this.currentChatId, {
             senderId,
             receiverId,
@@ -2042,20 +2022,31 @@ export class ChatPagePage implements OnInit, OnDestroy {
               sharedSessionId
             }
           });
+          
+          // 183) Log successful message send
           console.log('[ChatPage.confirmAttachmentShareCopy] Sent confirmation message with sharedSessionId', sharedSessionId);
         } else {
+          // 184) Warn if no active chat to send message to
           console.warn('[ChatPage.confirmAttachmentShareCopy] No current chat to send confirmation message to.');
         }
       } catch (sendErr) {
+        // 185) Catch and log message send failures (non-fatal)
         console.warn('[ChatPage.confirmAttachmentShareCopy] Failed to send confirmation message', sendErr);
       }
     } catch (error) {
+      // 186) Catch any unhandled errors from the entire copy workflow
       console.error('[ChatPage.confirmAttachmentShareCopy] Failed to copy session:', error);
+      
+      // 187) Reset all copy operation flags to indicate failure
       this.isAttachmentCopyInProgress = false;
       this.attachmentCopyProgress = 0;
       this.attachmentCopyStatusText = '';
       this.attachmentDebugState = 'inactive';
+      
+      // 188) Show alert to user indicating operation failed
       alert('Error sharing session. Check console for details.');
+      
+      // 189) Exit the function early to prevent further operations
       return;
     }
   }
@@ -2084,313 +2075,39 @@ export class ChatPagePage implements OnInit, OnDestroy {
   }
 }
 
-  //  async confirmAttachmentShareCopy(attachment: any): Promise<void> {
-  //   console.log('[ChatPage.confirmAttachmentShareCopy] ===== SESSION COPY WORKFLOW START =====');
 
-  //   const selectedSession = attachment || this.selectedAttachmentForDebug || this.selectedAttachment;
-  //   if (!selectedSession) {
-  //     console.error('[ChatPage.confirmAttachmentShareCopy] No session selected');
-  //     alert('No session selected');
-  //     return;
-  //   }
-
-  //   if (selectedSession.type !== 'session' || !selectedSession.id) {
-  //     console.error('[ChatPage.confirmAttachmentShareCopy] Invalid session attachment:', selectedSession);
-  //     alert('Invalid session attachment');
-  //     return;
-  //   }
-
-  //   if (!this.validateSessionBelongsToCurrentUser(selectedSession)) {
-  //     console.error('[ChatPage.confirmAttachmentShareCopy] SECURITY: session does not belong to the current user');
-  //     alert('Security error: Cannot share session from another user');
-  //     return;
-  //   }
-
-  //   const currentUserId = this.auth3.getCurrentUser()?.uid || this.userID;
-  //   if (!currentUserId) {
-  //     console.error('[ChatPage.confirmAttachmentShareCopy] Cannot determine current user ID');
-  //     alert('Error: Cannot determine current user');
-  //     return;
-  //   }
-
-  //   const recipientUserId = this.resolveAttachmentShareRecipient();
-  //   if (!recipientUserId) {
-  //     console.error('[ChatPage.confirmAttachmentShareCopy] Cannot determine recipient user ID', {
-  //       activeChat: this.activeChat,
-  //       currentChatId: this.currentChatId,
-  //       receiverUserId: this.receiverUserId,
-  //       newRecepientUserId: this.newRecepientUserId
-  //     });
-  //     alert('Error: Cannot determine recipient. Please open a chat with a valid user first.');
-  //     return;
-  //   }
-
-  //   this.receiverUserId = recipientUserId;
-  //   this.newRecepientUserId = recipientUserId;
-
-  //   const service: any = this.imageStorage;
-  //   const newSessionId = `s-${Date.now()}`;
-  //   const copiedSession: any = JSON.parse(JSON.stringify(selectedSession));
-  //   copiedSession.id = newSessionId;
-  //   copiedSession.sessionId = newSessionId;
-  //   copiedSession.userId = recipientUserId;
-  //   copiedSession.created = new Date().toISOString();
-  //   copiedSession.imageKeys = [];
-
-  //   try {
-  //     this.isAttachmentCopyInProgress = true;
-  //     this.attachmentDebugState = 'active';
-  //     this.attachmentCopyProgress = 0;
-  //     this.attachmentCopyStatusText = 'Initializing session copy...';
-
-  //     this.updateCopyProgress(5, 'Loading session data...');
-
-  //     const sourceImageKeys = Array.isArray(selectedSession.imageKeys) ? selectedSession.imageKeys : [];
-  //     copiedSession.imageKeys = sourceImageKeys.map((key: string) => this.transformKeyForAttachmentShare(key, recipientUserId));
-  //     const copiedImages: any[] = [];
-  //     const uploadStatusByImage: Array<{
-  //       sourceImageKey: string;
-  //       copiedFilename: string;
-  //       originalUploadAttempted: boolean;
-  //       originalUploadSucceeded: boolean;
-  //       withBoxesUploadAttempted: boolean;
-  //       withBoxesUploadSucceeded: boolean;
-  //     }> = [];
-
-  //     this.updateCopyProgress(15, 'Copying session images...');
-
-  //     const firestoreImageObjects = new Map<string, any>();
-  //     const sessionImageObjectsWithFetchedS3ByKey = new Map<string, any>();
-  //     const sourceSessionImageObjectsFromFirestore: any[] = [];
-  //     try {
-  //       const fetchedImageObjects = await this.fetchSessionImageObjectsFromFirestoreByImageKeys(
-  //         selectedSession.id,
-  //         sourceImageKeys
-  //       );
-  //       sourceSessionImageObjectsFromFirestore.push(...fetchedImageObjects);
-
-  //       sourceSessionImageObjectsFromFirestore.forEach((imageDoc: any) => {
-  //         const docId = (imageDoc?.firestoreDocId || '').toString();
-  //         if (docId) {
-  //           firestoreImageObjects.set(docId, imageDoc);
-  //         }
-  //         if (imageDoc?.filename) {
-  //           firestoreImageObjects.set(imageDoc.filename, imageDoc);
-  //         }
-  //         if (imageDoc?.originalKey) {
-  //           firestoreImageObjects.set(imageDoc.originalKey, imageDoc);
-  //         }
-  //         if (imageDoc?.originalS3Key) {
-  //           firestoreImageObjects.set(imageDoc.originalS3Key, imageDoc);
-  //         }
-  //         if (imageDoc?.withBoxesS3Key) {
-  //           firestoreImageObjects.set(imageDoc.withBoxesS3Key, imageDoc);
-  //         }
-  //       });
-
-  //       this.printSelectedSessionImageObjectsFromFirestore(
-  //         selectedSession,
-  //         sourceImageKeys,
-  //         sourceSessionImageObjectsFromFirestore
-  //       );
-
-        
-
-  //       console.log('[ChatPage.confirmAttachmentShareCopy] Stored source session image objects from Firestore images collection:', sourceSessionImageObjectsFromFirestore);
-
-  //       const copiedSessionImageObjects: any[] = [];
-  //       const copiedSessionImageObjectsWithFetchedS3: any[] = [];
-
-  //       for (let i = 0; i < sourceSessionImageObjectsFromFirestore.length; i++) {
-  //         const sourceImageObject = sourceSessionImageObjectsFromFirestore[i];
-  //         const clonedImageObject: any = JSON.parse(JSON.stringify(sourceImageObject || {}));
-
-  //         if (typeof clonedImageObject.filename === 'string' && clonedImageObject.filename.trim()) {
-  //           clonedImageObject.filename = this.changeUserIdPrefixUntilSessionId(clonedImageObject.filename, recipientUserId);
-  //         }
-
-  //         clonedImageObject.userId = recipientUserId;
-  //         clonedImageObject.sessionId = newSessionId;
-
-  //         copiedSessionImageObjects.push(clonedImageObject);
-
-  //         const sourceOriginalS3Key = typeof sourceImageObject?.originalS3Key === 'string'
-  //           ? sourceImageObject.originalS3Key
-  //           : '';
-  //         const sourceWithBoxesS3Key = typeof sourceImageObject?.withBoxesS3Key === 'string'
-  //           ? sourceImageObject.withBoxesS3Key
-  //           : '';
-
-  //         const originalDataUrl = sourceOriginalS3Key
-  //           ? await service.fetchS3ObjectAsDataUrl(sourceOriginalS3Key)
-  //           : null;
-  //         const withBoxesDataUrl = sourceWithBoxesS3Key
-  //           ? await service.fetchS3ObjectAsDataUrl(sourceWithBoxesS3Key)
-  //           : null;
-
-  //         const storedFetchedImageObject: any = {
-  //           ...clonedImageObject,
-  //           original: originalDataUrl || clonedImageObject.original || '',
-  //           withBoxes: withBoxesDataUrl || clonedImageObject.withBoxes || '',
-  //           originalS3Key: sourceOriginalS3Key || clonedImageObject.originalS3Key || null,
-  //           withBoxesS3Key: sourceWithBoxesS3Key || clonedImageObject.withBoxesS3Key || null
-  //         };
-
-  //         copiedSessionImageObjectsWithFetchedS3.push(storedFetchedImageObject);
-
-  //         const lookupCandidates = [
-  //           sourceImageObject?.filename,
-  //           sourceImageObject?.originalKey,
-  //           sourceImageObject?.firestoreDocId,
-  //           sourceImageObject?.originalS3Key,
-  //           sourceImageObject?.withBoxesS3Key
-  //         ];
-
-  //         lookupCandidates.forEach((candidate) => {
-  //           if (typeof candidate === 'string' && candidate.trim().length > 0) {
-  //             sessionImageObjectsWithFetchedS3ByKey.set(candidate, storedFetchedImageObject);
-  //           }
-  //         });
-  //       }
-
-  //       console.group('[ChatPage.confirmAttachmentShareCopy] Session image object one-to-one copy with filename/userId transformation');
-  //       console.log('recipientUserId:', recipientUserId);
-  //       console.log('copiedSessionImageObjects:', copiedSessionImageObjects);
-  //       console.groupEnd();
-
-  //       console.group('[ChatPage.confirmAttachmentShareCopy] Session image objects fetched from S3 and stored');
-  //       console.log('storedCount:', copiedSessionImageObjectsWithFetchedS3.length);
-  //       console.log('copiedSessionImageObjectsWithFetchedS3:', copiedSessionImageObjectsWithFetchedS3);
-  //       console.groupEnd();
-  //     } catch (firestoreError) {
-  //       console.warn('[ChatPage.confirmAttachmentShareCopy] Unable to load session images from Firestore, falling back to local cache only:', firestoreError);
-  //     }
-
-  //     for (let i = 0; i < sourceImageKeys.length; i++) {
-  //       const imageKey = sourceImageKeys[i];
-  //       const fetchedImageFromSessionObjects = sessionImageObjectsWithFetchedS3ByKey.get(imageKey) || null;
-  //       const cachedImage = this.getStoredImageForAttachment(imageKey);
-  //       const originalImage = fetchedImageFromSessionObjects
-  //         || cachedImage
-  //         || firestoreImageObjects.get(imageKey)
-  //         || firestoreImageObjects.get(cachedImage?.filename || '')
-  //         || null;
-
-  //       if (!originalImage) {
-  //         console.warn('[ChatPage.confirmAttachmentShareCopy] Image not found for key:', imageKey);
-  //         continue;
-  //       }
-
-  //       this.updateCopyProgress(
-  //         15 + ((i / Math.max(sourceImageKeys.length, 1)) * 45),
-  //         `Copying image ${i + 1}/${sourceImageKeys.length}...`
-  //       );
-
-  //       const copiedImage = await this.copySessionImageForRecipient(originalImage, imageKey, recipientUserId, newSessionId);
-  //       if (!copiedImage) {
-  //         console.warn('[ChatPage.confirmAttachmentShareCopy] Skipping image because no usable image data was found:', imageKey);
-  //         continue;
-  //       }
-
-  //       copiedImages.push(copiedImage);
-  //       uploadStatusByImage.push({
-  //         sourceImageKey: imageKey,
-  //         copiedFilename: copiedImage.filename,
-  //         originalUploadAttempted: !!copiedImage.originalUploadAttempted,
-  //         originalUploadSucceeded: !!copiedImage.originalUploadSucceeded,
-  //         withBoxesUploadAttempted: !!copiedImage.withBoxesUploadAttempted,
-  //         withBoxesUploadSucceeded: !!copiedImage.withBoxesUploadSucceeded
-  //       });
-
-  //       const transformedOriginalKey = this.transformKeyForAttachmentShare(imageKey, recipientUserId);
-  //       const existingKeyIndex = copiedSession.imageKeys.findIndex((key: string) => key === transformedOriginalKey);
-  //       if (existingKeyIndex >= 0) {
-  //         copiedSession.imageKeys[existingKeyIndex] = copiedImage.filename;
-  //       } else {
-  //         copiedSession.imageKeys.push(copiedImage.filename);
-  //       }
-
-  //       if (typeof service.addImage === 'function') {
-  //         await service.addImage(copiedImage);
-  //       }
-  //     }
-
-  //     copiedSession.totalBoundingBoxes = copiedSession.totalBoundingBoxes ?? selectedSession.totalBoundingBoxes ?? 0;
-
-  //     if (typeof service.registerSession === 'function') {
-  //       service.registerSession(copiedSession);
-  //     } else if (typeof service.addSessionIfNotExists === 'function') {
-  //       service.addSessionIfNotExists(copiedSession);
-  //     }
-
-  //     this.updateCopyProgress(70, 'Uploading copied session to Firestore...');
-
-  //     await service.saveSessionWithImagesToFirestore(copiedSession.id, recipientUserId);
-
-  //     this.updateCopyProgress(100, 'Session copy completed');
-
-  //     console.log('[ChatPage.confirmAttachmentShareCopy] ===== SESSION COPY WORKFLOW COMPLETE =====');
-  //     console.log('[ChatPage.confirmAttachmentShareCopy] Original session:', selectedSession);
-  //     console.log('[ChatPage.confirmAttachmentShareCopy] Copied session:', copiedSession);
-  //     console.log('[ChatPage.confirmAttachmentShareCopy] Copied images:', copiedImages);
-  //     console.log('[ChatPage.confirmAttachmentShareCopy] Firestore image objects used for copy:', Array.from(firestoreImageObjects.values()));
-  //     console.log('[ChatPage.confirmAttachmentShareCopy] Per-image upload status (original/withBoxes):', uploadStatusByImage);
-
-  //     console.log('Receiver user ID:', recipientUserId);
-  //     console.log('Current user ID:', currentUserId);
-
-  //     const failedUploads = uploadStatusByImage.filter((item) => {
-  //       const originalFailed = item.originalUploadAttempted && !item.originalUploadSucceeded;
-  //       const withBoxesFailed = item.withBoxesUploadAttempted && !item.withBoxesUploadSucceeded;
-  //       return originalFailed || withBoxesFailed;
-  //     });
-
-  //     if (failedUploads.length > 0) {
-  //       console.warn('[ChatPage.confirmAttachmentShareCopy] Some image uploads did not complete successfully:', failedUploads);
-  //     }
-
-  //     this.isAttachmentCopyInProgress = false;
-  //     this.attachmentDebugState = 'completed';
-  //     this.selectedAttachmentForDebug = copiedSession;
-  //   } catch (error) {
-  //     console.error('[ChatPage.confirmAttachmentShareCopy] Failed to copy session:', error);
-  //     this.isAttachmentCopyInProgress = false;
-  //     this.attachmentCopyProgress = 0;
-  //     this.attachmentCopyStatusText = '';
-  //     this.attachmentDebugState = 'inactive';
-  //     alert('Error sharing session. Check console for details.');
-  //     return;
-  //   }
-  // }
-
-  
-
-  async confirmAttachmentDebugActionVersion2(attachment: any): Promise<void> {
-    return this.confirmAttachmentShareCopy(attachment);
-  }
 
   // Confirm sharing completion: close dialogs and request location permission
-  async confirmSharingComplete(): Promise<void> {
-    try {
-      // Close the debug dialog and attachment sheet
-      this.isAttachmentDebugDialogOpen = false;
-      this.selectedAttachmentForDebug = null;
-      this.attachmentDebugState = 'inactive';
-      this.closeAttachmentSheet();
+    async confirmSharingComplete(): Promise<void> {
+      try {
+        // 1) Close the attachment debug dialog so the UI hides the debug overlay
+        this.isAttachmentDebugDialogOpen = false;
+        // 2) Clear the stored debug attachment reference used for inspection
+        this.selectedAttachmentForDebug = null;
+        // 3) Mark the debug state as inactive to update any debug UI indicators
+        this.attachmentDebugState = 'inactive';
+        // 4) Close the attachment sheet (hides the session/attachment UI panel)
+        this.closeAttachmentSheet();
 
-      // Auto-send success message
-      // this.messageText = 'File shared successfully';
-      // setTimeout(() => {
-      //   this.sendMessage();
-      // }, 500);
+        // 5) (optional) Auto-send a brief success message into the chat.
+        //    This block is commented out to avoid unexpected messages; uncomment
+        //    if you want the app to send the string automatically after sharing.
+        // this.messageText = 'File shared successfully';
+        // setTimeout(() => {
+        //   this.sendMessage();
+        // }, 500);
 
-      // Request location permission for location-based features
-      console.log('[ChatPage] Requesting location permission for enhanced features...');
-      // await this.requestLocationPermissionForFeatures();
-    } catch (e) {
-      console.error('[ChatPage] Error during sharing completion:', e);
+        // 6) Log intent to request location permission for optional features
+        console.log('[ChatPage] Requesting location permission for enhanced features...');
+        // 7) (optional) Call the interactive permission helper. Left commented
+        //    to avoid prompting the user unexpectedly during automated flows.
+        // await this.requestLocationPermissionForFeatures();
+      } catch (e) {
+        // 8) Catch and log any error that occurred during cleanup so the app
+        //    can continue running and the developer sees the failure cause.
+        console.error('[ChatPage] Error during sharing completion:', e);
+      }
     }
-  }
 
   // Request location permission and explain why it's needed
   private async requestLocationPermissionForFeatures(): Promise<void> {
@@ -2480,33 +2197,41 @@ export class ChatPagePage implements OnInit, OnDestroy {
    */
   private transformImageFilenameUserId(filename: string, newUserId: string): string {
     try {
-      // Use non-greedy match to capture the FIRST userID up to the FIRST 'sessionId:'
-      // Pattern: ^userID:(.+?)sessionId:
-      // The .+? matches minimum characters (non-greedy) until the literal 'sessionId:'
+      // 1) Build a non-greedy regex to match the FIRST 'userID:...sessionId:' chunk
+      //    It captures the user id portion between 'userID:' and the following 'sessionId:'
+      //    Pattern: ^userID:(.+?)sessionId:
       const match = filename.match(/^userID:(.+?)sessionId:/);
-      
+
+      // 2) If the pattern matches, we will stitch a new filename that keeps the
+      //    sessionId and any trailing data but replaces the captured user id.
       if (match) {
+        // 3) `match[1]` is the old user id that was captured by the regex
         const oldUserId = match[1];
-        // Extract everything AFTER the first 'sessionId:' to preserve the rest of the filename
+        // 4) Find the index where 'sessionId:' begins so we can preserve the rest
         const restIndex = filename.indexOf('sessionId:');
+        // 5) Slice the string from 'sessionId:' to the end (keeps suffix intact)
         const rest = filename.substring(restIndex); // includes 'sessionId:' and everything after
+        // 6) Compose the new filename by inserting the new user id and keeping the suffix
         const newFilename = `userID:${newUserId}${rest}`;
-        
+
+        // 7) Log the original and transformed values for debugging/audit
         console.log(`[ChatPage] Filename transform successful:`);
         console.log(`  Original:    ${filename}`);
         console.log(`  Transformed: ${newFilename}`);
         console.log(`  Old UserID:  ${oldUserId}`);
         console.log(`  New UserID:  ${newUserId}`);
-        
+
+        // 8) Return the safely transformed filename
         return newFilename;
       } else {
-        // Pattern doesn't match - return original and log for debugging
+        // 9) If the expected pattern is not present, warn and return input unchanged
         console.warn('[ChatPage] Filename pattern not recognized for transformation');
         console.warn(`  Pattern expected: userID:<userId>sessionId:...`);
         console.warn(`  Actual filename:  ${filename}`);
         return filename;
       }
     } catch (e) {
+      // 10) On any unexpected error, log details and return the original filename
       console.error('[ChatPage] Error transforming filename:', e);
       console.error(`  Filename: ${filename}`);
       console.error(`  New UserID: ${newUserId}`);
@@ -2515,19 +2240,31 @@ export class ChatPagePage implements OnInit, OnDestroy {
   }
 
   private updateCopyProgress(percent: number, status: string): void {
+    // 1) Ensure the progress percentage never exceeds 100 and store it
     this.attachmentCopyProgress = Math.min(percent, 100);
+    // 2) Update the human-readable status text shown in the UI
     this.attachmentCopyStatusText = status;
+    // 3) Emit a concise console log for developer debugging/tracing
     console.log(`[ChatPage.copyProgress] ${percent}% - ${status}`);
   }
 
   // Debug method: print attachment object and related images from Firestore/S3
   private async debugPrintAttachmentData(attachment: any): Promise<void> {
     try {
+      // 1) Print a clear header so the debug output is easy to find in the console
       console.log('========== ATTACHMENT DEBUG INFO ==========');
+
+      // 2) Deep-clone and log the attachment object to avoid accidental mutations
+      //    during inspection (JSON stringify removes circular refs for readability)
       console.log('Attachment Object:', JSON.parse(JSON.stringify(attachment)));
-      
+
+      // 3) If this attachment represents a saved session (has type 'session' and an id)
+      //    we print richer session metadata below; otherwise we skip to the end.
       if (attachment?.type === 'session' && attachment?.id) {
+        // 4) Section header for session-specific details
         console.log('\n--- Session Details ---');
+
+        // 5) Log the canonical session properties that help identify the session
         console.log('Session ID:', attachment.id);
         console.log('Session Name:', attachment.name);
         console.log('Image Count:', attachment.imageCount || 0);
@@ -2536,33 +2273,47 @@ export class ChatPagePage implements OnInit, OnDestroy {
         console.log('Total Bounding Boxes:', attachment.totalBoundingBoxes || 0);
         console.log('Created:', attachment.created);
 
-        // Get all stored images
+        // 6) Attempt to retrieve all locally stored image objects from the
+        //    injected imageStorage abstraction. Different versions expose
+        //    different helpers so we defensively check both APIs.
         let allImages: any[] = [];
         try {
+          // 7) Prefer the `getAllImages` API when available
           if (typeof (this.imageStorage as any).getAllImages === 'function') {
             const result = (this.imageStorage as any).getAllImages();
             allImages = result instanceof Promise ? await result : result;
+          // 8) Fallback to `getImages` for older implementations
           } else if (typeof (this.imageStorage as any).getImages === 'function') {
             const result = (this.imageStorage as any).getImages();
             allImages = result instanceof Promise ? await result : result;
           }
+          // 9) Normalize to an array if the call returned something unexpected
           if (!Array.isArray(allImages)) allImages = [];
         } catch (e) {
+          // 10) If any error occurs while fetching cached images, log a warning
+          //     and continue with an empty list so diagnostics remain non-blocking.
           console.warn('[ChatPage] Failed to get all images:', e);
           allImages = [];
         }
 
+        // 11) Print a short summary of the local image cache for developer insight
         console.log('\n--- All Stored Images ---');
         console.log('Total Stored Images:', allImages.length);
+        // 12) The detailed per-image logs are commented out to avoid noisy output;
+        //     they can be enabled for deeper inspection during debugging.
         allImages.forEach((img: any, idx: number) => {
           // console.log(`  [${idx}] Filename: ${img.filename}, Original: ${img.original?.substring?.(0, 50)}..., S3: ${img.s3Url?.substring?.(0, 50) || 'N/A'}...`);
         });
 
-        // Print images for this specific session
+        // 13) Build a list of images that belong to this session by matching
+        //     either the stored `filename` or the `original` URL against the
+        //     attachment's `imageKeys` array (multiple possible identifier fields)
         const sessionImages = allImages.filter((img: any) => 
           attachment.imageKeys?.includes(img.filename) || 
           attachment.imageKeys?.includes(img.original)
         );
+        // 14) Per-image session logs are intentionally commented out; uncomment
+        //     the block below when you need a full dump of each matched image.
         // console.log(`\n--- Images in this Session (${sessionImages.length} total) ---`);
         // sessionImages.forEach((img: any, idx: number) => {
         //   console.log(`  [${idx}] Filename: ${img.filename}`);
@@ -2571,12 +2322,18 @@ export class ChatPagePage implements OnInit, OnDestroy {
         //   console.log(`       Boxes: ${img.boxes?.length || 0}`);
         // });
       } else {
+        // 15) For non-session attachments we currently do not print extra details;
+        //     helper logs are left commented for optional use in the future.
         // console.log('\n--- Message Attachment Details ---');
         // console.log('Type:', attachment?.type);
         // console.log('Size:', attachment?.size);
       }
+
+      // 16) Print a footer so the debug output block is visually delimited
       console.log('========== END DEBUG INFO ==========\n');
     } catch (e) {
+      // 17) Any unexpected error during the diagnostic flow is logged here
+      //     to aid troubleshooting without bubbling the exception further.
       console.error('[ChatPage] Error during attachment debug print:', e);
     }
   }
@@ -2733,11 +2490,23 @@ export class ChatPagePage implements OnInit, OnDestroy {
     this.mapTapOverlayElement = undefined;
   }
 
+
+  /**
+   * Returns true when the given DOM element is actually visible to the user.
+   * Checks computed styles (`display`, `visibility`, `opacity`), layout size
+   * (positive `width`/`height`), and whether the element's bounding rect
+   * intersects the current viewport. Use to determine if an element is
+   * rendered and at least partly on-screen.
+   */
   private isElementVisiblyRendered(element: HTMLElement): boolean {
+    // 1) Read computed styles to detect CSS-level hiding (display/visibility/opacity)
     const style = window.getComputedStyle(element);
+    // 2) Get the element's bounding client rect (position and size in viewport coordinates)
     const rect = element.getBoundingClientRect();
+    // 3) Resolve the current viewport dimensions (fallback to document dimensions)
     const viewportWidth = window.innerWidth || document.documentElement.clientWidth;
     const viewportHeight = window.innerHeight || document.documentElement.clientHeight;
+    // 4) Check whether the element's rect intersects the visible viewport at all
     const intersectsViewport = (
       rect.bottom >= 0 &&
       rect.right >= 0 &&
@@ -2745,6 +2514,10 @@ export class ChatPagePage implements OnInit, OnDestroy {
       rect.left <= viewportWidth
     );
 
+    // 5) Final visibility decision: element is considered visibly rendered when
+    //    - it's not hidden by CSS (`display`, `visibility`, or `opacity`)
+    //    - it has a positive layout size (`width` and `height` > 0)
+    //    - and at least part of its bounding rect intersects the viewport
     return (
       style.display !== 'none' &&
       style.visibility !== 'hidden' &&
@@ -2756,29 +2529,37 @@ export class ChatPagePage implements OnInit, OnDestroy {
   }
 
   private drawMarkerCenteredSquare(center: L.LatLng, trigger: 'click' | 'touchend' | 'story-item', titleText: string): void {
+    // 1) Guard: ensure the Leaflet map instance exists before attempting to draw
     if (!this.map) {
       console.warn('[ChatPage.markerSquare] Skipped drawing square because map is not initialized.');
       return;
     }
 
+    // 2) Compute square geometry in meters: half side (meters) and full side
     const halfSideMeters = this.markerSquareHalfSideMeters;
     const sideMeters = halfSideMeters * 2;
 
-    // Approximate meter-to-degree conversion at the marker latitude.
+    // 3) Convert meter distances to latitude/longitude degrees at this latitude
+    //    - metersPerDegreeLat is an approximate constant for latitude
+    //    - longitude degrees shrink with latitude; use cos(lat) to adjust
     const metersPerDegreeLat = 111_320;
     const cosLat = Math.cos((center.lat * Math.PI) / 180);
     const metersPerDegreeLng = Math.max(1, Math.abs(cosLat) * 111_320);
+    // 4) Delta degrees to move from center to square edges
     const deltaLat = halfSideMeters / metersPerDegreeLat;
     const deltaLng = halfSideMeters / metersPerDegreeLng;
 
+    // 5) Build Leaflet LatLng corners for the rectangle bounds
     const southWest = L.latLng(center.lat - deltaLat, center.lng - deltaLng);
     const northEast = L.latLng(center.lat + deltaLat, center.lng + deltaLng);
     const squareBounds = L.latLngBounds(southWest, northEast);
 
+    // 6) Remove any previously-drawn selection square to avoid duplicates
     try {
       this.markerSelectionSquare?.remove();
     } catch {}
 
+    // 7) Create a new rectangle (non-filled, non-interactive) and add it to the map
     this.markerSelectionSquare = L.rectangle(squareBounds, {
       color: '#111111',
       weight: 2,
@@ -2786,12 +2567,15 @@ export class ChatPagePage implements OnInit, OnDestroy {
       interactive: false
     }).addTo(this.map);
 
+    // 8) Bring the rectangle to the front so it displays above other layers
     try { this.markerSelectionSquare.bringToFront(); } catch {}
 
+    // 9) Compute some human-readable metrics for logging (area, hectares, corner radius)
     const areaSqMeters = sideMeters * sideMeters;
     const areaHectares = areaSqMeters / 10_000;
     const cornerRadiusMeters = Math.sqrt(2) * halfSideMeters;
 
+    // 10) Log a compact summary including geometry and bounding coordinates
     console.log('[ChatPage.markerSquare] Square drawn around marker', {
       trigger,
       titleText,
@@ -2817,236 +2601,40 @@ export class ChatPagePage implements OnInit, OnDestroy {
     });
   }
 
+  /**
+   * Waits for the Leaflet map to exist before location-tab logic continues.
+   * It checks for an already-initialized map first, then looks for the map DOM
+   * element, tries to initialize the map when the element is present, and
+   * retries a limited number of times with a small delay between attempts.
+   */
   private async ensureMapReadyForLocationTab(maxAttempts: number = 18, delayMs: number = 120): Promise<L.Map | null> {
+    // Try multiple times because the location tab can render before the map is ready.
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      // If the Leaflet map already exists, return it immediately.
       if (this.map) {
         return this.map;
       }
 
+      // Check whether the map container exists in the DOM yet.
       const mapElement = document.getElementById('map');
       if (mapElement) {
+        // If the container exists, attempt to initialize the map instance.
         await this.initMap();
+
+        // If initialization succeeded, return the ready map.
         if (this.map) {
           return this.map;
         }
       }
 
+      // Pause briefly before retrying so Angular/DOM rendering can catch up.
       await new Promise<void>((resolve) => {
         setTimeout(() => resolve(), delayMs);
       });
     }
 
+    // After all attempts, return the map if available; otherwise return null.
     return this.map ?? null;
-  }
-
-  private applyMarkerSelectionOverlayInlineStyles(
-    overlay: HTMLDivElement,
-    wrap: HTMLDivElement,
-    panel: HTMLDivElement,
-    list: HTMLDivElement,
-    closeBtn: HTMLButtonElement
-  ): void {
-    const isMobile = window.innerWidth <= 640;
-
-    Object.assign(overlay.style, {
-      position: 'fixed',
-      inset: '0',
-      background: 'rgba(0, 0, 0, 0.14)',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      zIndex: '2147483646',
-      padding: isMobile ? '12px' : '16px'
-    });
-
-    Object.assign(wrap.style, {
-      display: 'flex',
-      flexDirection: 'column',
-      alignItems: 'center',
-      width: '100%',
-      maxWidth: isMobile ? '94vw' : '560px'
-    });
-
-    Object.assign(panel.style, {
-      width: '100%',
-      maxWidth: isMobile ? '94vw' : '540px',
-      background: '#e8e8e8',
-      border: '1px solid #b8b8b8',
-      borderRadius: '12px',
-      padding: isMobile ? '14px 12px' : '20px 18px 16px',
-      boxSizing: 'border-box',
-      // maxHeight: isMobile ? 'min(82vh, 500px)' : 'min(80vh, 530px)',
-       maxHeight: isMobile ? 'min(82vh, 350px)' : 'min(80vh, 530px)',
-      display: 'flex',
-      flexDirection: 'column',
-      gap: isMobile ? '12px' : '16px',
-      boxShadow: '0 8px 20px rgba(0, 0, 0, 0.1)'
-    });
-
-    Object.assign(list.style, {
-      display: 'flex',
-      flexDirection: 'column',
-      gap: isMobile ? '10px' : '14px',
-      overflowY: 'auto',
-      maxHeight: isMobile ? 'min(52vh, 300px)' : 'min(52vh, 340px)',
-      paddingRight: '2px'
-    });
-
-    Object.assign(closeBtn.style, {
-      alignSelf: 'flex-end',
-      width: isMobile ? '138px' : '176px',
-      height: isMobile ? '120px' : '126px',
-      padding: '0 16px',
-      border: 'none',
-      borderRadius: '10px',
-      background: '#4432d8',
-      color: '#ffffff',
-      fontSize: isMobile ? '1.35rem' : '2rem',
-      lineHeight: '1',
-      cursor: 'pointer'
-    });
-  }
-
-  private applyMarkerSelectionItemInlineStyles(
-    item: HTMLButtonElement,
-    avatar: HTMLDivElement,
-    info: HTMLDivElement,
-    name: HTMLDivElement,
-    sub: HTMLDivElement
-  ): void {
-    const isMobile = window.innerWidth <= 640;
-
-    Object.assign(item.style, {
-      display: 'flex',
-      alignItems: 'center',
-      gap: isMobile ? '10px' : '14px',
-      width: '100%',
-      border: 'none',
-      borderRadius: '5px',
-      // background: '#4fd86f',
-      background: 'FCF8F8',
-      padding: isMobile ? '8px 10px' : '10px 14px',
-      minHeight: isMobile ? '78px' : '92px',
-      cursor: 'pointer',
-      textAlign: 'left',
-      transition: 'transform 0.12s ease, filter 0.12s ease'
-    });
-
-    Object.assign(avatar.style, {
-      width: isMobile ? '52px' : '64px',
-      height: isMobile ? '52px' : '64px',
-      minWidth: isMobile ? '52px' : '64px',
-      borderRadius: '999px',
-      overflow: 'hidden',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      background: '#ffb429'
-    });
-
-    Object.assign(info.style, {
-      display: 'flex',
-      flexDirection: 'column',
-      gap: '3px',
-      minWidth: '0'
-    });
-
-    Object.assign(name.style, {
-      fontSize: isMobile ? '1.2rem' : '1.9rem',
-      lineHeight: '1.5',
-      color: '#1f1f1f',
-      whiteSpace: 'nowrap',
-      overflow: 'hidden',
-      textOverflow: 'ellipsis'
-    });
-
-    Object.assign(sub.style, {
-      fontSize: isMobile ? '1.25rem' : '1.9rem',
-      lineHeight: '1.02',
-      color: '#1f1f1f',
-      opacity: '0.95',
-      whiteSpace: 'nowrap',
-      overflow: 'hidden',
-      textOverflow: 'ellipsis'
-    });
-  }
-
-  private applyMapTapOverlayInlineStyles(
-    overlay: HTMLDivElement,
-    panel: HTMLDivElement,
-    title: HTMLHeadingElement,
-    lngInput: HTMLInputElement,
-    latInput: HTMLInputElement,
-    message: HTMLDivElement,
-    actions: HTMLDivElement,
-    cancelBtn: HTMLButtonElement,
-    placeBtn: HTMLButtonElement
-  ): void {
-    Object.assign(overlay.style, {
-      position: 'fixed',
-      inset: '0',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      padding: '16px',
-      zIndex: '2147483647',
-      background: 'rgba(0, 0, 0, 0.45)'
-    });
-
-    Object.assign(panel.style, {
-      background: '#ffffff',
-      borderRadius: '14px',
-      width: '100%',
-      maxWidth: '360px',
-      padding: '16px',
-      boxShadow: '0 12px 30px rgba(0, 0, 0, 0.2)',
-      display: 'flex',
-      flexDirection: 'column',
-      gap: '10px'
-    });
-
-    Object.assign(title.style, {
-      margin: '0 0 4px',
-      fontSize: '17px'
-    });
-
-    const inputStyle: Partial<CSSStyleDeclaration> = {
-      height: '40px',
-      padding: '0 10px',
-      border: '1px solid #d6d6d6',
-      borderRadius: '8px'
-    };
-    Object.assign(lngInput.style, inputStyle);
-    Object.assign(latInput.style, inputStyle);
-
-    Object.assign(message.style, {
-      minHeight: '18px',
-      fontSize: '12px',
-      color: '#d32f2f'
-    });
-
-    Object.assign(actions.style, {
-      display: 'flex',
-      gap: '8px',
-      justifyContent: 'flex-end'
-    });
-
-    Object.assign(cancelBtn.style, {
-      height: '36px',
-      padding: '0 14px',
-      borderRadius: '8px',
-      border: '1px solid #d0d0d0',
-      background: '#fff'
-    });
-
-    Object.assign(placeBtn.style, {
-      height: '36px',
-      padding: '0 14px',
-      borderRadius: '8px',
-      border: 'none',
-      background: '#387ef5',
-      color: '#fff'
-    });
   }
 
   // Conversation search results (loaded dynamically)
@@ -3073,13 +2661,22 @@ export class ChatPagePage implements OnInit, OnDestroy {
   }
 
 
+/**
+ * Component startup entry point.
+ * Restores incoming navigation state, primes location/map behavior,
+ * hydrates cached user data, and starts the chat/location background services.
+ */
 ngOnInit(): void {
+  // 1) Emit a clear startup marker so initialization is easy to spot in the console.
   console.log('[ChatPage.ngOnInit] ===== PAGE INIT START (ngOnInit called) =====');
+
+  // 2) Log the current authenticated user so we can confirm which account is booting.
   console.log('[ChatPage.ngOnInit] Auth currentUser on ngOnInit:', this.auth3.getCurrentUser()?.uid || 'null');
 
+  // 3) Read any incoming map location from the route/query/session state.
   this.loadIncomingMapLocation();
 
-  // If navigation passed an `activeTab` via navigation state, apply it here.
+  // 4) If navigation passed an `activeTab`, restore it so the user returns to the same section.
   try {
     const nav: any = (this.router && (this.router as any).getCurrentNavigation) ? (this.router as any).getCurrentNavigation() : null;
     const stateTab = (nav && nav.extras && nav.extras.state && (nav.extras.state as any).activeTab) || (history && (history.state && (history.state as any).activeTab));
@@ -3088,19 +2685,23 @@ ngOnInit(): void {
       console.log('[ChatPage.ngOnInit] activeTab set from navigation state:', this.activeTab);
     }
   } catch (e) {
-    // ignore
+    // 5) Ignore navigation-state lookup errors so startup still continues.
   }
 
+  // 6) If the location tab is active on entry, kick off map startup and offline download work.
   if (this.activeTab === 'location') {
     this.scheduleMapInitialization();
     this.startMapRefreshTimer();
     void this.triggerOfflineDownloadWithDefaults();
   }
 
+  // 7) Resolve the current user id from cache/auth so the app can hydrate the correct data set.
   const cachedUid = this.resolveCachedUid();
   if (cachedUid) {
+    // 8) Update the visible cache-sync label for this user.
     this.refreshCacheWarmStatus(cachedUid);
 
+    // 9) If a cached profile exists, populate name/email fields from it.
     const cachedProfile = this.userPrefetchCache.getCachedUserProfile(cachedUid);
     if (cachedProfile) {
       this.firstName = cachedProfile.firstName || this.firstName;
@@ -3108,54 +2709,72 @@ ngOnInit(): void {
       this.email = cachedProfile.email || this.email;
     }
 
+    // 10) Restore cached chat previews so the chat list appears immediately.
     const cachedChats = this.userPrefetchCache.getCachedChats(cachedUid);
     if (cachedChats.length > 0) {
       this.chats = [...cachedChats];
     }
 
+    // 11) Restore cached engineers and keep a backup copy for search reset behavior.
     const cachedEngineers = this.userPrefetchCache.getCachedEngineers(cachedUid);
     if (cachedEngineers.length > 0) {
       this.engineers = [...cachedEngineers];
       this.engineersBackup = [...cachedEngineers];
     }
 
+    // 12) Refresh the cache in the background so the UI can stay responsive.
     this.userPrefetchCache.warmUserDataInBackground(cachedUid, 'chat-page-ngOnInit').finally(() => {
       this.refreshCacheWarmStatus(cachedUid);
     });
 
-    // Only bootstrap the user's own location when the map is not being driven by an incoming office marker.
+    // 13) Only bootstrap the user's own location when no incoming map marker is taking precedence.
     if (!this.incomingMarkerLocationActive) {
-      // Load user location from storage and start background marker fetch
+      // 14) Load stored location and begin background marker fetching for the current user.
       this.loadUserLocationAndStartBackgroundFetch(cachedUid);
 
-      // Get and save current location if available
+      // 15) Attempt to fetch and persist the current location for later use.
       void this.getAndSaveCurrentLocation();
     } else {
+      // 16) Keep the incoming marker location intact and skip the normal location bootstrap.
       console.log('[ChatPage.ngOnInit] Incoming marker location active; skipping user location bootstrap.');
     }
   }
 
+  // 17) Finish app bootstrap: initialize remaining services and live subscriptions.
   this.initialize();
   this.refreshOfflineAreaList();
   this.startUserChatsSubscription().catch((err) => {
     console.warn('[ChatPage.ngOnInit] Unable to start chat list subscription:', err);
   });
   
-  // Start periodic checker for internet and location service recovery
+  // 18) Start the periodic recovery loop for internet/location/map state.
   this.startServiceRecoveryChecker();
 
-  // Setup hardware back button handler
+  // 19) Register the hardware back button handler last so it can react to the final UI state.
   this.setupHardwareBackButton();
 }
 
+/**
+ * Loads an incoming map location from the URL, navigation state, or session storage.
+ * The first valid source wins, then the location tab is activated and the pending
+ * marker location is stored so the map can open on that position.
+ */
 private loadIncomingMapLocation(): void {
+  // 1) Read the query parameters from the current route snapshot.
   const queryParamMap = this.route?.snapshot?.queryParamMap;
+
+  // 2) Try to parse latitude/longitude from the URL query string.
   const queryLatitude = queryParamMap ? Number.parseFloat(queryParamMap.get('markerLat') || '') : Number.NaN;
   const queryLongitude = queryParamMap ? Number.parseFloat(queryParamMap.get('markerLng') || '') : Number.NaN;
+
+  // 3) Read the browser history state as a secondary source.
   const navState: any = history?.state || {};
+
+  // 4) Parse latitude/longitude from navigation state if present.
   const stateLatitude = Number.parseFloat(navState?.markerLat);
   const stateLongitude = Number.parseFloat(navState?.markerLng);
 
+  // 5) Prefer the URL query parameters when both coordinates are valid.
   if (Number.isFinite(queryLatitude) && Number.isFinite(queryLongitude)) {
     this.pendingMapLocation = {
       latitude: queryLatitude,
@@ -3163,16 +2782,20 @@ private loadIncomingMapLocation(): void {
       label: queryParamMap?.get('markerLabel') || undefined
     };
   } else if (Number.isFinite(stateLatitude) && Number.isFinite(stateLongitude)) {
+    // 6) Otherwise, fall back to the navigation state values.
     this.pendingMapLocation = {
       latitude: stateLatitude,
       longitude: stateLongitude,
       label: navState?.markerLabel || undefined
     };
   } else {
+    // 7) If neither source is valid, try the last stored marker location in session storage.
     try {
       const storedMarkerLocationRaw = sessionStorage.getItem('selectedMarkerLocation');
       if (storedMarkerLocationRaw) {
         const storedMarkerLocation = JSON.parse(storedMarkerLocationRaw);
+
+        // 8) Parse the stored coordinates and only use them when both are finite numbers.
         const storedLatitude = Number.parseFloat(storedMarkerLocation?.latitude);
         const storedLongitude = Number.parseFloat(storedMarkerLocation?.longitude);
 
@@ -3185,21 +2808,28 @@ private loadIncomingMapLocation(): void {
         }
       }
     } catch (error) {
+      // 9) Ignore storage parsing failures and keep startup moving.
       console.warn('[ChatPage.loadIncomingMapLocation] Failed to read stored marker location:', error);
     }
   }
 
+  // 10) If a valid incoming location was found, switch the UI into location mode.
   if (this.pendingMapLocation) {
     this.activeTab = 'location';
     this.incomingMarkerLocationActive = true;
+
+    // 11) Seed the current location object with the incoming marker coordinates.
     this.currentUserLocation = {
       latitude: this.pendingMapLocation.latitude,
       longitude: this.pendingMapLocation.longitude,
       accuracy: 0,
       timestamp: new Date().toISOString()
     };
+
+    // 12) Log the resolved location for debugging.
     console.log('[ChatPage.loadIncomingMapLocation] Incoming map location loaded:', this.pendingMapLocation);
 
+    // 13) Remove the stored marker payload so it does not get reused on later visits.
     try {
       sessionStorage.removeItem('selectedMarkerLocation');
     } catch (error) {
@@ -3209,55 +2839,131 @@ private loadIncomingMapLocation(): void {
 }
 
 getCurrentMapBoundsBBox(): { west: number; south: number; east: number; north: number } | null {
+  /**
+   * getCurrentMapBoundsBBox
+   * ------------------------
+   * Returns a simple bounding-box representation of the current Leaflet map
+   * viewport. If the map instance isn't available (not yet initialized), the
+   * function returns `null`.
+   *
+   * Line-by-line:
+   * 1) Guard early when `this.map` is falsy and return `null`.
+   * 2) Read the Leaflet `LatLngBounds` object from `this.map`.
+   * 3) Build and return a plain object with numeric `west`, `south`, `east`,
+   *    and `north` properties extracted from the bounds.
+   */
+
+  // Guard: map not ready -> no meaningful bounds to return
   if (!this.map) {
     return null;
   }
 
+  // Read Leaflet LatLngBounds for the current viewport
   const bounds = this.map.getBounds();
+
+  // Convert Leaflet bounds API to a compact plain object BBox
   return {
+    // Minimum longitude (west edge)
     west: bounds.getWest(),
+    // Minimum latitude (south edge)
     south: bounds.getSouth(),
+    // Maximum longitude (east edge)
     east: bounds.getEast(),
+    // Maximum latitude (north edge)
     north: bounds.getNorth()
   };
 }
 
 toggleOfflineMode(): void {
+  /**
+   * toggleOfflineMode
+   * ------------------
+   * Toggle the component's offline tile rendering mode and update UI state.
+   *
+   * Line-by-line:
+   * 1) Flip the `offlineModeEnabled` boolean on the component.
+   * 2) Re-apply the effective tile layer mode so the map tile layer updates.
+   * 3) Update a human-readable status string to reflect the current mode.
+   */
+
+  // 1) Toggle the offline mode flag
   this.offlineModeEnabled = !this.offlineModeEnabled;
+
+  // 2) Tell the tile layer to switch to the effective mode (offline/online)
   this.applyEffectiveTileLayerMode();
+
+  // 3) Update user-facing status text depending on the new state
   this.offlineDownloadStatusText = this.offlineModeEnabled
     ? 'Offline mode enabled. Only cached tiles will render.'
     : 'Offline mode disabled. Online fallback enabled.';
 }
 
+/**
+ * isNativeDevice
+ * --------------
+ * Returns `true` when the app is running on a native mobile platform
+ * (Android or iOS). This is used to adjust timeouts / behavior for
+ * device-specific performance characteristics.
+ *
+ * Line-by-line:
+ * 1) Query the injected `Platform` service for Android runtime.
+ * 2) Query the injected `Platform` service for iOS runtime.
+ * 3) Return true if either platform check passes.
+ */
 private isNativeDevice(): boolean {
+  // 1-2) Check platform flags exposed by Ionic's Platform service
   return this.platform.is('android') || this.platform.is('ios');
 }
 
+  /**
+   * downloadVisibleMapAreaOffline(): Promise<void>
+   *
+   * Purpose: Downloads map tiles for the currently visible map area to enable offline browsing.
+   * This function handles validation, progress tracking, device-aware timeout calculations,
+   * and error recovery for tile downloads.
+   *
+   * High-level flow:
+   * 1) Validate map exists and is initialized
+   * 2) Validate zoom range is valid (min <= max)
+   * 3) Extract current visible map bounds
+   * 4) Initiate tile download with progress tracking
+   * 5) Monitor for stalled downloads
+   * 6) Calculate device-specific timeouts (longer on mobile devices)
+   * 7) Race download against timeout promise
+   * 8) Handle success or failure
+   * 9) Clean up progress monitor
+   */
   async downloadVisibleMapAreaOffline(): Promise<void> {
+    // 1) Log entry point and current platform (NATIVE = Android/iOS, WEB/BROWSER = web version)
     console.log('[ChatPage.download] Function called');
     console.log('[ChatPage.download] Platform:', this.isNativeDevice() ? 'NATIVE (Android/iOS)' : 'WEB/BROWSER');
     
+    // 2) Verify map instance exists; if not, attempt initialization
     if (!this.map) {
       console.warn('[ChatPage.download] Map not initialized, attempting to initialize...');
       await this.initMap();
+      // 3) Guard: if map initialization failed, exit early to prevent errors
       if (!this.map) {
         console.error('[ChatPage.download] Failed to initialize map');
         return;
       }
     }
 
+    // 4) Extract and floor min/max zoom levels from component state
     const minZoom = Math.floor(this.offlineMinZoom);
     const maxZoom = Math.floor(this.offlineMaxZoom);
+    // 5) Validate zoom range: max must be >= min (logical requirement for zoom range)
     if (maxZoom < minZoom) {
       console.error('[ChatPage.download] Invalid zoom range:', {minZoom, maxZoom});
       alert('Invalid zoom range: max zoom must be greater than or equal to min zoom.');
       return;
     }
 
+    // 6) Read the current visible map bounds (NW/SE corners of viewport)
     const bounds = this.map.getBounds();
     console.log('[ChatPage.download] Map bounds:', bounds);
     
+    // 7) Set UI flags to indicate download is starting
     this.offlineDownloadInProgress = true;
     this.offlineDownloadProgressPct = 0;
     this.offlineDownloadStatusText = 'Preparing offline tile download...';
@@ -3265,6 +2971,7 @@ private isNativeDevice(): boolean {
       minZoom, maxZoom, maxTiles: this.offlineMaxTilesPerDownload
     });
 
+    // 8) Initialize progress tracking variables (used by progress callback and monitor)
     let lastProgressTime = Date.now();
     let lastProgressPercentage = 0;
     const progressCheckIntervalMs = 5000; // Check for progress every 5 seconds
@@ -3274,22 +2981,27 @@ private isNativeDevice(): boolean {
     try {
       console.log('[ChatPage.download] Calling service.downloadTilesForBounds...');
       
-      // Create a promise that races the download against a timeout
+      // 9) Initiate the tile download by calling the offline service with current map bounds and settings
+      //    This returns a promise that completes when all tiles are fetched/cached
       const downloadPromise = this.offlineMapTileService.downloadTilesForBounds({
-        bounds,
-        minZoom,
-        maxZoom,
-        urlTemplate: this.osmTileTemplate,
-        subdomains: this.offlineTileSubdomains,
-        maxTiles: this.offlineMaxTilesPerDownload,
-        concurrency: 6,
-        areaName: (this.offlineAreaName || '').trim() || `Area ${new Date().toLocaleString()}`,
+        bounds,           // Map viewport boundaries (NW/SE corners)
+        minZoom,          // Starting zoom level for tile download
+        maxZoom,          // Highest zoom level for tile download
+        urlTemplate: this.osmTileTemplate,  // URL pattern for tile requests (e.g., OpenStreetMap)
+        subdomains: this.offlineTileSubdomains,  // Subdomains for load balancing (a/b/c)
+        maxTiles: this.offlineMaxTilesPerDownload,  // Hard limit on number of tiles to download
+        concurrency: 6,   // Number of simultaneous tile downloads
+        areaName: (this.offlineAreaName || '').trim() || `Area ${new Date().toLocaleString()}`,  // User-friendly name for this download area
+        // 10) Progress callback: invoked periodically by the download service with status updates
         onProgress: (progress) => {
           try {
             const now = Date.now();
+            // 11) Update timestamp so stall detector knows download is still active
             lastProgressTime = now;
+            // 12) Capture current percentage for display and stall detection
             lastProgressPercentage = progress.percentage;
             
+            // 13) Log progress details for debugging (completed tiles, total, percentage)
             console.log('[ChatPage.progress] Callback received:', {
               completed: progress.completed,
               total: progress.total,
@@ -3297,38 +3009,43 @@ private isNativeDevice(): boolean {
               timeSinceLastProgress: 0
             });
             
-            // Ensure progress updates trigger Angular change detection
+            // 14) Update UI inside ngZone.run() to ensure Angular change detection fires
+            //     This refreshes the progress bar and status text in real-time
             this.ngZone.run(() => {
               this.offlineDownloadProgressPct = progress.percentage;
               this.offlineDownloadStatusText = `Downloading tiles: ${progress.completed}/${progress.total} (${progress.percentage}%)`;
               console.log('[ChatPage.progress] UI updated:', this.offlineDownloadStatusText);
             });
           } catch (callbackError) {
+            // 15) Catch and log errors in the progress callback to avoid breaking the download
             console.error('[ChatPage.progress] Error in progress callback:', callbackError);
           }
         }
       });
 
-      // Monitor for stalled progress
+      // 16) Set up a progress monitor that checks periodically if the download has stalled
+      //     A stalled download has not made progress for maxNoProgressTimeMs milliseconds
       const progressMonitor = setInterval(() => {
         const timeSinceLastProgress = Date.now() - lastProgressTime;
         console.log('[ChatPage.download] Progress check - timeSinceLastProgress:', timeSinceLastProgress, 'lastPercentage:', lastProgressPercentage);
         
+        // 17) If no progress received for 30 seconds AND download is not complete (< 100%), flag as stalled
+        //     This is informational; the main timeout promise will ultimately cancel the download
         if (timeSinceLastProgress > maxNoProgressTimeMs && lastProgressPercentage < 100) {
           console.warn('[ChatPage.download] Download appears stalled - no progress for', timeSinceLastProgress, 'ms');
           clearInterval(progressMonitor);
-          // The race condition will handle this
+          // 18) The Promise.race timeout will handle this if it continues
         }
       }, progressCheckIntervalMs);
 
-      // Device-aware timeout calculation
-      // On native devices, operations are slower, so be more generous with timeouts
-      // NOTE: Storage now uses Web Cache API (instant), so timeout is primarily for network fetches
+      // 19) Calculate device-aware timeout: longer timeouts for native devices (slower network/CPU)
+      //     Web Cache API is instant now, so timeout is primarily for network fetch operations
       const estimatedTileCount = Math.min(this.offlineMaxTilesPerDownload, 200);
-      const baseTimeoutPerTile = isNative ? 300 : 200; // 300ms per tile on device (network only now), 200ms on web
+      const baseTimeoutPerTile = isNative ? 300 : 200; // 300ms per tile on device, 200ms on web
       const minTimeout = isNative ? 60000 : 45000; // 60s min on device, 45s on web
       const timeoutMs = Math.max(minTimeout, estimatedTileCount * baseTimeoutPerTile);
       
+      // 20) Log the calculated timeout values for debugging timeout-related issues
       console.log('[ChatPage.download] Device-aware timeout settings (Cache API enabled):', {
         isNative,
         estimatedTileCount,
@@ -3337,11 +3054,15 @@ private isNativeDevice(): boolean {
         calculatedTimeoutMs: timeoutMs
       });
 
+      // 21) Race the download promise against a timeout promise
+      //     Whichever completes first wins; if timeout wins, the download is cancelled
       const summary = await Promise.race([
-        downloadPromise,
+        downloadPromise,  // The actual tile download process
         new Promise<any>((_, reject) => {
+          // 22) Create a timeout promise that rejects after timeoutMs milliseconds
           setTimeout(() => {
             clearInterval(progressMonitor);
+            // 23) Build an error message that includes helpful suggestions for timeout recovery
             const message = `Download timeout after ${timeoutMs}ms. Completed: ${lastProgressPercentage}%.${
               isNative ? ' On device, try: 1) Reduce Max Tiles to 30-50, 2) Use lower zoom levels (10-15), 3) Check network connection.' 
               : ' Check your network connection.'
@@ -3351,19 +3072,29 @@ private isNativeDevice(): boolean {
         })
       ]);
 
+      // 24) If we reach here, the download promise completed before timeout
+      //     Stop the progress monitor since download is done
       clearInterval(progressMonitor);
       
+      // 25) Log successful completion with summary statistics
       console.log('[ChatPage.download] Download completed with summary:', summary);
+      // 26) Update UI with final download results (downloaded count, cached count, failed count)
       this.offlineDownloadStatusText = `Offline tiles ready. Downloaded: ${summary.downloaded}, cached: ${summary.cached}, failed: ${summary.failed}.`;
+      // 27) Refresh the list of downloaded offline areas so UI shows new area
       this.refreshOfflineAreaList();
+      // 28) Redraw the map tile layer to display newly cached tiles
       this.baseTileLayer?.redraw();
     } catch (error) {
+      // 29) Handle any errors from the download process (timeout, network, service errors)
       const errorMsg = error instanceof Error ? error.message : String(error);
+      // 30) Determine if this is a timeout error and provide context-specific suggestions
       const displayMessage = errorMsg.includes('timeout') 
         ? `Download timeout. Try: 1) Lower zoom levels, 2) Reduce Max Tiles to 30, 3) Ensure good network connection. Details: ${errorMsg}`
         : `Download failed: ${errorMsg}`;
       
+      // 31) Update UI with error message
       this.offlineDownloadStatusText = displayMessage;
+      // 32) Log error details for debugging (type, message, stack trace)
       console.error('[ChatPage.download] Download error:', error);
       console.error('[ChatPage.download] Error details:', {
         name: (error as any)?.name,
@@ -3371,8 +3102,11 @@ private isNativeDevice(): boolean {
         stack: (error as any)?.stack,
         timeSinceStart: Date.now() - lastProgressTime
       });
+      // 33) Show alert to user so they know the download failed
       alert(displayMessage);
     } finally {
+      // 34) Always execute cleanup: reset the download-in-progress flag
+      //     This ensures the UI stops showing the download spinner regardless of success/failure
       this.offlineDownloadInProgress = false;
       console.log('[ChatPage.download] Download finished. offlineDownloadInProgress set to false.');
     }
@@ -5257,230 +4991,7 @@ onMsgBubbleTap(message: Message): void {
     latInput.focus();
   }
 
-  async openMarkerSelectionOverlay(titleText: string = 'Engineer Selection Overlay'): Promise<void> {
-    console.log('[ChatPage.markerSelection] openMarkerSelectionOverlay requested', {
-      titleText,
-      hasOverlayRef: !!this.markerSelectionOverlayElement,
-      engineersCached: this.engineers.length
-    });
-
-    if (this.markerSelectionOverlayElement) {
-      const isMounted = document.body.contains(this.markerSelectionOverlayElement);
-      const isVisible = isMounted && this.isElementVisiblyRendered(this.markerSelectionOverlayElement);
-      console.log('[ChatPage.markerSelection] Existing overlay reference detected', { isMounted, isVisible });
-
-      if (isMounted && isVisible) {
-        console.log('[ChatPage.markerSelection] Overlay is already open; skipping duplicate render.');
-        return;
-      }
-
-      try { document.body.removeChild(this.markerSelectionOverlayElement); } catch {}
-      this.markerSelectionOverlayElement = undefined;
-      console.warn('[ChatPage.markerSelection] Cleared stale overlay reference before rendering a new one.');
-    }
-
-    if (!this.engineers.length) {
-      try { await this.fetchEngineers(); } catch (err) { console.warn('[ChatPage] fetchEngineers in marker overlay failed', err); }
-    }
-
-    const options = (this.engineers.length ? this.engineers : this.searchConversationResults) || [];
-    const optionsSource = this.engineers.length ? 'firestore-engineers' : 'placeholder-results';
-    console.log('[ChatPage.markerSelection] Preparing overlay options', {
-      source: optionsSource,
-      count: options.length
-    });
-
-    const overlay = document.createElement('div');
-    overlay.className = 'marker-selection-overlay';
-
-    const wrap = document.createElement('div');
-    wrap.className = 'marker-selection-wrap';
-
-    const panel = document.createElement('div');
-    panel.className = 'marker-selection-panel';
-    panel.setAttribute('role', 'dialog');
-    panel.setAttribute('aria-modal', 'true');
-    panel.setAttribute('aria-label', titleText || 'Engineer selection');
-
-    const list = document.createElement('div');
-    list.className = 'marker-selection-list';
-
-    const closeBtn = document.createElement('button');
-    closeBtn.type = 'button';
-    closeBtn.className = 'marker-selection-close-btn';
-    closeBtn.textContent = 'Close';
-
-    this.applyMarkerSelectionOverlayInlineStyles(overlay, wrap, panel, list, closeBtn);
-
-    const dismiss = (reason: 'button' | 'backdrop' | 'selection' = 'button') => {
-      console.log('[ChatPage.markerSelection] Closing overlay', { reason });
-      try { document.body.removeChild(overlay); } catch {}
-      if (this.markerSelectionOverlayElement === overlay) {
-        this.markerSelectionOverlayElement = undefined;
-      }
-    };
-
-    if (!options.length) {
-      const empty = document.createElement('div');
-      empty.textContent = 'No engineers available.';
-      empty.className = 'marker-selection-empty';
-      Object.assign(empty.style, {
-        textAlign: 'center',
-        color: '#636363',
-        padding: '24px 12px',
-        fontSize: '0.95rem'
-      });
-      list.appendChild(empty);
-    } else {
-      for (const [optionIndex, option] of options.entries()) {
-        const item = document.createElement('button');
-        item.type = 'button';
-        item.className = 'marker-selection-item';
-
-        const avatar = document.createElement('div');
-        avatar.className = 'marker-selection-avatar';
-
-        const avatarUrl = option?.photoURL || option?.avatar;
-        if (avatarUrl) {
-          const img = document.createElement('img');
-          img.src = avatarUrl;
-          img.alt = 'avatar';
-          img.className = 'marker-selection-avatar-image';
-          Object.assign(img.style, {
-            width: '100%',
-            height: '100%',
-            objectFit: 'cover'
-          });
-          avatar.appendChild(img);
-        } else {
-          const initials = (option?.initials || this.getInitials(option?.firstName ? `${option.firstName} ${option?.lastName || ''}` : option?.name || option?.email || 'U')).toUpperCase();
-          const initialText = document.createElement('span');
-          initialText.textContent = initials;
-          initialText.className = 'marker-selection-avatar-initials';
-          Object.assign(initialText.style, {
-            color: '#1f1f1f',
-            fontWeight: '700',
-            fontSize: window.innerWidth <= 640 ? '0.95rem' : '1rem'
-          });
-          avatar.appendChild(initialText);
-        }
-
-        const info = document.createElement('div');
-        info.className = 'marker-selection-info';
-
-        const name = document.createElement('div');
-        const displayName = option?.firstName
-          ? `${option.firstName} ${option?.lastName || ''}`.trim()
-          : (option?.name || option?.email || 'Unknown User');
-        name.textContent = displayName;
-        name.className = 'marker-selection-name';
-
-        const sub = document.createElement('div');
-        const contact = option?.phoneNumber
-          || option?.phone
-          || option?.contactNumber
-          || option?.mobile
-          || option?.mobileNumber
-          || option?.telephone
-          || option?.tel
-          || option?.contact
-          || 'Phone Number';
-        sub.textContent = contact;
-        sub.className = 'marker-selection-sub';
-
-        this.applyMarkerSelectionItemInlineStyles(item, avatar, info, name, sub);
-
-        item.addEventListener('pointerenter', () => {
-          item.style.filter = 'brightness(0.98)';
-        });
-        item.addEventListener('pointerleave', () => {
-          item.style.filter = '';
-          item.style.transform = '';
-        });
-        item.addEventListener('pointerdown', () => {
-          item.style.transform = 'scale(0.99)';
-        });
-        item.addEventListener('pointerup', () => {
-          item.style.transform = '';
-        });
-
-        info.appendChild(name);
-        info.appendChild(sub);
-        item.appendChild(avatar);
-        item.appendChild(info);
-
-        item.addEventListener('click', async () => {
-          const selectedId = option?.id || option?.uid || option?.userID || option?.email || 'unknown';
-          const selectedPayload = {
-            source: optionsSource,
-            selectedIndex: optionIndex,
-            selectedId,
-            selectedName: displayName,
-            selectedContact: contact,
-            selectedItemData: option
-          };
-
-          console.log('[ChatPage.markerSelection] Engineer row tapped', selectedPayload);
-          dismiss('selection');
-
-          // Start chat directly from the exact selected marker list item.
-          try {
-            await this.selectEngineer(option);
-            console.log('[ChatPage.markerSelection] Chat start requested from marker selection', {
-              selectedId,
-              selectedName: displayName,
-              selectedIndex: optionIndex,
-              source: optionsSource
-            });
-          } catch (error) {
-            console.error('[ChatPage.markerSelection] Failed to start chat from marker selection', {
-              selectedId,
-              selectedIndex: optionIndex,
-              source: optionsSource,
-              error
-            });
-          }
-        });
-
-        list.appendChild(item);
-      }
-    }
-
-    closeBtn.addEventListener('click', () => dismiss('button'));
-
-    overlay.addEventListener('click', (event) => {
-      if (event.target === overlay) dismiss('backdrop');
-    });
-
-    panel.addEventListener('click', (event) => event.stopPropagation());
-
-    panel.appendChild(list);
-    panel.appendChild(closeBtn);
-    wrap.appendChild(panel);
-    overlay.appendChild(wrap);
-
-    // Append the overlay to the body and keep a reference for future checks/removal.
-    // document.body.appendChild(overlay);
-    this.markerSelectionOverlayElement = overlay;
-
-    const rect = panel.getBoundingClientRect();
-    const overlayComputedStyle = window.getComputedStyle(overlay);
-    console.log('[ChatPage.markerSelection] Overlay rendered', {
-      isMounted: document.body.contains(overlay),
-      isVisible: this.isElementVisiblyRendered(overlay),
-      optionsCount: options.length,
-      panelTop: Math.round(rect.top),
-      panelLeft: Math.round(rect.left),
-      panelWidth: Math.round(rect.width),
-      panelHeight: Math.round(rect.height),
-      overlayPosition: overlayComputedStyle.position,
-      overlayZIndex: overlayComputedStyle.zIndex,
-      viewportWidth: window.innerWidth,
-      viewportHeight: window.innerHeight
-    });
-
-    try { closeBtn.focus(); } catch {}
-  }
+  
 
     private clearSyncStateForUser(userId: string): void {
     if (!userId) return;
@@ -5819,173 +5330,6 @@ onMsgBubbleTap(message: Message): void {
     });
   }
 
-  private openMapTapMarkerOverlay(initialLatitude: number, initialLongitude: number): void {
-    console.log('[ChatPage.mapTapOverlay] Triggered for tapped coordinates:', {
-      latitude: initialLatitude,
-      longitude: initialLongitude
-    });
-    if (!this.map) {
-      console.warn('[ChatPage.mapTapOverlay] Not opened because map is not initialized.');
-      return;
-    }
-
-    if (this.mapTapOverlayElement) {
-      const isMounted = document.body.contains(this.mapTapOverlayElement);
-      const isVisible = isMounted && this.isElementVisiblyRendered(this.mapTapOverlayElement);
-
-      if (!isMounted || !isVisible) {
-        console.warn('[ChatPage.mapTapOverlay] Overlay state exists but is not visibly rendered. Recreating overlay.', {
-          isMounted,
-          isVisible
-        });
-        this.dismissMapTapOverlay();
-      } else {
-        console.log('[ChatPage.mapTapOverlay] Already open; skipping duplicate trigger.');
-        return;
-      }
-    }
-
-    const overlay = document.createElement('div');
-    overlay.className = 'map-overlay map-overlay--dim';
-
-    const panel = document.createElement('div');
-    panel.className = 'map-overlay-panel';
-
-    const title = document.createElement('h3');
-    title.textContent = 'Place marker from tapped position';
-    title.className = 'map-overlay-title';
-
-    const lngInput = document.createElement('input');
-    lngInput.type = 'number';
-    lngInput.placeholder = 'Longitude (from tap)';
-    lngInput.step = 'any';
-    lngInput.value = initialLongitude.toFixed(6);
-    lngInput.className = 'map-overlay-input';
-
-    const latInput = document.createElement('input');
-    latInput.type = 'number';
-    latInput.placeholder = 'Latitude (from tap)';
-    latInput.step = 'any';
-    latInput.value = initialLatitude.toFixed(6);
-    latInput.className = 'map-overlay-input';
-
-    const message = document.createElement('div');
-    message.className = 'map-overlay-message';
-
-    const actions = document.createElement('div');
-    actions.className = 'map-overlay-actions';
-
-    const cancelBtn = document.createElement('button');
-    cancelBtn.type = 'button';
-    cancelBtn.textContent = 'Cancel';
-    cancelBtn.className = 'map-overlay-btn map-overlay-btn--secondary';
-
-    const placeBtn = document.createElement('button');
-    placeBtn.type = 'button';
-    placeBtn.textContent = 'Place Marker';
-    placeBtn.className = 'map-overlay-btn map-overlay-btn--primary';
-
-    actions.appendChild(cancelBtn);
-    actions.appendChild(placeBtn);
-
-    panel.appendChild(title);
-    panel.appendChild(lngInput);
-    panel.appendChild(latInput);
-    panel.appendChild(message);
-    panel.appendChild(actions);
-    overlay.appendChild(panel);
-
-    this.applyMapTapOverlayInlineStyles(
-      overlay,
-      panel,
-      title,
-      lngInput,
-      latInput,
-      message,
-      actions,
-      cancelBtn,
-      placeBtn
-    );
-
-    const dismiss = () => {
-      try { document.body.removeChild(overlay); } catch {}
-      if (this.mapTapOverlayElement === overlay) {
-        this.mapTapOverlayElement = undefined;
-      }
-    };
-
-    overlay.addEventListener('click', (event) => {
-      if (event.target === overlay) dismiss();
-    });
-
-    panel.addEventListener('click', (event) => {
-      event.stopPropagation();
-    });
-
-    cancelBtn.addEventListener('click', () => dismiss());
-
-    // Custom icon for markers placed from map tap overlay
-    const placeMarkerFromInput = () => {
-      if (!this.map) {
-        console.warn('[ChatPage.openMarkerSelectionOverlay] Map not ready, attempting to initialize...');
-        this.initMap().then(() => {
-          if (!this.map) {
-            message.textContent = 'Map initialization in progress. Please try again in a moment.';
-          }
-        });
-        return;
-      }
-
-      const latitude = Number.parseFloat(latInput.value);
-      const longitude = Number.parseFloat(lngInput.value);
-
-      if (Number.isNaN(latitude) || Number.isNaN(longitude)) {
-        message.textContent = 'Please enter valid numeric latitude and longitude.';
-        return;
-      }
-
-      if (latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180) {
-        message.textContent = 'Latitude must be -90..90 and longitude must be -180..180.';
-        return;
-      }
-
-      console.log('[ChatPage.mapTapOverlay] Place Marker tapped with:', { latitude, longitude });
-
-      const tappedMarker = L.marker([latitude, longitude], { icon: this.tapMarkerIcon })
-        .addTo(this.map)
-        .bindPopup(`Marker: ${latitude.toFixed(6)}, ${longitude.toFixed(6)}`)
-        .openPopup();
-
-      this.bindMarkerSelectionTrigger(tappedMarker, 'Marker Selection Overlay');
-      this.map.setView([latitude, longitude], 15);
-      console.log('[ChatPage.mapTap] marker placed from overlay:', { latitude, longitude });
-      dismiss();
-    };
-
-    placeBtn.addEventListener('click', placeMarkerFromInput);
-    lngInput.addEventListener('keydown', (event) => {
-      if (event.key === 'Enter') {
-        event.preventDefault();
-        latInput.focus();
-      }
-    });
-    latInput.addEventListener('keydown', (event) => {
-      if (event.key === 'Enter') {
-        event.preventDefault();
-        placeMarkerFromInput();
-      }
-    });
-
-    // document.body.appendChild(overlay);
-    this.mapTapOverlayElement = overlay;
-    console.log('[ChatPage.mapTapOverlay] Overlay opened successfully.');
-    console.log('[ChatPage.mapTapOverlay] Overlay visibility snapshot:', {
-      isMounted: document.body.contains(overlay),
-      isVisible: this.isElementVisiblyRendered(overlay),
-      rect: overlay.getBoundingClientRect().toJSON()
-    });
-    lngInput.focus();
-  }
 
   // Custom icon for markers placed from map tap overlay
   private readonly tapMarkerIcon = L.icon({
