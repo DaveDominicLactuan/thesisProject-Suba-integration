@@ -54,15 +54,28 @@
     <div class="page-body" [class.engineer-checked-background]="engineerLookedSessionChecked">
       <!-- Scrollable image gallery with margin-top -->
       <div class="scroll-wrapper">
-        <div class="image-scroll" #scrollContainer (scroll)="onScroll($event)" [ngClass]="getScrollClasses(imagePaths.length)">
-          <img
-            *ngFor="let img of imagePaths"
-            [src]="showWithBoxes ? img.withBoxes : img.original"
-            [class.selected]="(showWithBoxes ? img.withBoxes : img.original) === selectedImage"
-            (click)="onImageClick(img)"
-            (dblclick)="openZoomModal(showWithBoxes ? img.withBoxes : img.original)"
-            class="image-item"
-          />
+        <div class="image-scroll"
+            #scrollContainer
+            (scroll)="onScroll($event)"
+            [ngClass]="getScrollClasses(imagePaths.length)">
+
+            <img
+              *ngFor="let img of imagePaths"
+              [src]="showWithBoxes ? img.withBoxes : img.original"
+              [class.selected]="(showWithBoxes ? img.withBoxes : img.original) === selectedImage"
+              (click)="onImageClick(img)"
+              (dblclick)="openZoomModal(showWithBoxes ? img.withBoxes : img.original)"
+              class="image-item"
+            />
+
+            <div
+              *ngFor="let box of getCurrentBoxes(); let i = index"
+              class="bounding-box"
+              [class.selected-box]="selectedBoxIndex === i"
+              [ngStyle]="getBoxStyle(box)"
+              (click)="selectBox(i)">
+            </div>
+
         </div>
       </div>
 
@@ -97,6 +110,10 @@
             Pinch to zoom • Click outside to close
           </div>
         </div>
+      </div>
+
+      <div style="color:red;font-weight:bold;">
+        BOX COUNT: {{ getCurrentBoxes().length }}
       </div>
 
       <!-- Form metadata section -->

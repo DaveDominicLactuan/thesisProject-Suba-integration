@@ -1473,3 +1473,14 @@ ion-select.no-arrow::part(icon) {
   }
 }
 
+.bounding-box {
+  position: absolute;
+  border: 5px solid red;
+  background: rgba(0,255,0,0.2);
+  z-index: 9999;
+}
+
+.selected-box {
+  border: 4px solid yellow;
+  box-shadow: 0 0 15px yellow;
+}

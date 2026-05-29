@@ -8,6 +8,23 @@ import { S3Client, PutObjectCommand, ListObjectsV2Command, HeadObjectCommand, Ge
 import { fromCognitoIdentityPool } from '@aws-sdk/credential-providers';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'; // NEW IMPORT
 
+export interface CrackPrediction {
+  id: number;
+
+  box: {
+    x: number;
+    y: number;
+    w: number;
+    h: number;
+  };
+
+  type?: string;
+  shape?: string;
+  severity?: string;
+
+  confidence?: number;
+}
+
 //image object in the session
 export interface StoredImage {
   original: string; // Base64 image
@@ -18,6 +35,7 @@ export interface StoredImage {
   timestamp: string;
   filename: string;
   prediction?: { type: string; shape: string; severity: string; boxes?: any[] };
+  multiPredictions?: CrackPrediction[];
   correctedPrediction?: { type: string; shape: string; severity: string; boxes?: any[] };
   // New optional helpers for status/testing
   hasPrediction?: boolean;

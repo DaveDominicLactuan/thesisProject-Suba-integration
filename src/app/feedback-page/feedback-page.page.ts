@@ -43,7 +43,9 @@ interface BoundingBox {
 export class FeedbackPagePage implements OnInit {
   message: string = '';
   selectedImage: string = '';
-selectedImageTitle: string = '';
+  selectedImageTitle: string = '';
+  selectedBoxIndex: number = 0;
+  selectedBox: any = null;
   // Holds the structured prediction for the currently-selected/centered image
   selectedPrediction: { type?: string; shape?: string; severity?: string } = {};
   selectedStatusMessage: string = '';
@@ -200,6 +202,47 @@ private lastImageTitleDebugAt: number = 0;
         resolve(originalDataUrl);
       }
     });
+  }
+
+  selectBox(index: number) {
+
+    this.selectedBoxIndex = index;
+
+    const currentImage = this.imagePaths.find(
+      img =>
+        img.original === this.selectedImage ||
+        img.withBoxes === this.selectedImage
+    );
+
+    if (!currentImage?.boxes?.length) {
+      return;
+    }
+
+    this.selectedBox = currentImage.boxes[index];
+
+    console.log('BOX CLICKED', index);
+    console.log(
+      'Selected box:',
+      index,
+      this.selectedBox
+    );
+    console.log('Box data:', this.selectedBox);
+    console.log(
+      'CURRENT IMAGE BOXES',
+      this.getCurrentBoxes()
+    );
+  }
+
+  getCurrentBoxes(): any[] {
+
+    const currentImage = this.imagePaths.find(
+      img =>
+        img.original === this.selectedImage ||
+        img.withBoxes === this.selectedImage
+    );
+
+    return currentImage?.boxes || [];
+
   }
 
     /**
@@ -419,6 +462,25 @@ private lastImageTitleDebugAt: number = 0;
     // select image, chooses which image to show or display depending on 
     //showWithBoxes toggle the original or with boxes
     this.selectedImage = this.showWithBoxes ? img.withBoxes : img.original;
+
+    this.selectedBoxIndex = 0;
+
+    console.log('STEP2 TEST A');
+
+    if (img.boxes && img.boxes.length > 0) {
+
+      this.selectedBox = img.boxes[0];
+
+      console.log('STEP2 TEST B', img.boxes.length);
+      console.log('STEP2 TEST C', this.selectedBox);
+
+    } else {
+
+      console.log('STEP2 TEST D - NO BOXES');
+
+      this.selectedBox = null;
+
+    }
 
     //copys the image raw prediction and statusmessage into the field and updates the structured prediction/status
     // If engineerCheckedSession is true, prefer correctedPrediction; otherwise use rawPrediction
@@ -1052,6 +1114,19 @@ private lastImageTitleDebugAt: number = 0;
     };
   }
 
+  getBoxStyle(box: any) {
+
+    const scale = 3;
+
+    return {
+      left: ((box.x * scale) + 110) + 'px',
+      top: (box.y * scale) + 'px',
+      width: (box.w * scale) + 'px',
+      height: (box.h * scale) + 'px'
+    };
+
+  }
+
   /** Copy session-level notes and review status into the form state. */
   private applySessionFormState(session: any): void {
     if (!session) {
@@ -1116,11 +1191,22 @@ detectCenterImage() {
   if (closestImg) {
     const src = (closestImg as HTMLImageElement).getAttribute('src') ?? '';
     const matched = this.imagePaths.find(img => img.original === src || img.withBoxes === src);
+    console.log('BOXES DEBUG:', matched?.boxes);
+    console.log('FIRST BOX:', matched?.boxes?.[0]);
     if (!matched) return;
 
     //Update selectedImage from the scroll and get 
     //detectionMessage prefer statusMessage, else prediction.type
   this.selectedImage = this.showWithBoxes ? matched.withBoxes : matched.original;
+
+  if (matched.boxes && matched.boxes.length > 0) {
+    this.selectedBoxIndex = 0;
+    this.selectedBox = matched.boxes[0];
+  } else {
+    this.selectedBoxIndex = -1;
+    this.selectedBox = null;
+  }
+
   // Prefer stored statusMessage; otherwise build readable strings from prediction
   if (matched.statusMessage && matched.statusMessage.length > 0) {
     this.detectionMessage = matched.statusMessage;
