@@ -857,8 +857,22 @@ export class ImageStorageService {
   addSessionIfNotExists(session: Partial<ImageSession>): boolean {
     if (!session || !session.id) return false;
 
-    const exists = this.sessions.some(s => s.id === session.id);
-    if (exists) return false;
+    const existing = this.sessions.find(s => s.id === session.id);
+    if (existing) {
+      existing.name = session.name || existing.name || 'Untitled Session';
+      existing.imageKeys = Array.isArray(session.imageKeys) ? session.imageKeys.filter(k => !!k) : existing.imageKeys;
+      existing.created = session.created || existing.created || new Date().toISOString();
+      existing.totalBoundingBoxes = session.totalBoundingBoxes || existing.totalBoundingBoxes || 0;
+      existing.userId = session.userId ?? existing.userId;
+      existing.sessionId = session.sessionId ?? existing.sessionId;
+      existing.notes = session.notes ?? existing.notes;
+      if (typeof session.engineerCheckedSession !== 'undefined') {
+        existing.engineerCheckedSession = !!session.engineerCheckedSession;
+      }
+
+      this.persistSessions();
+      return false;
+    }
 
     const normalized: ImageSession = {
       id: session.id,
