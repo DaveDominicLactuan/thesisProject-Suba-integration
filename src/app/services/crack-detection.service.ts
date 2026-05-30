@@ -194,7 +194,7 @@ export class CrackDetectionService {
       }
     }
 
-    // --- SIMPLE DILATION TO CONNECT FRAGMENTS ---
+    // SIMPLE DILATION TO CONNECT FRAGMENTS
     const dilated = new Uint8Array(flat);
 
     for (let y = 1; y < h - 1; y++) {

@@ -527,6 +527,10 @@ export class CameraPage2Page implements AfterViewInit {
     } catch (e) {
       console.warn('[CameraPage2] processDataUrl: Failed to retrieve userID from storage', e);
     }
+
+    const sessionImgIndex = typeof (this.imageStorage as any).getNextOriginalImageNumber === 'function'
+      ? (this.imageStorage as any).getNextOriginalImageNumber(this.selectedSessionId || undefined)
+      : undefined;
     
     //preprocess
     const doWork = async () => {
@@ -553,7 +557,7 @@ export class CameraPage2Page implements AfterViewInit {
       // Prepare storage entry or build StoredImage entry
       const safeOriginal = await this.shrinkDataUrlToBytes(dataUrl, maxBytes, 4000);
       const timestamp = new Date().toISOString();
-      const generatedFilename = this.buildSessionFilename(!!prediction, timestamp, originalName);
+      const generatedFilename = this.buildSessionFilename(!!prediction, timestamp, originalName, sessionImgIndex);
       const entry: StoredImage = {
         original: safeOriginal,
         timestamp,
@@ -566,7 +570,8 @@ export class CameraPage2Page implements AfterViewInit {
         sessionId: this.selectedSessionId || undefined
       };
 
-      // If the model returned bounding boxes, create a "withBoxes" image and attach boxes
+      // If the model returned bounding boxes, create a "withBoxes" image, attach boxes,
+      // and persist cropped crack images for each detected box.
       try {
         if (prediction && Array.isArray(prediction.boxes) && prediction.boxes.length > 0) {
           const rawBoxes = prediction.boxes;
@@ -580,14 +585,37 @@ export class CameraPage2Page implements AfterViewInit {
 
           const maskW = prediction.maskWidth || prediction.maskW || 128;
           const maskH = prediction.maskHeight || prediction.maskH || 128;
+
+          const croppedCracks: any[] = [];
+
+          for (const box of boxesToDraw) {
+            const croppedNumber = croppedCracks.length + 1;
+            const crop = await this.cropBoxFromImage(dataUrl, box, maskW, maskH);
+            const cropTensor = await this.preprocessImage(crop);
+            const cropPrediction = await this.crackDetectionService.runInference(cropTensor);
+
+            croppedCracks.push({
+              croppedNumber,
+              image: crop,
+              box,
+              type: cropPrediction?.type ?? 'unknown',
+              shape: cropPrediction?.shape ?? 'unknown',
+              severity: cropPrediction?.severity ?? 'unknown'
+            });
+          }
+
+          console.log('[CROPS] Total crops:', croppedCracks.length);
+
          // try to create withBoxes image with drawn boxes based on the bouding box data
           try {
             const withBoxesDataUrl = await this.drawBoxesOnImage(dataUrl, boxesToDraw, maskW, maskH);
             const safeWithBoxes = await this.shrinkDataUrlToBytes(withBoxesDataUrl, maxBytes, 4000);
             (entry as any).withBoxes = safeWithBoxes;
             (entry as any).boxes = boxesToDraw;
+            (entry as any).croppedCracks = croppedCracks;
             (entry as any).detectionMessage = `Rendered ${boxesToDraw.length} detected crack box(es)`;
             this.totalBoundingBoxesCreated += boxesToDraw.length;
+            console.log('CROPPED CRACKS', croppedCracks);
           } catch (renderErr) {
             console.warn('[CameraPage2] drawBoxesOnImage failed', renderErr);
             (entry as any).withBoxes = safeOriginal;
@@ -611,18 +639,32 @@ export class CameraPage2Page implements AfterViewInit {
         return entry;
       }
       await this.imageStorage.addImage(entry, this.selectedSessionId || undefined);
-      // Debug: log the full entry after processing and storage
-      console.log('[CameraPage2] processDataUrl saved entry:', entry);
-      // also add to active session if one exists
       try {
         //add to current session in use and set sessioIsPristine to false, then refresh displayed images
         if (this.selectedSessionId && typeof (this.imageStorage.addImageToSession) === 'function') {
           this.imageStorage.addImageToSession(this.selectedSessionId, entry.filename);
           this.sessionIsPristine = false; // Mark session as no longer pristine
         }
+      } catch (e) {
+        console.warn('[CameraPage2] Failed to add parent image to session', e);
+      }
+      if (Array.isArray((entry as any).croppedCracks) && (entry as any).croppedCracks.length > 0) {
+        const storedCroppedCracks = await this.persistCroppedCracksAsSessionImages((entry as any).croppedCracks, originalName || entry.fileImageName || entry.filename, entry.timestamp, userId, sessionImgIndex);
+        (entry as any).croppedCracks = storedCroppedCracks;
+        try {
+          if (typeof (this.imageStorage as any).setEntryForImage === 'function') {
+            (this.imageStorage as any).setEntryForImage(entry.filename, entry);
+          }
+        } catch (setErr) {
+          console.warn('[CameraPage2] Failed to update stored parent entry with cropped cracks', setErr);
+        }
+      }
+      // Debug: log the full entry after processing and storage
+      console.log('[CameraPage2] processDataUrl saved entry:', entry);
+      try {
         await this.refreshDisplayedImages();
       } catch (e) {
-        console.warn('[CameraPage2] Failed to add image to session or refresh display', e);
+        console.warn('[CameraPage2] Failed to refresh display', e);
       }
       // Count only true new uploads/captures as session additions.
       if (bumpCounters) {
@@ -633,6 +675,7 @@ export class CameraPage2Page implements AfterViewInit {
       if (refreshCountsAfterSave) {
         await this.updatePhotoCounts();
       }
+      await this.logCurrentSessionImageObjects();
       return entry;
     };
 
@@ -646,7 +689,7 @@ export class CameraPage2Page implements AfterViewInit {
         // If we timed out, persist a fallback entry indicating failure/no-prediction
         const safeOriginal = await this.shrinkDataUrlToBytes(dataUrl, maxBytes, 4000);
         const timestamp = new Date().toISOString();
-        const generatedFilename = this.buildSessionFilename(false, timestamp, originalName);
+        const generatedFilename = this.buildSessionFilename(false, timestamp, originalName, sessionImgIndex);
         const entry: StoredImage = {
           original: safeOriginal,
           timestamp,
@@ -677,6 +720,7 @@ export class CameraPage2Page implements AfterViewInit {
           this.imagesUploadedThisSession += 1;
           // update UI counters from authoritative storage
           await this.updatePhotoCounts();
+          await this.logCurrentSessionImageObjects();
         } catch (e) {
           console.warn('[CameraPage2] Failed to persist fallback entry after timeout', e);
         }
@@ -687,6 +731,22 @@ export class CameraPage2Page implements AfterViewInit {
       this.isProcessing = false;
       // Log cumulative bounding box count after processing
       this.logBoundingBoxStats();
+    }
+  }
+
+  /** Print the current session's stored image objects after processing completes. */
+  private async logCurrentSessionImageObjects() {
+    try {
+      const sessionId = this.selectedSessionId;
+      if (!sessionId || !this.imageStorage || typeof (this.imageStorage as any).getSessionImages !== 'function') {
+        console.log('[CameraPage2] No active session or storage helper unavailable for image-object dump');
+        return;
+      }
+
+      const sessionImages = await (this.imageStorage as any).getSessionImages(sessionId);
+      console.log('[CameraPage2] Session image objects:', sessionImages);
+    } catch (e) {
+      console.warn('[CameraPage2] Failed to log session image objects', e);
     }
   }
 
@@ -794,16 +854,158 @@ export class CameraPage2Page implements AfterViewInit {
     return `P${idx}${hh}${mm}.jpg`;
   }
 
-  private buildSessionFilename(hasCrack: boolean, timestamp?: string, fallbackName?: string): string {
+  private buildSessionFilename(hasCrack: boolean, timestamp?: string, fallbackName?: string, imgIndex?: number): string {
     const svc: any = this.imageStorage as any;
     if (svc && typeof svc.generateSessionFilename === 'function') {
       return svc.generateSessionFilename({
         sessionId: this.selectedSessionId || undefined,
+        filename: fallbackName,
+        designatedPart: 'original',
+        imageType: 'original',
         hasCrack,
+        imgIndex,
         timestamp
       });
     }
     return fallbackName || this.generateFilename();
+  }
+
+  private async persistCroppedCracksAsSessionImages(
+    croppedCracks: Array<{ croppedNumber?: number; image: string; box: BoundingBox; type: string; shape: string; severity: string; }>,
+    originalFilename: string,
+    timestamp: string,
+    userId?: string,
+    imgIndex?: number
+  ): Promise<any[]> {
+    const storedCroppedCracks: any[] = [];
+    const service: any = this.imageStorage as any;
+    const sessionId = this.selectedSessionId || undefined;
+
+    for (let index = 0; index < croppedCracks.length; index++) {
+      const crop = croppedCracks[index];
+      const croppedNumber = typeof crop.croppedNumber === 'number' ? crop.croppedNumber : index + 1;
+      const generatedFilename = typeof service?.generateSessionFilename === 'function'
+        ? service.generateSessionFilename({
+            sessionId,
+            filename: originalFilename,
+            originalFilename,
+            designatedPart: 'cropped',
+            croppedNumber,
+            imageType: 'cropped',
+            imgIndex,
+            timestamp,
+          })
+        : this.generateFilename();
+
+      const safeCrop = await this.shrinkDataUrlToBytes(crop.image, 900_000, 4000);
+      const cropEntry: StoredImage = {
+        original: safeCrop,
+        timestamp,
+        filename: generatedFilename,
+        fileImageName: `${originalFilename.replace(/\.[^.]+$/, '')}-crop-${croppedNumber}`,
+        prediction: {
+          type: crop.type,
+          shape: crop.shape,
+          severity: crop.severity,
+        },
+        hasPrediction: true,
+        statusMessage: `Cropped crack ${croppedNumber} prediction stored`,
+        detectionMessage: `Stored cropped crack ${croppedNumber}`,
+        boxes: [crop.box],
+        userId,
+        sessionId,
+      };
+
+      await this.imageStorage.addImage(cropEntry, sessionId);
+
+      if (sessionId && typeof (this.imageStorage as any).addImageToSession === 'function') {
+        (this.imageStorage as any).addImageToSession(sessionId, cropEntry.filename);
+      }
+
+      if (userId) {
+        try {
+          await this.imageStorage.saveImageToUser(userId, cropEntry);
+        } catch (saveErr) {
+          console.warn('[CameraPage2] Failed to save cropped crack to user storage', saveErr);
+        }
+      }
+
+      storedCroppedCracks.push({
+        ...crop,
+        filename: cropEntry.filename,
+        sessionImage: cropEntry,
+      });
+    }
+
+    return storedCroppedCracks;
+  }
+
+  async cropBoxFromImage(
+    imageDataUrl: string,
+    box: BoundingBox,
+    maskW: number,
+    maskH: number
+  ): Promise<string> {
+    const img = new Image();
+    img.src = imageDataUrl;
+
+    return new Promise(resolve => {
+      img.onload = () => {
+        const imgW = img.naturalWidth;
+        const imgH = img.naturalHeight;
+
+        const scaleX = imgW / maskW;
+        const scaleY = imgH / maskH;
+
+        const padding = 100;
+
+        let cropX = Math.round(box.x * scaleX);
+        let cropY = Math.round(box.y * scaleY);
+        let cropW = Math.round(box.w * scaleX);
+        let cropH = Math.round(box.h * scaleY);
+
+        // Add context around crack
+        cropX = Math.max(0, cropX - padding);
+        cropY = Math.max(0, cropY - padding);
+
+        cropW = Math.min(imgW - cropX, cropW + padding * 2);
+        cropH = Math.min(imgH - cropY, cropH + padding * 2);
+
+        // Keep a 4:3 aspect ratio
+        const targetRatio = 4 / 3;
+        const centerX = cropX + cropW / 2;
+        const centerY = cropY + cropH / 2;
+
+        if (cropH > cropW) {
+          cropW = cropH * targetRatio;
+        } else {
+          cropH = cropW / targetRatio;
+        }
+
+        cropX = Math.round(centerX - cropW / 2);
+        cropY = Math.round(centerY - cropH / 2);
+
+        cropX = Math.max(0, cropX);
+        cropY = Math.max(0, cropY);
+
+        if (cropX + cropW > imgW) {
+          cropW = imgW - cropX;
+        }
+
+        if (cropY + cropH > imgH) {
+          cropH = imgH - cropY;
+        }
+
+        const canvas = document.createElement('canvas');
+        canvas.width = cropW;
+        canvas.height = cropH;
+
+        const ctx = canvas.getContext('2d')!;
+        ctx.drawImage(img, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
+
+        resolve(canvas.toDataURL('image/jpeg'));
+      };
+    });
   }
 
 

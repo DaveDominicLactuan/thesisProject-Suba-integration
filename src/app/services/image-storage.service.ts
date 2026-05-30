@@ -8,16 +8,35 @@ import { S3Client, PutObjectCommand, ListObjectsV2Command, HeadObjectCommand, Ge
 import { fromCognitoIdentityPool } from '@aws-sdk/credential-providers';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'; // NEW IMPORT
 
+export interface CrackPrediction {
+  id: number;
+
+  box: {
+    x: number;
+    y: number;
+    w: number;
+    h: number;
+  };
+
+  type?: string;
+  shape?: string;
+  severity?: string;
+
+  confidence?: number;
+}
+
 //image object in the session
 export interface StoredImage {
   original: string; // Base64 image
   withBoxes?: string;
   boxes?: any[];
+  croppedCracks?: {image: string; box: any; type: string; shape: string; severity: string;}[];
   faceDetected?: boolean;
   faceData?: any[];
   timestamp: string;
   filename: string;
   prediction?: { type: string; shape: string; severity: string; boxes?: any[] };
+  multiPredictions?: CrackPrediction[];
   correctedPrediction?: { type: string; shape: string; severity: string; boxes?: any[] };
   // New optional helpers for status/testing
   hasPrediction?: boolean;
@@ -73,6 +92,8 @@ export class ImageStorageService {
   private identityPoolId = 'ap-southeast-2:e70f96d9-6860-4f80-9bf8-082d2661b665';
   // Counter map to track image number per session
   private sessionImageCounters: Map<string, number> = new Map();
+  // Separate counter map for original uploads so cropped variants can reuse the same img index.
+  private sessionOriginalImageCounters: Map<string, number> = new Map();
 
   newSessionIdForFileShare = '';
 
@@ -184,13 +205,15 @@ export class ImageStorageService {
   }
 
   /** Upload original image to S3 with session-scoped filename */
-  async uploadSessionImageOriginal(dataUrl: string, sessionId: string, originalFilename: string): Promise<{ url: string; s3Key: string } | null> {
+  async uploadSessionImageOriginal(dataUrl: string, sessionId: string, originalFilename: string, imgIndex?: number): Promise<{ url: string; s3Key: string } | null> {
     try {
       // Generate S3 filename using session info
       const s3Filename = this.generateSessionFilename({
         sessionId,
         filename: originalFilename,
+        designatedPart: 'original',
         imageType: 'original',
+        imgIndex,
         timestamp: new Date().toISOString()
       });
 
@@ -225,13 +248,15 @@ export class ImageStorageService {
   }
 
   /** Upload withBoxes image to S3 with session-scoped filename */
-  async uploadSessionImageWithBoxes(dataUrl: string, sessionId: string, originalFilename: string): Promise<{ url: string; s3Key: string } | null> {
+  async uploadSessionImageWithBoxes(dataUrl: string, sessionId: string, originalFilename: string, imgIndex?: number): Promise<{ url: string; s3Key: string } | null> {
     try {
       // Generate S3 filename using session info
       const s3Filename = this.generateSessionFilename({
         sessionId,
         filename: originalFilename,
+        designatedPart: 'original',
         imageType: 'withBoxes',
+        imgIndex,
         timestamp: new Date().toISOString()
       });
 
@@ -553,6 +578,7 @@ export class ImageStorageService {
               timestamp: firestoreImage.timestamp || new Date().toISOString(),
               filename: firestoreImage.filename,
               prediction: firestoreImage.prediction || null,
+              multiPredictions: firestoreImage.multiPredictions || [],
               hasPrediction: firestoreImage.hasPrediction || false,
               statusMessage: firestoreImage.statusMessage || '',
               detectionMessage: firestoreImage.detectionMessage || '',
@@ -563,6 +589,7 @@ export class ImageStorageService {
               storageUrl: firestoreImage.storageUrl,
               withBoxesStoragePath: firestoreImage.withBoxesStoragePath,
               withBoxesStorageUrl: firestoreImage.withBoxesStorageUrl,
+              croppedCracks: firestoreImage.croppedCracks || [],
               // ✅ FIX: Also retrieve the explicit S3 key fields that were saved to Firestore
               originalS3Key: firestoreImage.originalS3Key || firestoreImage.storagePath || null,
               originalS3Url: firestoreImage.originalS3Url || firestoreImage.storageUrl || null,
@@ -583,6 +610,12 @@ export class ImageStorageService {
             }
             if (!localImage.withBoxesS3Url && firestoreImage.withBoxesS3Url) {
               localImage.withBoxesS3Url = firestoreImage.withBoxesS3Url;
+            }
+            if (!localImage.croppedCracks && firestoreImage.croppedCracks) {
+              localImage.croppedCracks = firestoreImage.croppedCracks;
+            }
+            if (!localImage.multiPredictions && firestoreImage.multiPredictions) {
+              localImage.multiPredictions = firestoreImage.multiPredictions;
             }
           }
 
@@ -648,11 +681,49 @@ export class ImageStorageService {
   /** Initialize session image counters from existing images */
   private initializeSessionCounters() {
     this.sessionImageCounters.clear();
+    this.sessionOriginalImageCounters.clear();
     // Count images per session from existing data
     this.sessions.forEach(session => {
       const count = session.imageKeys ? session.imageKeys.length : 0;
       this.sessionImageCounters.set(session.id, count);
+      this.sessionOriginalImageCounters.set(session.id, this.getSessionOriginalImageCount(session.id));
     });
+  }
+
+  private isOriginalSessionImageKey(imageKey: string): boolean {
+    return /img\d+original/i.test(imageKey || '');
+  }
+
+  private getSessionOriginalImageCount(sessionId?: string): number {
+    if (!sessionId) {
+      return this.images.filter(image => this.isOriginalSessionImageKey(image.filename)).length;
+    }
+
+    const session = this.sessions.find(s => s.id === sessionId);
+    if (!session || !Array.isArray(session.imageKeys)) {
+      return 0;
+    }
+
+    let count = 0;
+    for (const key of session.imageKeys) {
+      const image = this.images.find(i => i.filename === key || i.original === key || (i.withBoxes && i.withBoxes === key));
+      if (image && this.isOriginalSessionImageKey(image.filename)) {
+        count += 1;
+      } else if (this.isOriginalSessionImageKey(key)) {
+        count += 1;
+      }
+    }
+
+    return count;
+  }
+
+  /** Get the next image number for original uploads without counting cropped derivatives. */
+  getNextOriginalImageNumber(sessionId?: string): number {
+    const key = sessionId || 'global';
+    const currentCount = this.sessionOriginalImageCounters.get(key) ?? this.getSessionOriginalImageCount(sessionId);
+    const nextCount = currentCount + 1;
+    this.sessionOriginalImageCounters.set(key, nextCount);
+    return nextCount;
   }
 
   /**
@@ -714,8 +785,12 @@ export class ImageStorageService {
   generateSessionFilename(options: { 
     sessionId?: string; 
     filename?: string; 
+    originalFilename?: string;
     imageType?: string; 
     hasCrack?: boolean; 
+    designatedPart?: 'original' | 'cropped';
+    croppedNumber?: number;
+    imgIndex?: number;
     timestamp?: string 
   } = {}): string {
     const date = options.timestamp ? new Date(options.timestamp) : new Date();
@@ -729,7 +804,9 @@ export class ImageStorageService {
     const timeStr = `${hours}${minutes}`;
 
     const sessionId = options.sessionId;
-    const imgIndex = sessionId ? (this.getSessionImageCount(sessionId) + 1) : (this.images.length + 1);
+    const imgIndex = typeof options.imgIndex === 'number'
+      ? options.imgIndex
+      : (sessionId ? (this.getSessionImageCount(sessionId) + 1) : (this.images.length + 1));
     const crackPart = options.hasCrack ? `crack${this.getSessionCrackCount(sessionId) + 1}` : '';
 
     // Get current userId from auth
@@ -745,10 +822,13 @@ export class ImageStorageService {
     const sessionIdPrefix = session?.id ? `sessionId:${session.id}` : '';
 
     // Include original filename and image type in the final filename
-    const originalFilename = options.filename ? `_${options.filename.replace(/\.[^.]+$/, '')}` : '';
+    const originalFilenameSource = options.originalFilename || options.filename || '';
+    const originalFilename = originalFilenameSource ? `_${originalFilenameSource.replace(/\.[^.]+$/, '')}` : '';
     const imageTypeSuffix = options.imageType ? `_${options.imageType}` : '';
 
-    const crackPartStr = crackPart ? `_${crackPart}` : '';
+    const crackPartStr = options.designatedPart
+      ? `${options.designatedPart}${options.designatedPart === 'cropped' ? String(options.croppedNumber ?? '') : ''}`
+      : (crackPart ? `_${crackPart}` : '');
 
     console.log("uderIdPrefix:", userIdPrefix, "sessionIdPrefix:", sessionIdPrefix, "originalFilename:", originalFilename, "imageTypeSuffix:", imageTypeSuffix, "crackPartStr:", crackPartStr);
     
@@ -874,6 +954,7 @@ export class ImageStorageService {
 
     this.sessions.unshift(normalized);
     this.sessionImageCounters.set(normalized.id, normalized.imageKeys.length);
+    this.sessionOriginalImageCounters.set(normalized.id, this.getSessionOriginalImageCount(normalized.id));
     this.persistSessions();
     return true;
   }
@@ -1072,6 +1153,8 @@ export class ImageStorageService {
           // S3 references for original image (full generated filename with userID:sessionId prefix)
           originalS3Key: image.storagePath || null,   // e.g., "userID:abc123sessionId:xyz789img1crack1041120261109original.jpg"
           originalS3Url: image.storageUrl || null,    // HTTPS URL to original image
+          croppedCracks: image.croppedCracks || [],
+          multiPredictions: image.multiPredictions || [],
           // Backward compatibility
           storagePath: image.storagePath || null,
           storageUrl: image.storageUrl || null
@@ -1157,9 +1240,11 @@ export class ImageStorageService {
         statusMessage: image.statusMessage || '',
         detectionMessage: image.detectionMessage || '',
         prediction: image.prediction || null,
+        multiPredictions: image.multiPredictions || [],
         correctedPrediction: image.correctedPrediction || null,
         engineerCheckedSession: !!image.engineerCheckedSession,
         boxes: image.boxes || [],
+        croppedCracks: image.croppedCracks || [],
       };
 
       await setDoc(docRef, firestoreData);

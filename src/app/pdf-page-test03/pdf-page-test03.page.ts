@@ -414,11 +414,8 @@ export class PdfPageTest03Page {
 
           // Title appears only once at the beginning of the PDF.
           if (headerLogo) {
-            content.push({ image: headerLogo, width: 170, alignment: 'center', margin: [0, 0, 0, 12] });
+            content.push({ image: headerLogo, width: 220, alignment: 'center', margin: [0, 0, 0, 30] });
           }
-          content.push({ text: 'Crack', style: 'header', alignment: 'center', margin: [0, 0, 0, 0] });
-          content.push({ text: 'Damage', style: 'header', alignment: 'center', margin: [0, 0, 0, 0] });
-          content.push({ text: 'Report', style: 'header', alignment: 'center', margin: [0, 0, 0, 30] });
     
           // If sessionImages exist, create one page per image with page breaks
           if (this.sessionImages && this.sessionImages.length > 0) {

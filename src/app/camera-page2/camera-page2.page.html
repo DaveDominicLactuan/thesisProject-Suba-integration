@@ -71,7 +71,7 @@
       <div class="bottom-top-row">
   <!-- <button class="function-btn" (click)="pickImagesMobile()">Upload Image <img src="assets/Upload_Image_White.png" alt="Upload" class="action-icon" /></button>
       <button class="function-btn" (click)="goToFeedBackPage()">Finish Session <img src="assets/check2.png" alt="Finish" class="action-icon" /></button> -->
-      <button class="function-btn" (click)="pickImagesMobile()">
+      <button class="function-btn" (click)="pickImagesMobile()" [disabled]="isProcessing" [style.opacity]="isProcessing ? 0.55 : 1">
         <img src="assets/Upload_Image_White.png" alt="Upload" class="action-icon" />
       </button>
 
