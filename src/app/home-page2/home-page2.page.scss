@@ -306,6 +306,8 @@
     box-shadow: 0 10px 18px rgba(0, 0, 0, 0.08);
     transition: transform 0.1s ease, box-shadow 0.2s ease;
 
+    position: relative; /* allow badge positioning */
+
     &:hover {
       transform: translateY(-2px);
       box-shadow: 0 14px 22px rgba(0, 0, 0, 0.12);
@@ -336,6 +338,20 @@
       font-size: 14px;
       font-weight: 700;
       color: #1f1f1f;
+    }
+
+    .explore-badge {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      background: #ff512f;
+      color: #fff;
+      border-radius: 999px;
+      padding: 4px 8px;
+      font-size: 12px;
+      font-weight: 700;
+      line-height: 1;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.12);
     }
   }
 

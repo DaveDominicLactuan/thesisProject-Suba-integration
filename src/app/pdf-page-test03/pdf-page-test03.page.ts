@@ -31,6 +31,7 @@ export class PdfPageTest03Page {
     pdfSrc: SafeResourceUrl | null = null;
     private backButtonSub: any; // hardware back handler
     private savedPdfPath: string = ''; // Store the path for opening from notification
+  private headerLogoDataUrl: string | null = null;
     // Images passed via navigation state or history.state
     sessionImages: any[] = [];
     showSessionLoadingWindow: boolean = false;
@@ -322,6 +323,21 @@ export class PdfPageTest03Page {
       return fallback;
     }
 
+    private async ensureHeaderLogoDataUrl(): Promise<string> {
+      if (this.headerLogoDataUrl) {
+        return this.headerLogoDataUrl;
+      }
+
+      try {
+        this.headerLogoDataUrl = await this.ensureImageDataUrl('assets/DamageLogo2.png');
+      } catch (err) {
+        console.warn('[PDF] Failed to load header logo, using text-only title', err);
+        this.headerLogoDataUrl = '';
+      }
+
+      return this.headerLogoDataUrl;
+    }
+
     /**
      * Extract original image from image object with multiple property variations
      */
@@ -392,10 +408,14 @@ export class PdfPageTest03Page {
           // Fallback placeholder base64 images
           const imgPlainFallback = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
           const imgBoxFallback = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+          const headerLogo = this.headerLogoDataUrl || '';
     
           const content: Content[] = [];
 
           // Title appears only once at the beginning of the PDF.
+          if (headerLogo) {
+            content.push({ image: headerLogo, width: 170, alignment: 'center', margin: [0, 0, 0, 12] });
+          }
           content.push({ text: 'Crack', style: 'header', alignment: 'center', margin: [0, 0, 0, 0] });
           content.push({ text: 'Damage', style: 'header', alignment: 'center', margin: [0, 0, 0, 0] });
           content.push({ text: 'Report', style: 'header', alignment: 'center', margin: [0, 0, 0, 30] });
@@ -589,6 +609,8 @@ export class PdfPageTest03Page {
           // Temporarily replace sessionImages used by getDocumentDefinition
           this.sessionImages = processed;
         }
+
+        await this.ensureHeaderLogoDataUrl();
 
         // Build PDF and return blob
         const pdfDoc = pdfMake.createPdf(this.getDocumentDefinition());
@@ -810,6 +832,7 @@ export class PdfPageTest03Page {
            let containerEl: HTMLDivElement | null = null;
 
            await this.runPdfGenerationWindow(async () => {
+             await this.ensureHeaderLogoDataUrl();
              // Generate the PDF using the current document definition so it matches download behaviour
              const pdfDoc = pdfMake.createPdf(this.getDocumentDefinition());
              const blob: Blob = await new Promise((resolve, reject) => {

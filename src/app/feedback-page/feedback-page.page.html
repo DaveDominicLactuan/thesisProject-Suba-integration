@@ -122,9 +122,12 @@
             <span class="select-wrap-value">{{ dropdown1 || 'Type' }}</span>
           </div>
           <ng-template #dropdown1Editor>
-            <select id="dropdown1" [(ngModel)]="dropdown1" (ngModelChange)="updateSelectedImageFromDropdowns()" class="input-item" [disabled]="isUserReadOnly" [class.hide-dropdown-arrow]="userRole !== 'engineer'" [class.no-arrow]="userRole === 'user'">
-              <option *ngFor="let option of dropdownOptionsDirection" [value]="option">{{ option }}</option>
-            </select>
+            <div class="engineer-inline-field">
+              <select id="dropdown1" [(ngModel)]="dropdown1" (ngModelChange)="updateSelectedImageFromDropdowns()" class="input-item" [disabled]="isUserReadOnly" [class.hide-dropdown-arrow]="userRole !== 'engineer'" [class.no-arrow]="userRole === 'user'">
+                <option *ngFor="let option of dropdownOptionsDirection" [value]="option">{{ option }}</option>
+              </select>
+              <div class="engineer-inline-preview">{{ dropdown1 || 'Type' }}</div>
+            </div>
           </ng-template>
         </div>
 
@@ -134,13 +137,31 @@
             <span class="select-wrap-value">{{ dropdown2 || 'Shape' }}</span>
           </div>
           <ng-template #dropdown2Editor>
-            <select id="dropdown2" [(ngModel)]="dropdown2" (ngModelChange)="updateSelectedImageFromDropdowns()" class="input-item" [disabled]="isUserReadOnly" [class.hide-dropdown-arrow]="userRole !== 'engineer'" [class.no-arrow]="userRole === 'user'" [attr.toggle-icon]="userRole === 'user' ? ' ' : null">
-              <option *ngFor="let option of dropdownOptionsShape" [value]="option">{{ option }}</option>
-            </select>
+            <div class="engineer-inline-field">
+              <select id="dropdown2" [(ngModel)]="dropdown2" (ngModelChange)="updateSelectedImageFromDropdowns()" class="input-item" [disabled]="isUserReadOnly" [class.hide-dropdown-arrow]="userRole !== 'engineer'" [class.no-arrow]="userRole === 'user'" [attr.toggle-icon]="userRole === 'user' ? ' ' : null">
+                <option *ngFor="let option of dropdownOptionsShape" [value]="option">{{ option }}</option>
+              </select>
+              <div class="engineer-inline-preview">{{ dropdown2 || 'Shape' }}</div>
+            </div>
           </ng-template>
         </div>
 
         <div class="form-group">
+          <label for="dropdown3">Severity of Crack</label>
+          <div *ngIf="userRole === 'user'; else dropdown3Editor" class="select-wrap">
+            <span class="select-wrap-value">{{ dropdown3 || 'Severity' }}</span>
+          </div>
+          <ng-template #dropdown3Editor>
+            <div class="engineer-inline-field">
+              <select id="dropdown3" [(ngModel)]="dropdown3" (ngModelChange)="updateSelectedImageFromDropdowns()" class="input-item" [disabled]="isUserReadOnly" [class.hide-dropdown-arrow]="userRole !== 'engineer'" [class.no-arrow]="userRole === 'user'">
+                <option *ngFor="let option of dropdownOptionsSeverity" [value]="option">{{ option }}</option>
+              </select>
+              <div class="engineer-inline-preview">{{ dropdown3 || 'Severity' }}</div>
+            </div>
+          </ng-template>
+        </div>
+
+          <div class="form-group">
           <label for="dropdown3">Severity of Crack</label>
           <div *ngIf="userRole === 'user'; else dropdown3Editor" class="select-wrap">
             <span class="select-wrap-value">{{ dropdown3 || 'Severity' }}</span>

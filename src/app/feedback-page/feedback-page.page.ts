@@ -85,6 +85,8 @@ private lastImageTitleDebugAt: number = 0;
 
   // routeSessionId holds session id passed via query param from Camera page
   routeSessionId?: string | null = null;
+  routeNotes: string | null = '';
+  routeengineerCheckedSession: boolean = false;
 
   @ViewChild('scrollContainer', { static: false }) scrollContainer!: ElementRef;
   @ViewChild('zoomImageElement', { static: false }) zoomImageElement?: ElementRef;
@@ -227,7 +229,11 @@ private lastImageTitleDebugAt: number = 0;
     // Initialize sessions then refresh the displayed images from the active session
     setTimeout(() => {
       // If a session id was passed using query param use it
-      try { this.routeSessionId = this.route.snapshot.queryParamMap.get('sessionId'); } catch (e) { this.routeSessionId = null; }
+      try { 
+        this.routeSessionId = this.route.snapshot.queryParamMap.get('sessionId'); 
+        this.routeNotes = this.route.snapshot.queryParamMap.get('notes'); 
+        this.routeengineerCheckedSession = this.route.snapshot.queryParamMap.get('engineerCheckedSession') === 'true';
+      } catch (e) { this.routeSessionId = null; }
       this.loadSessions()
           .then(() => this.refreshDisplayedImages())
         .then(() => {
@@ -555,6 +561,8 @@ private lastImageTitleDebugAt: number = 0;
 
       if (currentSession) {
         this.sessions = [currentSession];
+        currentSession.notes = this.route.snapshot.queryParamMap.get('notes');
+        currentSession.engineerCheckedSession = this.route.snapshot.queryParamMap.get('engineerCheckedSession') === 'true';
         this.selectedSessionId = currentSession.id;
         this.applySessionFormState(currentSession);
         console.log('[FeedbackPage] Loaded current session only:', currentSession);

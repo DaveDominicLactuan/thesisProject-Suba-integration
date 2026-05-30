@@ -11,6 +11,8 @@ import { jsPDF } from 'jspdf';
 import * as L from 'leaflet';
 import { Firestore, collection, getDocs } from '@angular/fire/firestore';
 import { UserPrefetchCacheService } from '../services/user-prefetch-cache.service';
+import { firstValueFrom } from 'rxjs';
+import { ChatService } from '../services/chat.service';
 
 interface OfficeLocationMarkerData {
   id: string;
@@ -42,6 +44,7 @@ export class HomePage2Page implements OnInit, OnDestroy {
   engineeringID: string | null = null;
   userID: string | null = null;
   sessions: any[] = [];
+  exploreBadgeCount: number = 0;
   lastSessionDisplayName: string | null = null;
   private backButtonSub: any; // hardware back handler
   isLoggedIn: boolean = false;
@@ -56,7 +59,7 @@ export class HomePage2Page implements OnInit, OnDestroy {
   private locationCheckInterval: any = null;
 
   /** Inject auth, router, and image storage services for navigation and data. */
-  constructor(private formBuilder: FormBuilder, private router: Router, private authService: AuthService, private navCtrl: NavController, private auth3: Auth3Service, private imageStorage: ImageStorageService, private platform: Platform, private firestore: Firestore, private userPrefetchCache: UserPrefetchCacheService) {
+  constructor(private formBuilder: FormBuilder, private router: Router, private authService: AuthService, private navCtrl: NavController, private auth3: Auth3Service, private imageStorage: ImageStorageService, private platform: Platform, private firestore: Firestore, private userPrefetchCache: UserPrefetchCacheService, private chatService: ChatService) {
 
   }
 
@@ -81,6 +84,7 @@ private async initialize(): Promise<void> {
     if (isAlreadyLoggedIn) {
       console.log('[HomePage2.initialize] User ALREADY logged in. Immediately loading locally stored profile for UID:', currentUser!.uid);
       await this.loadUserProfileForLoggedInUser(currentUser!.uid);
+      await this.refreshUnreadChatBadgeCount(currentUser!.uid);
       
       // Then optionally refresh auth/profile in background after initial load completes
       this.refreshUserProfileInBackground(currentUser!.uid).catch((err) => {
@@ -89,6 +93,7 @@ private async initialize(): Promise<void> {
     } else {
       console.log('[HomePage2.initialize] User NOT logged in. Using existing auth wait flow...');
       await this.loadUserProfileWithAuthWait();
+      await this.refreshUnreadChatBadgeCount();
     }
 
     console.log('[HomePage2.initialize] ===== INITIALIZE END (success) =====');
@@ -152,6 +157,8 @@ private async loadUserProfileForLoggedInUser(uid: string): Promise<void> {
 
     // Step 6: Persist user data to localStorage
     this.persistUserProfileToStorage();
+
+    await this.refreshUnreadChatBadgeCount(uid);
 
     console.log('[HomePage2.loadUserProfileForLoggedInUser] Profile loading completed for user:', uid);
   } catch (error) {
@@ -258,6 +265,8 @@ private async loadUserProfileWithAuthWait(): Promise<void> {
 
     // Persist to storage
     this.persistUserProfileToStorage();
+
+    await this.refreshUnreadChatBadgeCount(this.userID || waitResult.uid);
 
     console.log('[HomePage2.loadUserProfileWithAuthWait] Auth wait flow completed successfully');
   } catch (error) {
@@ -432,6 +441,9 @@ private persistUserProfileToStorage(): void {
     if (uid) {
       this.loadPersistedSyncStatus(uid);
       this.loadPersistedLocation(uid);
+      this.refreshUnreadChatBadgeCount(uid).catch((err) => {
+        console.warn('[HomePage2.ionViewWillEnter] Failed to refresh unread chat badge:', err);
+      });
       // Start periodic location check
       this.startLocationCheckInterval();
     }
@@ -440,6 +452,42 @@ private persistUserProfileToStorage(): void {
       console.error('[HomePage2.ionViewWillEnter] Failed to refresh markers:', err);
     });
     this.requestLocationAccessOnEnter();
+  }
+
+  private async refreshUnreadChatBadgeCount(userId?: string): Promise<void> {
+    const resolvedUserId = userId || this.userID || this.auth3.getCurrentUser()?.uid || '';
+    if (!resolvedUserId) {
+      this.exploreBadgeCount = 0;
+      return;
+    }
+
+    try {
+      const chats = await firstValueFrom(this.chatService.getUserChats(resolvedUserId));
+      if (!Array.isArray(chats) || chats.length === 0) {
+        this.exploreBadgeCount = 0;
+        return;
+      }
+
+      const unreadCounts = await Promise.all(
+        chats.map(async (chat: any) => {
+          if (!chat?.chatId) {
+            return 0;
+          }
+
+          const messages = await firstValueFrom(this.chatService.getMessages(chat.chatId));
+          if (!Array.isArray(messages) || messages.length === 0) {
+            return 0;
+          }
+
+          return messages.filter((message: any) => message?.senderId !== resolvedUserId && message?.isRead === false).length;
+        })
+      );
+
+      this.exploreBadgeCount = unreadCounts.reduce((total, count) => total + count, 0);
+    } catch (error) {
+      console.warn('[HomePage2.refreshUnreadChatBadgeCount] Failed to load unread message count:', error);
+      this.exploreBadgeCount = 0;
+    }
   }
 
   private getLocationStorageKey(userId: string): string {

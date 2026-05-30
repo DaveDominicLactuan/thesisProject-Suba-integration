@@ -1,3 +1,58 @@
+
+/* Shared-session modal: reuse session-item styles from session-page */
+.shared-session-sessions-list {
+	margin: 0;
+	padding: 12px;
+	background-color: transparent;
+	max-height: 48vh;
+	overflow-y: auto;
+}
+
+.shared-session-sessions-list .session-item {
+	padding: 12px 16px;
+	border-radius: 12px;
+	background: linear-gradient(135deg, #f5e6d3 0%, #f9f2e8 100%);
+	display: flex;
+	justify-content: space-between;
+	align-items: flex-start;
+	gap: 12px;
+	margin-bottom: 10px;
+	box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+	cursor: default;
+}
+
+.shared-session-sessions-list .session-item .session-left {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+}
+
+.shared-session-sessions-list .session-item .session-name {
+	font-weight: 600;
+	color: #1a1a2e;
+	font-size: 1rem;
+}
+
+.shared-session-sessions-list .session-item .session-images {
+	color: #555;
+	font-size: 0.95rem;
+	display: flex;
+	align-items: center;
+	gap: 8px;
+}
+
+.shared-session-sessions-list .session-item .session-right {
+	display: flex;
+	flex-direction: column;
+	align-items: flex-end;
+	gap: 6px;
+}
+
+.shared-session-sessions-list .session-item .session-time {
+	font-size: 0.9rem;
+	color: #666;
+}
+
 // --- Chat Options Overlay (Bottom Sheet) ---
 .chat-options-overlay {
 	position: fixed;
@@ -173,6 +228,170 @@
 	opacity: 0.75;
 	cursor: progress;
 	box-shadow: 0 8px 16px rgba(255, 140, 0, 0.12);
+}
+
+.shared-session-modal-overlay {
+	position: fixed;
+	inset: 0;
+	z-index: 26000;
+	display: flex;
+	align-items: flex-start;
+	justify-content: flex-start;
+	padding: 84px 16px 16px 16px;
+	background: rgba(16, 16, 16, 0.18);
+	backdrop-filter: blur(6px);
+	-webkit-backdrop-filter: blur(6px);
+	animation: sharedSessionFadeIn 0.16s ease-out;
+}
+
+.shared-session-modal {
+	width: min(100%, 390px);
+	max-height: calc(100vh - 100px);
+	overflow: auto;
+	border-radius: 22px;
+	background: linear-gradient(180deg, #ffffff 0%, #fffaf2 100%);
+	border: 1px solid rgba(255, 138, 0, 0.18);
+	box-shadow: 0 22px 48px rgba(0, 0, 0, 0.2);
+	padding: 18px 18px 20px;
+	color: #1f1f1f;
+}
+
+.shared-session-modal-header {
+	display: flex;
+	align-items: flex-start;
+	justify-content: space-between;
+	gap: 12px;
+	margin-bottom: 14px;
+}
+
+.shared-session-modal-eyebrow {
+	margin: 0 0 4px;
+	font-size: 0.72rem;
+	font-weight: 800;
+	text-transform: uppercase;
+	letter-spacing: 0.08em;
+	color: #ff8a00;
+}
+
+.shared-session-modal-header h3 {
+	margin: 0;
+	font-size: 1.15rem;
+	line-height: 1.2;
+	font-weight: 800;
+	color: #111;
+	word-break: break-word;
+}
+
+.shared-session-modal-close {
+	flex: 0 0 auto;
+	width: 38px;
+	height: 38px;
+	border: none;
+	border-radius: 12px;
+	background: rgba(255, 138, 0, 0.12);
+	color: #8a3a0a;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	cursor: pointer;
+	padding: 0;
+}
+
+.shared-session-modal-close ion-icon {
+	font-size: 1.4rem;
+}
+
+.shared-session-modal-empty {
+	padding: 14px 12px;
+	border-radius: 14px;
+	background: rgba(255, 138, 0, 0.08);
+	color: #6b4d2d;
+	font-size: 0.95rem;
+	line-height: 1.45;
+}
+
+.shared-session-meta {
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	gap: 10px;
+	margin-bottom: 14px;
+}
+
+.shared-session-meta div {
+	padding: 10px 12px;
+	border-radius: 14px;
+	background: #fff;
+	border: 1px solid rgba(255, 138, 0, 0.12);
+	box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+}
+
+.shared-session-meta span {
+	display: block;
+	font-size: 0.72rem;
+	font-weight: 700;
+	text-transform: uppercase;
+	letter-spacing: 0.04em;
+	color: #8c6a42;
+	margin-bottom: 4px;
+}
+
+.shared-session-meta strong {
+	display: block;
+	font-size: 0.92rem;
+	font-weight: 800;
+	color: #111;
+	word-break: break-word;
+}
+
+.shared-session-source {
+	margin-bottom: 14px;
+	padding: 12px 14px;
+	border-radius: 16px;
+	background: linear-gradient(180deg, rgba(255, 138, 0, 0.08), rgba(255, 138, 0, 0.04));
+	border: 1px solid rgba(255, 138, 0, 0.16);
+}
+
+.shared-session-source-label {
+	font-size: 0.72rem;
+	font-weight: 800;
+	letter-spacing: 0.05em;
+	text-transform: uppercase;
+	color: #8a3a0a;
+	margin-bottom: 6px;
+}
+
+.shared-session-source-text {
+	font-size: 0.92rem;
+	line-height: 1.45;
+	color: #222;
+	word-break: break-word;
+}
+
+.shared-session-json-wrap {
+	max-height: 52vh;
+	overflow: auto;
+	border-radius: 16px;
+	background: #111827;
+	padding: 14px;
+	border: 1px solid rgba(17, 24, 39, 0.12);
+}
+
+.shared-session-json {
+	margin: 0;
+	font-size: 0.8rem;
+	line-height: 1.5;
+	color: #e5e7eb;
+	white-space: pre-wrap;
+	word-break: break-word;
+}
+
+@keyframes sharedSessionFadeIn {
+	from {
+		opacity: 0;
+	}
+	to {
+		opacity: 1;
+	}
 }
 
 @keyframes chatOptionsFadeIn {

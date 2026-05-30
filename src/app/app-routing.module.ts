@@ -71,6 +71,10 @@ const routes: Routes = [
     path: 's3-page',
     loadChildren: () => import('./s3-page/s3-page.module').then( m => m.S3PagePageModule)
   },
+  {
+    path: 'notification-page',
+    loadChildren: () => import('./notification-page/notification-page.module').then( m => m.NotificationPagePageModule)
+  },
 
 
 

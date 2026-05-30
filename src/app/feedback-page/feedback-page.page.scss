@@ -559,7 +559,8 @@
 }
 
 .login-form.engineer-role {
-  height: 580px;
+  // height: 580px;
+  height: 100%;
 }
 
 .login-form.engineer-role.notes-open {
@@ -567,15 +568,16 @@
 }
 
 .button-group {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
+  display: flex;
+  justify-content: center;
+  align-items: center;
   gap: 12px;
   margin-top: 7px;
 }
 
 .button-group .sign-in-button {
-  width: 100%;
-  width: 275px;
+  width: min(100%, 275px);
+  margin: 0;
   font-family: 'Segoe UI Variable Text Semibold', sans-serif;
 }
 
@@ -1019,6 +1021,36 @@
 .form-group {
   display: flex;
   flex-direction: column;
+}
+
+.engineer-inline-field {
+  display: flex;
+  align-items: stretch;
+  gap: 10px;
+  width: 100%;
+}
+
+.engineer-inline-field .input-item {
+  flex: 1 1 0;
+  min-width: 0;
+  margin-bottom: 0;
+}
+
+.engineer-inline-preview {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 120px;
+  padding: 5px 12px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: linear-gradient(#fffdfd, #fffdfd) padding-box, linear-gradient(to right, #ff512f, #f09819) border-box;
+  font-size: 14px;
+  font-weight: 600;
+  color: #000;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .select-wrap {

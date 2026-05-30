@@ -264,9 +264,47 @@
             </div>
           </div>
         </div>
-        <!-- <button class="call-btn">
-          <ion-icon name="call-outline"></ion-icon>
-        </button> -->
+        <button class="menu-btn" (click)="openSharedSessionModal()" title="Open shared session preview">
+          <ion-icon name="ellipsis-horizontal-outline"></ion-icon>
+        </button>
+      </div>
+    </div>
+
+    <div *ngIf="sharedSessionModalOpen" class="shared-session-modal-overlay" (click)="closeSharedSessionModal()">
+      <div class="shared-session-modal" (click)="$event.stopPropagation()">
+        <div class="shared-session-modal-header">
+          <div>
+            <p class="shared-session-modal-eyebrow">Shared session</p>
+            <h3>{{ sharedSessionObject?.name || 'Session details' }}</h3>
+          </div>
+          <button type="button" class="shared-session-modal-close" (click)="closeSharedSessionModal()" aria-label="Close shared session modal">
+            <ion-icon name="close-outline"></ion-icon>
+          </button>
+        </div>
+
+        <div *ngIf="sharedSessionError; else sharedSessionContent" class="shared-session-modal-empty">
+          {{ sharedSessionError }}
+        </div>
+
+        <ng-template #sharedSessionContent>
+          <div class="sessions-list shared-session-sessions-list">
+            <div class="session-item" (click)="$event.stopPropagation()">
+              <div class="session-left">
+                <div class="session-name">{{ sharedSessionObject?.name || (sharedSessionObject?.id || sharedSessionId) }}</div>
+                <div class="session-images" style="margin-top:6px; font-size:0.95rem; color:#555;">
+                  <span>Images: <strong>{{ sharedSessionObject?.imageKeys?.length || 0 }}</strong></span>
+                  <span style="margin-left:12px">Boxes: <strong>{{ sharedSessionObject?.totalBoundingBoxes || 0 }}</strong></span>
+                </div>
+                <div *ngIf="sharedSessionSourceMessage" class="shared-session-source-text" style="margin-top:8px; color:#666; font-size:0.9rem;">
+                  {{ sharedSessionSourceMessage?.text || 'Shared session message found in conversation.' }}
+                </div>
+              </div>
+              <div class="session-right">
+                <div class="session-time">{{ sharedSessionObject?.created | date:'short' }}</div>
+              </div>
+            </div>
+          </div>
+        </ng-template>
       </div>
     </div>
 
@@ -597,7 +635,7 @@
               {{ selectedMapEngineer ? getMapSheetEngineerName(selectedMapEngineer) : 'Tap a marker to view' }}
             </div>
             <div class="map-sheet-peek-sub">
-              {{ mapSheetViewMode === 'list' ? (mapSheetAggregatedEngineers.length + ' nearby marker(s) found') : (selectedMapEngineer ? (getMapSheetEngineerDistanceLabel(selectedMapEngineer) || '') : 'Drag up or tap to explore') }}
+              {{ mapSheetViewMode === 'list' ? (mapSheetAggregatedEngineers.length + ' nearby user(s) found') : (selectedMapEngineer ? 'Press Enter to load nearby users' : 'Drag up or tap to explore') }}
             </div>
           </div>
           <ion-icon name="chevron-up-outline" class="map-sheet-peek-chevron" [ngClass]="{'rotated': isMapBottomSheetActive}"></ion-icon>
@@ -608,7 +646,7 @@
           <ng-container *ngIf="mapSheetViewMode === 'list'; else mapSheetDetailTemplate">
             <div class="map-sheet-body-list">
               <div class="map-sheet-list-header">
-                <h3>Nearby Markers</h3>
+                <h3>Nearby Users</h3>
                 <span>{{ mapSheetAggregatedEngineers.length }}</span>
               </div>
 
@@ -627,6 +665,10 @@
                 </div>
                 <div class="map-sheet-list-distance">{{ getMapSheetEngineerDistanceLabel(engineer) }}</div>
               </button>
+
+                <div *ngIf="mapSheetAggregatedEngineers.length === 0" class="map-sheet-empty-state">
+                  No nearby users found within the selected radius.
+                </div>
             </div>
           </ng-container>
 
@@ -650,16 +692,21 @@
               </div> -->
               <div class="map-sheet-address">
                 <ion-icon name="location-outline"></ion-icon>
-                <span>{{ selectedMapEngineer?.address || selectedMapEngineer?.markerPayload?.address || 'Office Address' }}</span>
+                <span>{{ selectedMapEngineer?.address || selectedMapEngineer?.markerPayload?.address || selectedMapEngineer?.markerTitle || 'Office Address' }}</span>
               </div>
               <!-- <div class="map-sheet-avail">
                 <ion-icon name="time-outline"></ion-icon>
                 <span>{{ selectedMapEngineer?.availableTime || selectedMapEngineer?.markerPayload?.availableTime || 'Available: 8AM Tue' }}</span>
               </div> -->
-              <button class="map-sheet-chat-btn" (click)="openChatFromMapSheet($event)">
+              <button *ngIf="selectedMapEngineer?.id || selectedMapEngineer?.uid || selectedMapEngineer?.userID || selectedMapEngineer?.email; else chatUnavailableBtn" class="map-sheet-chat-btn" (click)="openChatFromMapSheet($event)">
                 <ion-icon name="chatbubble-outline"></ion-icon>
                 Chat
               </button>
+              <ng-template #chatUnavailableBtn>
+                <button class="map-sheet-chat-btn" type="button" disabled>
+                  Chat unavailable
+                </button>
+              </ng-template>
             </div>
           </ng-template>
 
@@ -679,7 +726,7 @@
         <div class="radius-selection-panel" (click)="$event.stopPropagation()">
           <div class="radius-selection-row">
             <label class="radius-selection-label" for="radius-size-select">Set size for maximum</label>
-            <select id="radius-size-select" class="radius-selection-select" [(ngModel)]="selectedRadiusHalfSideMeters">
+            <select id="radius-size-select" class="radius-selection-select" [(ngModel)]="selectedRadiusHalfSideMeters" (keydown.enter)="confirmRadiusSelection()">
               <option *ngFor="let option of markerRadiusOptions" [ngValue]="option.value">{{ option.label }}</option>
             </select>
           </div>

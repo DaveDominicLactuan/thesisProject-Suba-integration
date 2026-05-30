@@ -61,6 +61,11 @@ export class ChatPagePage implements OnInit, OnDestroy {
   receiverUserId: string | any;
   newRecepientUserId: string | any;
   sessionImageObjectCounter: number = 0;
+  sharedSessionModalOpen = false;
+  sharedSessionId: string | null = null;
+  sharedSessionObject: any = null;
+  sharedSessionSourceMessage: any = null;
+  sharedSessionError = '';
     // Long-press logic for chat-item
     onChatItemPressStart(event: MouseEvent | TouchEvent, chat: any) {
       if (this.chatOptionsLongPressTimer) clearTimeout(this.chatOptionsLongPressTimer);
@@ -287,8 +292,7 @@ export class ChatPagePage implements OnInit, OnDestroy {
   getMapSheetEngineerDistanceLabel(engineer: any): string {
     const distance = Number(engineer?.distanceFromCenterMeters);
     if (!Number.isFinite(distance) || distance < 0) return '';
-    if (distance >= 1000) return `${(distance / 1000).toFixed(2)} km away`;
-    return `${Math.round(distance)} m away`;
+    return `${(distance / 1000).toFixed(2)} km away`;
   }
 
   getMapSheetEngineerInitials(engineer: any): string {
@@ -2018,6 +2022,100 @@ export class ChatPagePage implements OnInit, OnDestroy {
     }
   }
    
+  private normalizeSessionUserIds(userIdValue: any, currentUserId: string, receiverId: string): string[] {
+    const existingUserIds = Array.isArray(userIdValue)
+      ? userIdValue
+      : (typeof userIdValue === 'string' && userIdValue.trim().length > 0 ? [userIdValue.trim()] : []);
+
+    return Array.from(
+      new Set(
+        [...existingUserIds, currentUserId, receiverId]
+          .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+          .map((value) => value.trim())
+      )
+    );
+  }
+
+  private buildTrimmedSharedSessionCopy(selectedSession: any, currentUserId: string, receiverId: string): any {
+    const copiedSession: any = JSON.parse(JSON.stringify(selectedSession || {}));
+    copiedSession.userId = this.normalizeSessionUserIds(copiedSession.userId, currentUserId, receiverId);
+    copiedSession.receiverId = receiverId;
+    copiedSession.ReceivedBy = receiverId;
+    copiedSession.createdBy = copiedSession.createdBy || currentUserId;
+    return copiedSession;
+  }
+
+  async confirmAttachmentShareCopy2(attachment: any): Promise<void> {
+    console.log('[ChatPage.confirmAttachmentShareCopy2] ===== TRIMMED SESSION SHARE START =====');
+
+    const selectedSession = attachment || this.selectedAttachmentForDebug || this.selectedAttachment;
+    if (!selectedSession) {
+      console.error('[ChatPage.confirmAttachmentShareCopy2] No session selected');
+      alert('No session selected');
+      return;
+    }
+
+    if (selectedSession.type !== 'session' || !selectedSession.id) {
+      console.error('[ChatPage.confirmAttachmentShareCopy2] Invalid session attachment:', selectedSession);
+      alert('Invalid session attachment');
+      return;
+    }
+
+    if (!this.validateSessionBelongsToCurrentUser(selectedSession)) {
+      console.error('[ChatPage.confirmAttachmentShareCopy2] SECURITY: session does not belong to the current user');
+      alert('Security error: Cannot share session from another user');
+      return;
+    }
+
+    const currentUserId = this.auth3.getCurrentUser()?.uid || this.userID || '';
+    if (!currentUserId) {
+      console.error('[ChatPage.confirmAttachmentShareCopy2] Cannot determine current user ID');
+      alert('Error: Cannot determine current user');
+      return;
+    }
+
+    const resolvedRecipientUserId = this.resolveAttachmentShareRecipient();
+    const receiverId = this.sanitizeRecipientOrReceiverId(resolvedRecipientUserId || this.receiverUserId || '');
+
+    if (!receiverId) {
+      console.error('[ChatPage.confirmAttachmentShareCopy2] Cannot determine receiver ID', {
+        activeChat: this.activeChat,
+        currentChatId: this.currentChatId,
+        receiverUserId: this.receiverUserId,
+        newRecepientUserId: this.newRecepientUserId
+      });
+      alert('Error: Cannot determine recipient. Please open a chat with a valid user first.');
+      return;
+    }
+
+    const sharedSessionCopy = this.buildTrimmedSharedSessionCopy(selectedSession, currentUserId, receiverId);
+
+    this.receiverUserId = receiverId;
+    this.newRecepientUserId = receiverId;
+    this.selectedAttachmentForDebug = sharedSessionCopy;
+
+    const service: any = this.imageStorage;
+    if (typeof service?.addSessionIfNotExists === 'function') {
+      service.addSessionIfNotExists(sharedSessionCopy);
+    }
+
+    try {
+      if (typeof service?.saveSessionWithImagesToFirestore === 'function') {
+        await service.saveSessionWithImagesToFirestore(sharedSessionCopy.id, receiverId);
+      }
+      console.log('[ChatPage.confirmAttachmentShareCopy2] Shared session prepared', {
+        sessionId: sharedSessionCopy.id,
+        userId: sharedSessionCopy.userId,
+        receiverId: sharedSessionCopy.receiverId,
+        ReceivedBy: sharedSessionCopy.ReceivedBy
+      });
+      this.attachmentDebugState = 'completed';
+    } catch (error) {
+      console.error('[ChatPage.confirmAttachmentShareCopy2] Failed to persist trimmed shared session:', error);
+      alert('Error sharing session. Check console for details.');
+    }
+  }
+
   changeUserID(currentFileName: string, targetID: string): string {
   // 1. Validation: Does it start with 'userID:'?
   if (!currentFileName.startsWith('userID:')) {
@@ -2674,6 +2772,7 @@ export class ChatPagePage implements OnInit, OnDestroy {
   private markerUserProfileMap: Map<L.Marker, any> = new Map();
   private mapRefreshTimerId?: ReturnType<typeof setInterval>;
   private readonly mapRefreshIntervalMs = 30000; // 30 seconds
+  private offlineDownloadTriggeredAfterMarkerRefresh = false;
   // Background location-based marker fetching
   private currentUserLocation: {
     latitude: number;
@@ -2740,7 +2839,9 @@ export class ChatPagePage implements OnInit, OnDestroy {
     this.markerSelectionSquare = L.rectangle(squareBounds, {
       color: '#111111',
       weight: 2,
-      fill: false,
+      fill: true,
+      fillColor: '#000000',
+      fillOpacity: 0.08,
       interactive: false
     }).addTo(this.map);
 
@@ -3052,7 +3153,6 @@ ngOnInit(): void {
   if (this.activeTab === 'location') {
     this.scheduleMapInitialization();
     this.startMapRefreshTimer();
-    void this.triggerOfflineDownloadWithDefaults();
   }
 
   const cachedUid = this.resolveCachedUid();
@@ -3436,7 +3536,7 @@ private async maybePromptForLocationActivation(): Promise<void> {
   await this.waitMs(this.mapLocationActivationGraceMs);
 }
 
-private async getInitialCoordinatesWithTimeout(timeoutMs: number = 4500): Promise<{ latitude: number; longitude: number } | null> {
+private async getInitialCoordinatesWithTimeout(timeoutMs: number = 3000): Promise<{ latitude: number; longitude: number } | null> {
   if (this.pendingMapLocation) {
     console.log('[ChatPage.getInitialCoordinatesWithTimeout] Using incoming marker location:', this.pendingMapLocation);
     return {
@@ -3463,6 +3563,12 @@ private async getInitialCoordinatesWithTimeout(timeoutMs: number = 4500): Promis
     console.log('[ChatPage.getInitialCoordinatesWithTimeout] Current location unavailable, checking stored location...');
     const storedLocation = this.getStoredUserLocation();
     if (storedLocation) {
+      this.currentUserLocation = {
+        latitude: storedLocation.latitude,
+        longitude: storedLocation.longitude,
+        accuracy: 0,
+        timestamp: new Date().toISOString()
+      };
       console.log('[ChatPage.getInitialCoordinatesWithTimeout] Using stored location:', storedLocation);
       return storedLocation;
     }
@@ -3475,6 +3581,12 @@ private async getInitialCoordinatesWithTimeout(timeoutMs: number = 4500): Promis
     // Try stored location as fallback
     const storedLocation = this.getStoredUserLocation();
     if (storedLocation) {
+      this.currentUserLocation = {
+        latitude: storedLocation.latitude,
+        longitude: storedLocation.longitude,
+        accuracy: 0,
+        timestamp: new Date().toISOString()
+      };
       console.log('[ChatPage.getInitialCoordinatesWithTimeout] Exception occurred; using stored location:', storedLocation);
       return storedLocation;
     }
@@ -3544,17 +3656,7 @@ private async runStaggeredOnlineBootstrap(bootstrapId: number): Promise<void> {
     return;
   }
 
-  // Check if user location is available - required for smart marker filtering
-  const hasUserLocation = this.currentUserLocation !== null || this.getStoredUserLocation() !== null;
-  
-  if (!hasUserLocation) {
-    console.log('[ChatPage.mapBootstrap] Online but no user location available. Skipping Firebase marker fetch. Using local cache.');
-    this.offlineDownloadStatusText = 'Online but no location available. Using local marker cache.';
-    this.setMapBootstrapStatus('Awaiting location data...', undefined, 'loading');
-    return;
-  }
-
-  // Online detected AND location available: refresh markers in the background WITHOUT blocking the map
+  // Online detected: refresh markers in the background WITHOUT blocking the map
   this.offlineDownloadStatusText = 'Online detected. Fetching markers from Firebase...';
   this.setMapBootstrapStatus('Online detected. Fetching map markers...', undefined, 'loading');
   
@@ -3577,18 +3679,8 @@ private async refreshMarkersFromOnlineInBackground(bootstrapId: number): Promise
   
   try {
     const previousMarkersCount = this.officeLocationMarkerData.length;
-    
-    // Verify location is available before attempting Firebase fetch
-    const hasUserLocation = this.currentUserLocation !== null || this.getStoredUserLocation() !== null;
-    
-    if (!hasUserLocation) {
-      console.log('[ChatPage.markerRefresh] No user location available - skipping Firebase fetch, keeping local cache.');
-      this.offlineDownloadStatusText = 'Waiting for location. Using local marker cache.';
-      this.setMapBootstrapStatus('Location unavailable. Using cached markers.', 2200, 'warning');
-      return;
-    }
-    
-    // Fetch fresh markers from Firestore (only fetches when online AND location is available)
+
+    // Fetch fresh markers from Firestore when online.
     await this.fetchOfficeLocationMarkerData();
     
     // Verify the bootstrap is still current (map wasn't closed/recreated)
@@ -3625,6 +3717,12 @@ private async refreshMarkersFromOnlineInBackground(bootstrapId: number): Promise
     
     this.offlineDownloadStatusText = `Markers refreshed from Firebase: ${markerUpdate}`;
     this.setMapBootstrapStatus(`Online markers loaded: ${markerUpdate}`, 2200, 'success');
+
+    if (!this.offlineDownloadTriggeredAfterMarkerRefresh && this.activeTab === 'location' && !this.offlineDownloadInProgress) {
+      this.offlineDownloadTriggeredAfterMarkerRefresh = true;
+      void this.triggerOfflineDownloadWithDefaults();
+    }
+
     console.log('[ChatPage.markerRefresh] Background marker refresh completed successfully.', {
       previousCount: previousMarkersCount,
       newCount: newMarkersCount,
@@ -3647,6 +3745,11 @@ private async refreshMarkersFromOnlineInBackground(bootstrapId: number): Promise
     
     this.offlineDownloadStatusText = 'Firebase fetch failed. Using local marker cache.';
     this.setMapBootstrapStatus('Using locally cached markers.', 2600, 'warning');
+
+    if (!this.offlineDownloadTriggeredAfterMarkerRefresh && this.activeTab === 'location' && !this.offlineDownloadInProgress) {
+      this.offlineDownloadTriggeredAfterMarkerRefresh = true;
+      void this.triggerOfflineDownloadWithDefaults();
+    }
   }
 }
 
@@ -3912,6 +4015,67 @@ getMessageStatusLabel(message: Message): 'Sent' | 'Delivered' | 'Read' {
   if (message?.isRead) return 'Read';
   if (this.isMessageDelivered(message)) return 'Delivered';
   return 'Sent';
+}
+
+private extractSharedSessionId(message: any): string {
+  const rawSessionId = message?.sharedSessionId || message?.copiedSessionId || message?.sessionId || message?.metadata?.sharedSessionId;
+  return typeof rawSessionId === 'string' ? rawSessionId.trim() : '';
+}
+
+openSharedSessionModal(): void {
+  // Collect all sharedSessionIds present in the conversation messages (deduped)
+  const ids = new Set<string>();
+  const messagesList = Array.isArray(this.messages) ? this.messages : [];
+  for (const message of messagesList) {
+    try {
+      const sid = this.extractSharedSessionId(message);
+      if (sid) ids.add(sid);
+    } catch (e) {
+      // ignore malformed messages
+    }
+  }
+
+  if (ids.size === 0) {
+    this.sharedSessionModalOpen = true;
+    this.sharedSessionId = null;
+    this.sharedSessionObject = null;
+    this.sharedSessionSourceMessage = null;
+    this.sharedSessionError = 'No message in this conversation contains a shared session id.';
+    return;
+  }
+
+  const storageService: any = this.imageStorage as any;
+  const sessions: any[] = [];
+  for (const sid of Array.from(ids)) {
+    let session: any = null;
+    try {
+      if (typeof storageService?.getSession === 'function') {
+        session = storageService.getSession(sid) || null;
+      }
+      if (!session && typeof storageService?.getSessions === 'function') {
+        const all = storageService.getSessions() || [];
+        session = all.find((it: any) => it?.id === sid) || null;
+      }
+    } catch (e) {
+      session = null;
+    }
+    sessions.push({ id: sid, session: session });
+  }
+
+  this.sharedSessionModalOpen = true;
+  this.sharedSessionId = ids.size === 1 ? Array.from(ids)[0] : null;
+  this.sharedSessionSourceMessage = null;
+  this.sharedSessionObject = sessions; // array of { id, session }
+  const foundCount = sessions.filter(s => s.session).length;
+  this.sharedSessionError = foundCount > 0 ? '' : `No session objects were found for sharedSessionIds: ${Array.from(ids).join(', ')}`;
+}
+
+closeSharedSessionModal(): void {
+  this.sharedSessionModalOpen = false;
+  this.sharedSessionId = null;
+  this.sharedSessionObject = null;
+  this.sharedSessionSourceMessage = null;
+  this.sharedSessionError = '';
 }
 
 
@@ -4246,8 +4410,15 @@ onMsgBubbleTap(message: Message): void {
 
     this.messagesSub = this.chatService.getMessages(chatId).subscribe(async (msgs) => {
       this.messages = msgs || [];
-      const unread = this.messages.filter(m => !m.isRead && m.senderId !== currentUid && m.id);
-      for (const m of unread) {
+      // Mark as read any message explicitly addressed to the current user.
+      const unreadForMe = this.messages.filter(m => {
+        if (m.isRead) return false;
+        // Prefer explicit `receiverId` field, fall back to metadata.receiverId when present
+        const msgReceiver = (m.receiverId || (m.metadata && m.metadata.receiverId)) as string | undefined | null;
+        return !!msgReceiver && msgReceiver === currentUid && !!m.id;
+      });
+
+      for (const m of unreadForMe) {
         try { await this.chatService.markMessageAsRead(chatId, m.id!); } catch (e) { console.warn('markMessageAsRead failed', e); }
       }
     });
@@ -4597,7 +4768,30 @@ onMsgBubbleTap(message: Message): void {
     await this.aggregateMarkersWithinSelectedRadius();
   }
 
-  private resolveRadiusAggregationCenter(): { latitude: number; longitude: number; source: 'selected-engineer' | 'map-center' | 'default-center' } {
+  private resolveRadiusAggregationCenter(): { latitude: number; longitude: number; source: 'current-user-location' | 'selected-engineer' | 'map-center' | 'default-center' } {
+    if (this.currentUserLocation) {
+      return {
+        latitude: this.currentUserLocation.latitude,
+        longitude: this.currentUserLocation.longitude,
+        source: 'current-user-location'
+      };
+    }
+
+    const storedLocation = this.getStoredUserLocation();
+    if (storedLocation) {
+      this.currentUserLocation = {
+        latitude: storedLocation.latitude,
+        longitude: storedLocation.longitude,
+        accuracy: 0,
+        timestamp: new Date().toISOString()
+      };
+      return {
+        latitude: storedLocation.latitude,
+        longitude: storedLocation.longitude,
+        source: 'current-user-location'
+      };
+    }
+
     if (this.selectedMapEngineer && typeof this.selectedMapEngineer === 'object') {
       const selectedCenter = this.resolveOfficeMarkerCoordinates(this.selectedMapEngineer as Record<string, unknown>);
       if (selectedCenter) {
@@ -4803,25 +4997,47 @@ onMsgBubbleTap(message: Message): void {
   /**
    * Load the user's location from localStorage if available.
    */
-  private getStoredUserLocation(): { latitude: number; longitude: number } | null {
+  private getStoredUserLocation(userId?: string): { latitude: number; longitude: number } | null {
     try {
-      const storageKey = this.getUserLocationStorageKey();
-      const storedData = localStorage.getItem(storageKey);
-      if (!storedData) {
-        console.log('[ChatPage.getStoredUserLocation] No stored location found.');
+      const resolvedUserId = (userId || this.userID || this.auth3.getCurrentUser()?.uid || '').toString().trim();
+      if (!resolvedUserId) {
+        console.log('[ChatPage.getStoredUserLocation] No user ID available for cached location lookup.');
         return null;
       }
 
-      const parsed = JSON.parse(storedData);
-      console.log('[ChatPage.getStoredUserLocation] Location loaded from storage:', {
-        latitude: parsed.latitude,
-        longitude: parsed.longitude,
-        timestamp: parsed.timestamp
+      const storageKeys = [
+        `user_current_location_${resolvedUserId}`,
+        `user_sidebar_location_${resolvedUserId}`
+      ];
+
+      for (const storageKey of storageKeys) {
+        const storedData = localStorage.getItem(storageKey);
+        if (!storedData) {
+          continue;
+        }
+
+        const parsed = JSON.parse(storedData);
+        if (typeof parsed?.latitude !== 'number' || typeof parsed?.longitude !== 'number') {
+          continue;
+        }
+
+        console.log('[ChatPage.getStoredUserLocation] Location loaded from storage:', {
+          storageKey,
+          latitude: parsed.latitude,
+          longitude: parsed.longitude,
+          timestamp: parsed.timestamp
+        });
+        return {
+          latitude: parsed.latitude,
+          longitude: parsed.longitude
+        };
+      }
+
+      console.log('[ChatPage.getStoredUserLocation] No stored location found.', {
+        userId: resolvedUserId,
+        storageKeys
       });
-      return {
-        latitude: parsed.latitude,
-        longitude: parsed.longitude
-      };
+      return null;
     } catch (error) {
       console.error('[ChatPage.getStoredUserLocation] Error loading stored location:', error);
       return null;
@@ -4987,37 +5203,8 @@ onMsgBubbleTap(message: Message): void {
       });
     }
 
-    // Aggregate markers within the radius
-    const aggregatedMapSheetItems = await this.aggregateMarkersForMapSheet(latitude, longitude);
-    this.mapSheetAggregatedEngineers = aggregatedMapSheetItems;
+    this.mapSheetAggregatedEngineers = [];
 
-    // Display aggregated results
-    if (aggregatedMapSheetItems.length > 1) {
-      this.selectedMapEngineer = aggregatedMapSheetItems[0];
-      this.mapSheetViewMode = 'list';
-      this.isMapBottomSheetActive = true;
-      console.log('[ChatPage.mapAggregation] Multiple engineers found. Opening list view.', {
-        trigger,
-        titleText,
-        aggregatedCount: aggregatedMapSheetItems.length,
-        center: { latitude: Number(center.lat.toFixed(6)), longitude: Number(center.lng.toFixed(6)) }
-      });
-      return;
-    }
-
-    if (aggregatedMapSheetItems.length === 1) {
-      this.mapSheetViewMode = 'detail';
-      this.selectedMapEngineer = aggregatedMapSheetItems[0];
-      this.isMapBottomSheetActive = true;
-      console.log('[ChatPage.mapAggregation] Single engineer found. Opening detail view.', {
-        trigger,
-        titleText,
-        center: { latitude: Number(center.lat.toFixed(6)), longitude: Number(center.lng.toFixed(6)) }
-      });
-      return;
-    }
-
-    // No engineers found - show fallback
     const fallback = {
       markerTitle: titleText,
       latitude,
@@ -5026,7 +5213,7 @@ onMsgBubbleTap(message: Message): void {
     };
     this.mapSheetViewMode = 'detail';
     this.openMapMarkerBottomSheet(fallback);
-    console.log('[ChatPage.mapAggregation] No engineers found. Opening detail view with fallback.', {
+    console.log('[ChatPage.mapAggregation] Radius preview shown without auto-aggregation.', {
       trigger,
       titleText,
       center: { latitude: Number(center.lat.toFixed(6)), longitude: Number(center.lng.toFixed(6)) }
@@ -5048,12 +5235,8 @@ onMsgBubbleTap(message: Message): void {
     }
 
     this.mapSheetAggregatedEngineers = aggregatedMapSheetItems;
-    if (aggregatedMapSheetItems.length > 1) {
+    if (aggregatedMapSheetItems.length > 0) {
       this.mapSheetViewMode = 'list';
-      this.selectedMapEngineer = aggregatedMapSheetItems[0];
-      this.isMapBottomSheetActive = true;
-    } else if (aggregatedMapSheetItems.length === 1) {
-      this.mapSheetViewMode = 'detail';
       this.selectedMapEngineer = aggregatedMapSheetItems[0];
       this.isMapBottomSheetActive = true;
     }
