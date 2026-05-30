@@ -572,14 +572,59 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
 
           const maskW = prediction.maskWidth || prediction.maskW || 128;
           const maskH = prediction.maskHeight || prediction.maskH || 128;
+
+          const croppedCracks: any[] = [];
+
+          for (const box of boxesToDraw) {
+
+            const crop = await this.cropBoxFromImage(
+              dataUrl,
+              box,
+              maskW,
+              maskH
+            );
+
+            const cropTensor =
+              await this.preprocessImage(crop);
+
+            const cropPrediction =
+              await this.crackDetectionService.runInference(
+                cropTensor
+              );
+
+            croppedCracks.push({
+              image: crop,
+
+              box,
+
+              type: cropPrediction?.type ?? 'unknown',
+
+              shape: cropPrediction?.shape ?? 'unknown',
+
+              severity: cropPrediction?.severity ?? 'unknown'
+            });
+          }
+
+          // Debug: track total crops detected across all boxes for this image
+          console.log(
+            '[CROPS] Total crops:',
+            croppedCracks.length
+          );
+
          // try to create withBoxes image with drawn boxes based on the bouding box data
           try {
             const withBoxesDataUrl = await this.drawBoxesOnImage(dataUrl, boxesToDraw, maskW, maskH);
             const safeWithBoxes = await this.shrinkDataUrlToBytes(withBoxesDataUrl, maxBytes, 4000);
             (entry as any).withBoxes = safeWithBoxes;
             (entry as any).boxes = boxesToDraw;
+            (entry as any).croppedCracks = croppedCracks;
             (entry as any).detectionMessage = `Rendered ${boxesToDraw.length} detected crack box(es) from ${rawBoxes.length} prediction box(es)`;
             this.totalBoundingBoxesCreated += boxesToDraw.length;
+            // Debug: log the cropped cracks data to verify contents and structure
+            console.log(
+              'CROPPED CRACKS',
+              croppedCracks
+            );
           } catch (renderErr) {
             console.warn('[UploadImagePage] drawBoxesOnImage failed', renderErr);
             (entry as any).withBoxes = safeOriginal;
@@ -743,7 +788,100 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
     });
   }
  
+  async cropBoxFromImage(
+    imageDataUrl: string,
+    box: BoundingBox,
+    maskW: number,
+    maskH: number
+  ): Promise<string> {
 
+    const img = new Image();
+    img.src = imageDataUrl;
+
+    return new Promise(resolve => {
+
+      img.onload = () => {
+
+        const imgW = img.naturalWidth;
+        const imgH = img.naturalHeight;
+
+        const scaleX = imgW / maskW;
+        const scaleY = imgH / maskH;
+
+        const padding = 100;
+
+        let cropX = Math.round(box.x * scaleX);
+        let cropY = Math.round(box.y * scaleY);
+        let cropW = Math.round(box.w * scaleX);
+        let cropH = Math.round(box.h * scaleY);
+
+        // Add context around crack
+        cropX = Math.max(0, cropX - padding);
+        cropY = Math.max(0, cropY - padding);
+
+        cropW = Math.min(
+          imgW - cropX,
+          cropW + padding * 2
+        );
+
+        cropH = Math.min(
+          imgH - cropY,
+          cropH + padding * 2
+        );
+
+        // Keep a 4:3 aspect ratio for the crop to match model input expectations
+        const targetRatio = 4 / 3;
+
+        const centerX = cropX + cropW / 2;
+        const centerY = cropY + cropH / 2;
+
+        if (cropH > cropW) {
+
+          cropW = cropH * targetRatio;
+
+        } else {
+
+          cropH = cropW / targetRatio;
+
+        }
+
+        cropX = Math.round(centerX - cropW / 2);
+        cropY = Math.round(centerY - cropH / 2);
+
+        cropX = Math.max(0, cropX);
+        cropY = Math.max(0, cropY);
+
+        if (cropX + cropW > imgW) {
+          cropW = imgW - cropX;
+        }
+
+        if (cropY + cropH > imgH) {
+          cropH = imgH - cropY;
+        }
+
+        const canvas = document.createElement('canvas');
+
+        canvas.width = cropW;
+        canvas.height = cropH;
+
+        const ctx = canvas.getContext('2d')!;
+
+        ctx.drawImage(
+          img,
+          cropX,
+          cropY,
+          cropW,
+          cropH,
+          0,
+          0,
+          cropW,
+          cropH
+        );
+
+        resolve(canvas.toDataURL('image/jpeg'));
+      };
+    });
+  }
 
   /**
    * Log current bounding box statistics

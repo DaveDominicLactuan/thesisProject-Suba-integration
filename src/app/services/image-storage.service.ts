@@ -30,6 +30,7 @@ export interface StoredImage {
   original: string; // Base64 image
   withBoxes?: string;
   boxes?: any[];
+  croppedCracks?: {image: string; box: any; type: string; shape: string; severity: string;}[];
   faceDetected?: boolean;
   faceData?: any[];
   timestamp: string;
