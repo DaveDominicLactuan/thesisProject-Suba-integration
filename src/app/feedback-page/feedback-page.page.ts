@@ -58,6 +58,9 @@ formDataMap: {
 } = {};
 
 imagePaths: DisplayImage[] = [];
+displayedImagePaths: DisplayImage[] = [];
+galleryViewState: 'originalState' | 'croppedState' = 'originalState';
+activeOriginalIndex: number | null = null;
 showWithBoxes: boolean = false;
 engineerLookedSessionChecked: boolean = false;
 private backButtonSub: any; // hardware back handler
@@ -418,19 +421,123 @@ private lastImageTitleDebugAt: number = 0;
     this.displayUserAndSessionInfo();
   }
 
+  private getImageFilenameRaw(img: DisplayImage): string {
+    return (img.filename || img.fileName || '').trim();
+  }
+
+  private getImageFilename(img: DisplayImage): string {
+    return this.getImageFilenameRaw(img).toLowerCase();
+  }
+
+  private getFilenameBase(filename: string): string {
+    const normalized = (filename || '').toLowerCase().replace(/\\/g, '/');
+    const lastPathPart = normalized.split('/').pop() || normalized;
+    const queryless = lastPathPart.split('?')[0];
+    return queryless.replace(/\.[a-z0-9]+$/i, '');
+  }
+
+  private parseImageGroup(filename: string): { index: number | null; isOriginal: boolean; isCropped: boolean } {
+    const base = this.getFilenameBase(filename);
+    const croppedMatch = base.match(/img(\d+)cropped(\d+)?/);
+    if (croppedMatch) {
+      return { index: Number(croppedMatch[1]), isOriginal: false, isCropped: true };
+    }
+
+    const originalMatch = base.match(/img(\d+)original/);
+    if (originalMatch) {
+      return { index: Number(originalMatch[1]), isOriginal: true, isCropped: false };
+    }
+
+    return { index: null, isOriginal: false, isCropped: false };
+  }
+
+  private logGalleryState(context: string): void {
+    const filenames = this.displayedImagePaths.map((img) => this.getImageFilenameRaw(img));
+    console.group(`[FeedbackPage] Gallery State - ${context}`);
+    console.log('selectedState:', this.galleryViewState);
+    console.log('activeOriginalIndex:', this.activeOriginalIndex);
+    console.log('displayedCount:', this.displayedImagePaths.length);
+    console.log('displayedFilenames:', filenames);
+    console.log('displayedSessionObjects:', this.displayedImagePaths);
+    console.groupEnd();
+  }
+
+  private getGalleryImagesByState(): DisplayImage[] {
+    const originals = this.imagePaths.filter((img) => {
+      const meta = this.parseImageGroup(this.getImageFilename(img));
+      return meta.isOriginal;
+    });
+
+    if (this.galleryViewState === 'croppedState' && this.activeOriginalIndex !== null) {
+      const cropped = this.imagePaths.filter((img) => {
+        const meta = this.parseImageGroup(this.getImageFilename(img));
+        return meta.isCropped && meta.index === this.activeOriginalIndex;
+      });
+
+      if (cropped.length > 0) {
+        return cropped;
+      }
+
+      this.galleryViewState = 'originalState';
+      this.activeOriginalIndex = null;
+    }
+
+    return originals;
+  }
+
+  private refreshDisplayedImagesByState(keepSelection: boolean = true, context: string = 'refresh'): void {
+    const previousSelectedSrc = this.selectedImage;
+    this.displayedImagePaths = this.getGalleryImagesByState();
+
+    if (this.displayedImagePaths.length === 0) {
+      this.selectedImage = '';
+      this.selectedImageTitle = '';
+      this.logGalleryState(`${context} (empty)`);
+      return;
+    }
+
+    let selected: DisplayImage | undefined;
+    if (keepSelection && previousSelectedSrc) {
+      selected = this.displayedImagePaths.find(
+        (img) => img.original === previousSelectedSrc || img.withBoxes === previousSelectedSrc
+      );
+    }
+
+    this.selectedImage = selected
+      ? (this.showWithBoxes ? selected.withBoxes : selected.original)
+      : (this.showWithBoxes ? this.displayedImagePaths[0].withBoxes : this.displayedImagePaths[0].original);
+
+    this.logGalleryState(context);
+  }
+
+  showOriginalState(): void {
+    this.galleryViewState = 'originalState';
+    this.activeOriginalIndex = null;
+    this.refreshDisplayedImagesByState(false, 'showOriginalState');
+    setTimeout(() => this.detectCenterImage(), 50);
+  }
+
   //handles a user clicking an image in the gallaery scroller, selects it and populates the UI
   //fields from stored prediction/status, updates formDataMap, logs a detailed debug log to console for debugging
   // and auto-centers the image.
   onImageClick(img: DisplayImage) {
+    const meta = this.parseImageGroup(this.getImageFilename(img));
+    if (this.galleryViewState === 'originalState' && meta.isOriginal && meta.index !== null) {
+      this.activeOriginalIndex = meta.index;
+      this.galleryViewState = 'croppedState';
+      this.refreshDisplayedImagesByState(false, `onImageClick -> croppedState for img${meta.index}`);
+      setTimeout(() => this.detectCenterImage(), 50);
+      return;
+    }
+
     // select image, chooses which image to show or display depending on 
     //showWithBoxes toggle the original or with boxes
     this.selectedImage = this.showWithBoxes ? img.withBoxes : img.original;
+    this.selectedImageTitle = img.fileName ?? img.filename ?? '';
 
-    //copys the image raw prediction and statusmessage into the field and updates the structured prediction/status
-    // If engineerCheckedSession is true, prefer correctedPrediction; otherwise use rawPrediction
-    this.selectedPrediction = (this.engineerLookedSessionChecked && img.correctedPrediction) 
-      ? img.correctedPrediction 
-      : (img.rawPrediction ?? {});
+    // Copy the original session prediction into the preview fields.
+    // The editable dropdowns are seeded separately from correctedPrediction.
+    this.selectedPrediction = img.prediction ?? img.rawPrediction ?? {};
     this.selectedStatusMessage = img.statusMessage ?? '';
 
     // apply the necessary data detection fields and dropdowns
@@ -447,10 +554,12 @@ private lastImageTitleDebugAt: number = 0;
     }
 
 
-    //update the 3 dropdown prediction values when available, otherwise fall back to image title
-    this.dropdown1 = this.selectedPrediction.type ?? this.selectedImageTitle ?? 'Type';
-    this.dropdown2 = this.selectedPrediction.shape ?? this.selectedImageTitle ?? 'Shape';
-    this.dropdown3 = this.selectedPrediction.severity ?? this.selectedImageTitle ?? 'Severity';
+    // Seed the editable dropdowns from the saved correction when present,
+    // otherwise fall back to the original session prediction.
+    const editablePrediction = img.correctedPrediction ?? img.prediction ?? img.rawPrediction ?? {};
+    this.dropdown1 = editablePrediction.type ?? this.selectedImageTitle ?? 'Type';
+    this.dropdown2 = editablePrediction.shape ?? this.selectedImageTitle ?? 'Shape';
+    this.dropdown3 = editablePrediction.severity ?? this.selectedImageTitle ?? 'Severity';
 
     // update form map for this image
     //Ensure a persistant per-image entry in formDataMap (defaults from current UI/prediction)
@@ -596,6 +705,7 @@ private lastImageTitleDebugAt: number = 0;
     try {
       // No route-passed session selected, so do not load unrelated images.
       if (!this.selectedSessionId) {
+        this.refreshDisplayedImagesByState(false, 'refreshDisplayedImages no selectedSessionId');
         return;
       }
       
@@ -609,6 +719,7 @@ private lastImageTitleDebugAt: number = 0;
         if (this.imagePaths.length === 0) {
           this.imagePaths.push({ original: 'assets/108644884_p0.jpg', withBoxes: 'assets/112772382_p0.jpg' });
         }
+        this.refreshDisplayedImagesByState(false, 'refreshDisplayedImages empty session');
         return;
       }
 
@@ -736,6 +847,10 @@ private lastImageTitleDebugAt: number = 0;
         })));
         console.groupEnd();
       }
+
+      this.galleryViewState = 'originalState';
+      this.activeOriginalIndex = null;
+      this.refreshDisplayedImagesByState(false, 'refreshDisplayedImages complete');
       
       //Top-level error handling
     } catch (err) {
@@ -1100,9 +1215,16 @@ private lastImageTitleDebugAt: number = 0;
  * (selected image, prediction/status, dropdown option lists, and formDataMap).
  */
 detectCenterImage() {
+  if (!this.scrollContainer?.nativeElement) {
+    return;
+  }
+
   //Read container, images, and compute horizontal center
   const container = this.scrollContainer.nativeElement as HTMLElement;
   const images = container.querySelectorAll('img');
+  if (!images || images.length === 0) {
+    return;
+  }
   const containerRect = container.getBoundingClientRect();
   const centerX = containerRect.left + containerRect.width / 2;
   
@@ -1123,7 +1245,8 @@ detectCenterImage() {
   //Resolve the matched DisplayImage entry from the school for the closest DOM <img>
   if (closestImg) {
     const src = (closestImg as HTMLImageElement).getAttribute('src') ?? '';
-    const matched = this.imagePaths.find(img => img.original === src || img.withBoxes === src);
+    const matched = this.displayedImagePaths.find(img => img.original === src || img.withBoxes === src)
+      ?? this.imagePaths.find(img => img.original === src || img.withBoxes === src);
     if (!matched) return;
 
     //Update selectedImage from the scroll and get 
@@ -1392,7 +1515,7 @@ addEntry() {
 
     // Use filename as primary key, fallback to original for backward compatibility
     const key = matched.fileName || matched.filename || matched.original;
-    const originalPrediction = matched.prediction ? { ...matched.prediction } : (matched.rawPrediction ? { ...matched.rawPrediction } : undefined);
+    const originalPrediction = matched.prediction ? { ...matched.prediction } : (matched.rawPrediction ? { ...matched.rawPrediction } : {});
     const correctedPrediction = this.buildCorrectedPrediction();
 
     // Preserve the original prediction and store the edited values separately
@@ -1400,22 +1523,24 @@ addEntry() {
       matched.prediction = { ...originalPrediction };
     }
     matched.correctedPrediction = { ...correctedPrediction };
-    matched.rawPrediction = { ...correctedPrediction };
+    matched.rawPrediction = { ...originalPrediction };
 
     // Update status/extra text
     matched.statusMessage = this.extraText || matched.statusMessage || '';
 
     // Recompute derived detection strings
+    const currentPrediction = matched.rawPrediction ?? originalPrediction ?? {};
+
     matched.detectionMessage = matched.statusMessage && matched.statusMessage.length > 0
       ? matched.statusMessage
-      : `${matched.rawPrediction.type || ''}${matched.rawPrediction.severity ? ' â€” ' + matched.rawPrediction.severity : ''}`.trim();
+      : `${currentPrediction.type || ''}${currentPrediction.severity ? ' â€” ' + currentPrediction.severity : ''}`.trim();
 
     matched.detectionResult = matched.statusMessage && matched.statusMessage.length > 0
       ? matched.statusMessage
-      : `${matched.rawPrediction.shape || ''}${matched.rawPrediction.severity ? ' â€” ' + matched.rawPrediction.severity : ''}`.trim();
+      : `${currentPrediction.shape || ''}${currentPrediction.severity ? ' â€” ' + currentPrediction.severity : ''}`.trim();
 
     // Sync selected* fields so UI reflects latest edits
-    this.selectedPrediction = { ...matched.rawPrediction };
+    this.selectedPrediction = { ...originalPrediction };
     this.selectedStatusMessage = matched.statusMessage;
     this.detectionMessage = matched.detectionMessage;
     this.detectionResult = matched.detectionResult;
@@ -1441,8 +1566,8 @@ addEntry() {
 
     updatedStored.prediction = originalPrediction ?? updatedStored.prediction ?? null;
     updatedStored.correctedPrediction = { ...correctedPrediction };
-    // Keep optional rawPrediction/status fields aligned for consumers that read them
-    (updatedStored as any).rawPrediction = updatedStored.correctedPrediction;
+    // Keep optional rawPrediction/status fields aligned with the original prediction.
+    (updatedStored as any).rawPrediction = originalPrediction ?? updatedStored.rawPrediction ?? null;
     updatedStored.statusMessage = matched.statusMessage;
     updatedStored.detectionMessage = matched.detectionMessage;
     updatedStored.detectionResult = matched.detectionResult;
@@ -1517,9 +1642,10 @@ addEntry() {
 
       // remove from in-memory display list and update selection
       this.imagePaths.splice(idx, 1);
+      this.refreshDisplayedImagesByState(false);
 
       if (this.imagePaths.length > 0) {
-        const first = this.imagePaths[0];
+        const first = this.displayedImagePaths[0] || this.imagePaths[0];
         this.selectedImage = this.showWithBoxes ? first.withBoxes : first.original;
         this.selectedPrediction = first.rawPrediction ?? {};
         this.selectedStatusMessage = first.statusMessage ?? '';
@@ -1678,6 +1804,10 @@ addEntry() {
       // and saves it to override the default nav, so it can be removed later
       this.backButtonSub = this.platform.backButton.subscribeWithPriority(100, () => {
         try {
+          if (this.galleryViewState === 'croppedState') {
+            this.showOriginalState();
+            return;
+          }
           this.goBack();
         } catch (e) {
           try { window.history.back(); } catch (err) { this.router.navigateByUrl('/home-page2'); }

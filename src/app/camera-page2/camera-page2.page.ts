@@ -884,7 +884,7 @@ export class CameraPage2Page implements AfterViewInit {
     for (let index = 0; index < croppedCracks.length; index++) {
       const crop = croppedCracks[index];
       const croppedNumber = typeof crop.croppedNumber === 'number' ? crop.croppedNumber : index + 1;
-      const generatedFilename = typeof service?.generateSessionFilename === 'function'
+      let generatedFilename = typeof service?.generateSessionFilename === 'function'
         ? service.generateSessionFilename({
             sessionId,
             filename: originalFilename,
@@ -909,7 +909,7 @@ export class CameraPage2Page implements AfterViewInit {
           severity: crop.severity,
         },
         hasPrediction: true,
-        statusMessage: `Cropped crack ${croppedNumber} prediction stored`,
+        statusMessage: `Prediction succeeded - Cropped crack ${croppedNumber} prediction stored`,
         detectionMessage: `Stored cropped crack ${croppedNumber}`,
         boxes: [crop.box],
         userId,
@@ -1068,11 +1068,19 @@ export class CameraPage2Page implements AfterViewInit {
   async updatePhotoCounts() {
     try {
       const svc: any = this.imageStorage as any;
+      const isProcessedStatus = (statusMessage?: string | null) => {
+        const normalized = (statusMessage || '').toLowerCase();
+        return normalized.includes('prediction succeeded') || normalized.includes('cropped crack');
+      };
 
       // If a session is active, compute counts from the session image keys
       if (this.selectedSessionId) {
-        // Ensure sessions are loaded
-        if (!this.sessions || this.sessions.length === 0) {
+        const freshSession = typeof svc.getSession === 'function'
+          ? svc.getSession(this.selectedSessionId)
+          : null;
+        if (freshSession) {
+          this.sessions = [freshSession];
+        } else if (!this.sessions || this.sessions.length === 0) {
           try {
             await this.loadSessions();
           } catch (e) {
@@ -1081,7 +1089,7 @@ export class CameraPage2Page implements AfterViewInit {
         }
 
         // Find the active session by its ID
-        const session = this.sessions.find(s => s.id === this.selectedSessionId) || null;
+        const session = freshSession || this.sessions.find(s => s.id === this.selectedSessionId) || null;
 
         if (!session || !Array.isArray(session.imageKeys)) {
           // If no session or invalid image keys, reset counts and stored images
@@ -1117,7 +1125,7 @@ export class CameraPage2Page implements AfterViewInit {
               foundCount++;
 
               // Count images with successful predictions
-              if (entry.statusMessage === 'Prediction succeeded') {
+              if (isProcessedStatus(entry.statusMessage)) {
                 processed++;
               }
             }
@@ -1125,7 +1133,7 @@ export class CameraPage2Page implements AfterViewInit {
 
           // Update counts and stored images
           this.photosProcessed = processed;
-          this.photosTaken = foundCount;
+          this.photosTaken = imgs.length;
           this.storedImages = imgs;
         }
       } else {
@@ -1134,7 +1142,7 @@ export class CameraPage2Page implements AfterViewInit {
 
         // Update counts based on all stored images
         this.photosTaken = Array.isArray(all) ? all.length : 0;
-        this.photosProcessed = Array.isArray(all) ? all.filter(i => (i.statusMessage === 'Prediction succeeded')).length : 0;
+        this.photosProcessed = Array.isArray(all) ? all.filter(i => isProcessedStatus(i.statusMessage)).length : 0;
         this.storedImages = Array.isArray(all) ? all.slice() : [];
       }
 

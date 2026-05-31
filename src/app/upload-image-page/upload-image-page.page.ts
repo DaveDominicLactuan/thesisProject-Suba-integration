@@ -852,7 +852,7 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
     for (let index = 0; index < croppedCracks.length; index++) {
       const crop = croppedCracks[index];
       const croppedNumber = typeof crop.croppedNumber === 'number' ? crop.croppedNumber : index + 1;
-      const generatedFilename = typeof service?.generateSessionFilename === 'function'
+      let generatedFilename = typeof service?.generateSessionFilename === 'function'
         ? service.generateSessionFilename({
             sessionId,
             filename: originalFilename,
@@ -877,7 +877,7 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
           severity: crop.severity,
         },
         hasPrediction: true,
-        statusMessage: `Cropped crack ${croppedNumber} prediction stored`,
+        statusMessage: `Prediction succeeded - Cropped crack ${croppedNumber} prediction stored`,
         detectionMessage: `Stored cropped crack ${croppedNumber}`,
         boxes: [crop.box],
         userId,
@@ -1313,6 +1313,8 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
       return svc.generateSessionFilename({
         sessionId: this.selectedSessionId || undefined,
         hasCrack,
+        designatedPart: 'original',
+        imageType: 'original',
         imgIndex,
         timestamp
       });
@@ -1613,12 +1615,23 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
    */
   async updatePhotoCounts() {
     try {
+      const isProcessedStatus = (statusMessage?: string | null) => {
+        const normalized = (statusMessage || '').toLowerCase();
+        return normalized.includes('prediction succeeded') || normalized.includes('cropped crack');
+      };
+
       // If a session is active, compute counts from that session's image keys
       if (this.selectedSessionId) {
-        if (!this.sessions || this.sessions.length === 0) {
+        const freshSession = typeof (this.imageStorage as any).getSession === 'function'
+          ? (this.imageStorage as any).getSession(this.selectedSessionId)
+          : null;
+        if (freshSession) {
+          this.sessions = [freshSession];
+        } else if (!this.sessions || this.sessions.length === 0) {
           try { await this.loadSessions(); } catch (e) { /* ignore */ }
         }
-        const session = this.sessions.find(s => s.id === this.selectedSessionId) || null;
+
+        const session = freshSession || this.sessions.find(s => s.id === this.selectedSessionId) || null;
         if (!session || !Array.isArray(session.imageKeys)) {
           this.photosTaken = 0;
           this.photosProcessed = 0;
@@ -1641,18 +1654,18 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
             if (entry) {
               imgs.push(entry as StoredImage);
               foundCount++;
-              if (entry.statusMessage === 'Prediction succeeded') processed++;
+              if (isProcessedStatus(entry.statusMessage)) processed++;
             }
           }
           this.photosProcessed = processed;
-          this.photosTaken = foundCount; // only count existing entries
+          this.photosTaken = imgs.length; // total stored session image objects currently available
           this.storedImages = imgs;
           this.imagePaths = imgs.map((s: StoredImage) => ({ original: s.original, withBoxes: (s as any).withBoxes || s.original, fileName: s.filename, rawPrediction: s.prediction }));
         }
       } else {
         const all: StoredImage[] = await this.imageStorage.getAllImages();
         this.photosTaken = Array.isArray(all) ? all.length : 0;
-        this.photosProcessed = Array.isArray(all) ? all.filter(i => (i.statusMessage === 'Prediction succeeded')).length : 0;
+        this.photosProcessed = Array.isArray(all) ? all.filter(i => isProcessedStatus(i.statusMessage)).length : 0;
         this.storedImages = Array.isArray(all) ? all.slice() : [];
         this.imagePaths = this.storedImages.map((s: StoredImage) => ({ original: s.original, withBoxes: (s as any).withBoxes || s.original, fileName: s.filename, rawPrediction: s.prediction }));
       }

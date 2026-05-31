@@ -826,9 +826,13 @@ export class ImageStorageService {
     const originalFilename = originalFilenameSource ? `_${originalFilenameSource.replace(/\.[^.]+$/, '')}` : '';
     const imageTypeSuffix = options.imageType ? `_${options.imageType}` : '';
 
-    const crackPartStr = options.designatedPart
+    // If a designatedPart is provided (original/cropped), include it and
+    // still append the crackPart suffix when a crack count applies.
+    const designatedStr = options.designatedPart
       ? `${options.designatedPart}${options.designatedPart === 'cropped' ? String(options.croppedNumber ?? '') : ''}`
-      : (crackPart ? `_${crackPart}` : '');
+      : '';
+    const crackSuffix = crackPart ? `_${crackPart}` : '';
+    const crackPartStr = `${designatedStr}${crackSuffix}`;
 
     console.log("uderIdPrefix:", userIdPrefix, "sessionIdPrefix:", sessionIdPrefix, "originalFilename:", originalFilename, "imageTypeSuffix:", imageTypeSuffix, "crackPartStr:", crackPartStr);
     

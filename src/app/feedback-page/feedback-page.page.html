@@ -45,7 +45,7 @@
     </div>
 
     <!-- Confirm button at the top left corner (hidden if engineer has checked session) -->
-    <div class="back-button-container2" >
+    <div class="back-button-container2" *ngIf="galleryViewState !== 'croppedState'">
       <button class="back-btn2" type="button" (click)="saveCurrentStoredImageAndGoHome()">
         <img src="assets/Check_Black.png" alt="Back" class="back-icon" />
       </button>
@@ -54,9 +54,12 @@
     <div class="page-body" [class.engineer-checked-background]="engineerLookedSessionChecked">
       <!-- Scrollable image gallery with margin-top -->
       <div class="scroll-wrapper">
-        <div class="image-scroll" #scrollContainer (scroll)="onScroll($event)" [ngClass]="getScrollClasses(imagePaths.length)">
+        <div class="gallery-state-actions" *ngIf="galleryViewState === 'croppedState'">
+          <button type="button" class="gallery-state-back-btn" (click)="showOriginalState()">Back to Originals</button>
+        </div>
+        <div class="image-scroll" #scrollContainer (scroll)="onScroll($event)" [ngClass]="getScrollClasses(displayedImagePaths.length)">
           <img
-            *ngFor="let img of imagePaths"
+            *ngFor="let img of displayedImagePaths"
             [src]="showWithBoxes ? img.withBoxes : img.original"
             [class.selected]="(showWithBoxes ? img.withBoxes : img.original) === selectedImage"
             (click)="onImageClick(img)"
@@ -126,7 +129,7 @@
               <select id="dropdown1" [(ngModel)]="dropdown1" (ngModelChange)="updateSelectedImageFromDropdowns()" class="input-item" [disabled]="isUserReadOnly" [class.hide-dropdown-arrow]="userRole !== 'engineer'" [class.no-arrow]="userRole === 'user'">
                 <option *ngFor="let option of dropdownOptionsDirection" [value]="option">{{ option }}</option>
               </select>
-              <div class="engineer-inline-preview">{{ dropdown1 || 'Type' }}</div>
+              <div class="engineer-inline-preview">{{ selectedPrediction.type || 'Type' }}</div>
             </div>
           </ng-template>
         </div>
@@ -141,7 +144,7 @@
               <select id="dropdown2" [(ngModel)]="dropdown2" (ngModelChange)="updateSelectedImageFromDropdowns()" class="input-item" [disabled]="isUserReadOnly" [class.hide-dropdown-arrow]="userRole !== 'engineer'" [class.no-arrow]="userRole === 'user'" [attr.toggle-icon]="userRole === 'user' ? ' ' : null">
                 <option *ngFor="let option of dropdownOptionsShape" [value]="option">{{ option }}</option>
               </select>
-              <div class="engineer-inline-preview">{{ dropdown2 || 'Shape' }}</div>
+              <div class="engineer-inline-preview">{{ selectedPrediction.shape || 'Shape' }}</div>
             </div>
           </ng-template>
         </div>
@@ -156,12 +159,12 @@
               <select id="dropdown3" [(ngModel)]="dropdown3" (ngModelChange)="updateSelectedImageFromDropdowns()" class="input-item" [disabled]="isUserReadOnly" [class.hide-dropdown-arrow]="userRole !== 'engineer'" [class.no-arrow]="userRole === 'user'">
                 <option *ngFor="let option of dropdownOptionsSeverity" [value]="option">{{ option }}</option>
               </select>
-              <div class="engineer-inline-preview">{{ dropdown3 || 'Severity' }}</div>
+              <div class="engineer-inline-preview">{{ selectedPrediction.severity || 'Severity' }}</div>
             </div>
           </ng-template>
         </div>
 
-          <div class="form-group">
+          <!-- <div class="form-group">
           <label for="dropdown3">Severity of Crack</label>
           <div *ngIf="userRole === 'user'; else dropdown3Editor" class="select-wrap">
             <span class="select-wrap-value">{{ dropdown3 || 'Severity' }}</span>
@@ -171,7 +174,7 @@
               <option *ngFor="let option of dropdownOptionsSeverity" [value]="option">{{ option }}</option>
             </select>
           </ng-template>
-        </div>
+        </div> -->
 
         <!-- Notes (optional) collapsible field -->
         <div class="form-group notes-panel" [class.expanded]="notesExpanded">

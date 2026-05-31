@@ -396,6 +396,114 @@ export class PdfPageTest03Page {
       return null;
     }
 
+    private getPdfFilenameBase(filename: string): string {
+      const normalized = (filename || '').toLowerCase().replace(/\\/g, '/');
+      const lastPathPart = normalized.split('/').pop() || normalized;
+      const queryless = lastPathPart.split('?')[0];
+      return queryless.replace(/\.[a-z0-9]+$/i, '');
+    }
+
+    private getPdfImageGroupInfo(img: any): { groupIndex: number; isOriginal: boolean; cropIndex: number | null; filename: string } {
+      const filename = (img?.filename || img?.fileName || img?.originalS3Key || img?.storagePath || '').toString();
+      const base = this.getPdfFilenameBase(filename);
+      const match = base.match(/img(\d+)(original|cropped(\d+)?)/i);
+
+      if (!match) {
+        return { groupIndex: -1, isOriginal: false, cropIndex: null, filename };
+      }
+
+      const groupIndex = Number(match[1]);
+      const variant = (match[2] || '').toLowerCase();
+      const cropIndex = variant.startsWith('cropped') ? Number(match[3] || 0) : null;
+
+      return {
+        groupIndex: Number.isFinite(groupIndex) ? groupIndex : -1,
+        isOriginal: variant.startsWith('original'),
+        cropIndex: Number.isFinite(cropIndex as number) ? cropIndex : null,
+        filename
+      };
+    }
+
+    private isPdfCroppedImage(img: any): boolean {
+      const filename = (img?.filename || img?.fileName || img?.originalS3Key || img?.storagePath || '').toString();
+      return /cropped/i.test(filename);
+    }
+
+    private getGroupedSessionImagesForPdf(logGroups: boolean = false): any[] {
+      const sourceImages = Array.isArray(this.sessionImages) ? [...this.sessionImages] : [];
+      const grouped = new Map<number, any[]>();
+      const ungrouped: any[] = [];
+
+      for (const img of sourceImages) {
+        const info = this.getPdfImageGroupInfo(img);
+        if (info.groupIndex < 0) {
+          ungrouped.push({ img, info });
+          continue;
+        }
+
+        const bucket = grouped.get(info.groupIndex) || [];
+        bucket.push({ img, info });
+        grouped.set(info.groupIndex, bucket);
+      }
+
+      const sortedGroupKeys = Array.from(grouped.keys()).sort((a, b) => b - a);
+      const sortedImages: any[] = [];
+
+      if (logGroups) {
+        console.group('[PDF] Session image groups (reverse img order)');
+      }
+
+      for (const groupKey of sortedGroupKeys) {
+        const bucket = grouped.get(groupKey) || [];
+        bucket.sort((left, right) => {
+          if (left.info.isOriginal !== right.info.isOriginal) {
+            return left.info.isOriginal ? -1 : 1;
+          }
+
+          if (left.info.isOriginal && right.info.isOriginal) {
+            return (left.info.filename || '').localeCompare(right.info.filename || '');
+          }
+
+          const leftCrop = left.info.cropIndex ?? Number.MAX_SAFE_INTEGER;
+          const rightCrop = right.info.cropIndex ?? Number.MAX_SAFE_INTEGER;
+          if (leftCrop !== rightCrop) {
+            return leftCrop - rightCrop;
+          }
+
+          return (left.info.filename || '').localeCompare(right.info.filename || '');
+        });
+
+        if (logGroups) {
+          console.group(`img${groupKey}`);
+          bucket.forEach((entry, index) => {
+            const label = entry.info.isOriginal ? 'original' : `cropped${entry.info.cropIndex ?? ''}`;
+            console.log(`${index + 1}. ${label}`, entry.info.filename || '(unnamed)', entry.img);
+          });
+          console.groupEnd();
+        }
+
+        sortedImages.push(...bucket.map(entry => entry.img));
+      }
+
+      if (ungrouped.length > 0) {
+        ungrouped.sort((left, right) => (left.info.filename || '').localeCompare(right.info.filename || ''));
+        if (logGroups) {
+          console.group('ungrouped');
+          ungrouped.forEach((entry, index) => {
+            console.log(`${index + 1}.`, entry.info.filename || '(unnamed)', entry.img);
+          });
+          console.groupEnd();
+        }
+        sortedImages.push(...ungrouped.map(entry => entry.img));
+      }
+
+      if (logGroups) {
+        console.groupEnd();
+      }
+
+      return sortedImages;
+    }
+
     // store incoming session id if any
     sessionId: string | null = null;
   
@@ -418,8 +526,10 @@ export class PdfPageTest03Page {
           }
     
           // If sessionImages exist, create one page per image with page breaks
-          if (this.sessionImages && this.sessionImages.length > 0) {
-            this.sessionImages.forEach((img: any, idx: number) => {
+          const sessionImages = this.getGroupedSessionImagesForPdf();
+
+          if (sessionImages.length > 0) {
+            sessionImages.forEach((img: any, idx: number) => {
               const i = idx + 1;
               const type = img?.rawPrediction?.type ?? img?.dropdown1 ?? img?.type ?? img?.fileName ?? 'Type';
               const shape = img?.rawPrediction?.shape ?? img?.dropdown2 ?? img?.shape ?? 'Shape';
@@ -440,46 +550,59 @@ export class PdfPageTest03Page {
                 margin: [0, 0, 0, 20]
               });
     
+              const isCropped = this.isPdfCroppedImage(img);
+
               // caption text
               content.push({
-                text: `Img ${i} without boxes and img ${i} with boxes`,
+                text: isCropped ? `Img ${i} original` : `Img ${i} without boxes and img ${i} with boxes`,
                 alignment: 'center',
                 margin: [0, 0, 0, 12],
                 fontSize: 12,
                 italics: true
               });
-    
+
               // Extract images with comprehensive property checking
               const extractedOriginal = this.extractOriginalImage(img);
-              const extractedBoxed = this.extractBoxedImage(img);
+              const extractedBoxed = isCropped ? null : this.extractBoxedImage(img);
               
               const originalImg = extractedOriginal ? this.normalizePdfImageSource(extractedOriginal, imgPlainFallback) : imgPlainFallback;
-              const withBoxesImg = extractedBoxed ? this.normalizePdfImageSource(extractedBoxed, imgBoxFallback) : imgBoxFallback;
-    
+
               // Log the result of extracting images for debugging/verification
-              console.log(`[PDF] Image ${i} extraction - original: ${extractedOriginal ? 'found' : 'FALLBACK'}, boxed: ${extractedBoxed ? 'found' : 'FALLBACK'}`);
-              this.logImageProcessingResult(i, !!extractedOriginal, !!extractedBoxed, type, shape, severity);
+              console.log(`[PDF] Image ${i} extraction - original: ${extractedOriginal ? 'found' : 'FALLBACK'}, boxed: ${isCropped ? 'SKIPPED (cropped image)' : (extractedBoxed ? 'found' : 'FALLBACK')}`);
+              this.logImageProcessingResult(i, !!extractedOriginal, !isCropped && !!extractedBoxed, type, shape, severity);
 
               // Calculate dynamic height based on image dimensions
               const imgHeight = this.calculateDynamicImageHeight(img);
-              const withBoxesHeight = this.calculateDynamicImageHeight({
-                ...img,
-                width: img?.withBoxesWidth,
-                height: img?.withBoxesHeight
-              });
-    
-              // images as two columns with dynamic heights
-              content.push({
-                columns: [
-                  { image: originalImg, width: 250, height: imgHeight, alignment: 'center' },
-                  { image: withBoxesImg, width: 250, height: withBoxesHeight, alignment: 'center' }
-                ],
-                columnGap: 10,
-                margin: [0, 0, 0, 20]
-              });
+
+              if (isCropped) {
+                content.push({
+                  image: originalImg,
+                  width: 250,
+                  height: imgHeight,
+                  alignment: 'center',
+                  margin: [0, 0, 0, 20]
+                });
+              } else {
+                const withBoxesImg = extractedBoxed ? this.normalizePdfImageSource(extractedBoxed, imgBoxFallback) : imgBoxFallback;
+                const withBoxesHeight = this.calculateDynamicImageHeight({
+                  ...img,
+                  width: img?.withBoxesWidth,
+                  height: img?.withBoxesHeight
+                });
+
+                // images as two columns with dynamic heights
+                content.push({
+                  columns: [
+                    { image: originalImg, width: 250, height: imgHeight, alignment: 'center' },
+                    { image: withBoxesImg, width: 250, height: withBoxesHeight, alignment: 'center' }
+                  ],
+                  columnGap: 10,
+                  margin: [0, 0, 0, 20]
+                });
+              }
 
               // Add page break after each image section (except the last one)
-              if (idx < this.sessionImages.length - 1) {
+              if (idx < sessionImages.length - 1) {
                 content.push({ text: '', pageBreak: 'after', margin: [0, 0, 0, 0] });
               }
             });
@@ -532,17 +655,23 @@ export class PdfPageTest03Page {
       // renders them correctly (especially `withBoxes` images).
       const originalSessionImages = this.sessionImages;
       try {
-        if (Array.isArray(this.sessionImages) && this.sessionImages.length > 0) {
+        const sessionImages = this.getGroupedSessionImagesForPdf(true);
+        if (Array.isArray(sessionImages) && sessionImages.length > 0) {
           const processed: any[] = [];
-          for (const img of this.sessionImages) {
+          for (const img of sessionImages) {
             try {
+              const isCropped = this.isPdfCroppedImage(img);
               const extractedOriginal = this.extractOriginalImage(img);
-              const extractedBoxed = this.extractBoxedImage(img);
+              const extractedBoxed = isCropped ? null : this.extractBoxedImage(img);
 
               const originalData = extractedOriginal ? await this.ensureImageDataUrl(extractedOriginal) : null;
               let boxedData = extractedBoxed ? await this.ensureImageDataUrl(extractedBoxed) : null;
 
-              if ((!boxedData || boxedData.trim().length === 0) && (img?.withBoxesS3Key || img?.withBoxesStoragePath || img?.withBoxesS3Url || img?.withBoxesStorageUrl)) {
+              if (isCropped) {
+                boxedData = null;
+              }
+
+              if (!isCropped && (!boxedData || boxedData.trim().length === 0) && (img?.withBoxesS3Key || img?.withBoxesStoragePath || img?.withBoxesS3Url || img?.withBoxesStorageUrl)) {
                 const boxedCandidate = img?.withBoxesS3Key || img?.withBoxesStoragePath || img?.withBoxesS3Url || img?.withBoxesStorageUrl;
                 try {
                   const fetchedBoxed = await this.imageStorage.fetchS3ObjectAsDataUrl(boxedCandidate);
@@ -555,7 +684,7 @@ export class PdfPageTest03Page {
               }
 
               // If boxedData still missing but boxes exist, try to generate an annotated image from the original
-              if ((!boxedData || boxedData.trim().length === 0) && img?.boxes && img.boxes.length > 0 && originalData) {
+              if (!isCropped && (!boxedData || boxedData.trim().length === 0) && img?.boxes && img.boxes.length > 0 && originalData) {
                 try {
                   const generated = await this.createWithBoxesDataUrl(originalData, img.boxes);
                   if (generated) {
@@ -586,7 +715,7 @@ export class PdfPageTest03Page {
 
               const copy = { ...img };
               if (originalData) copy.original = originalData;
-              if (boxedData) copy.withBoxes = boxedData;
+              if (boxedData && !isCropped) copy.withBoxes = boxedData;
               if (dimsOriginal) {
                 copy.originalWidth = dimsOriginal.width;
                 copy.originalHeight = dimsOriginal.height;
@@ -830,6 +959,7 @@ export class PdfPageTest03Page {
 
            await this.runPdfGenerationWindow(async () => {
              await this.ensureHeaderLogoDataUrl();
+            this.getGroupedSessionImagesForPdf(true);
              // Generate the PDF using the current document definition so it matches download behaviour
              const pdfDoc = pdfMake.createPdf(this.getDocumentDefinition());
              const blob: Blob = await new Promise((resolve, reject) => {

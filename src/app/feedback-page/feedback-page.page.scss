@@ -465,6 +465,25 @@
   }
 }
 
+.gallery-state-actions {
+  width: 100%;
+  display: flex;
+  justify-content: flex-end;
+  padding: 0 14px 8px;
+  box-sizing: border-box;
+}
+
+.gallery-state-back-btn {
+  border: none;
+  border-radius: 999px;
+  padding: 8px 14px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #fff;
+  background: linear-gradient(to right, #ff512f, #f09819);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.16);
+}
+
 
 .image-scroll {
   display: flex;
