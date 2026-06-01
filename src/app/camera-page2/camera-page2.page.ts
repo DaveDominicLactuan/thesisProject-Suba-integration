@@ -118,6 +118,13 @@ export class CameraPage2Page implements AfterViewInit {
   flashDurationMs: number = 120; // visual flash length
   cooldownMs: number = 500; // minimum time between pictures
   private backButtonSub: any; // hardware back handler
+  private imageRecordCounter = 0;
+
+  private generateImageRecordId(prefix: 'original' | 'cropped'): string {
+    this.imageRecordCounter += 1;
+    return `${prefix}-${Date.now()}-${this.imageRecordCounter}`;
+  }
+
   private updateLevelIndicatorState(absRollDeg: number): void {
     const threshold = this.isPhoneLeveled
       ? this.levelGreenExitThresholdDeg
@@ -531,6 +538,7 @@ export class CameraPage2Page implements AfterViewInit {
     const sessionImgIndex = typeof (this.imageStorage as any).getNextOriginalImageNumber === 'function'
       ? (this.imageStorage as any).getNextOriginalImageNumber(this.selectedSessionId || undefined)
       : undefined;
+    const originalId = this.generateImageRecordId('original');
     
     //preprocess
     const doWork = async () => {
@@ -567,7 +575,9 @@ export class CameraPage2Page implements AfterViewInit {
         hasPrediction: !!prediction,
         statusMessage: prediction ? 'Prediction succeeded' : (inferenceAttempted ? 'Prediction failed' : 'No prediction'),
         userId: userId,
-        sessionId: this.selectedSessionId || undefined
+        sessionId: this.selectedSessionId || undefined,
+        original_id: originalId,
+        cropped_id: originalId
       };
 
       // If the model returned bounding boxes, create a "withBoxes" image, attach boxes,
@@ -590,18 +600,22 @@ export class CameraPage2Page implements AfterViewInit {
 
           for (const box of boxesToDraw) {
             const croppedNumber = croppedCracks.length + 1;
-            const crop = await this.cropBoxFromImage(dataUrl, box, maskW, maskH);
-            const cropTensor = await this.preprocessImage(crop);
-            const cropPrediction = await this.crackDetectionService.runInference(cropTensor);
+            try {
+              const crop = await this.cropBoxFromImage(dataUrl, box, maskW, maskH);
+              const cropTensor = await this.preprocessImage(crop);
+              const cropPrediction = await this.crackDetectionService.runInference(cropTensor);
 
-            croppedCracks.push({
-              croppedNumber,
-              image: crop,
-              box,
-              type: cropPrediction?.type ?? 'unknown',
-              shape: cropPrediction?.shape ?? 'unknown',
-              severity: cropPrediction?.severity ?? 'unknown'
-            });
+              croppedCracks.push({
+                croppedNumber,
+                image: crop,
+                box,
+                type: cropPrediction?.type ?? 'unknown',
+                shape: cropPrediction?.shape ?? 'unknown',
+                severity: cropPrediction?.severity ?? 'unknown'
+              });
+            } catch (cropErr) {
+              console.warn('[CameraPage2] Failed processing one cropped crack, continuing', cropErr);
+            }
           }
 
           console.log('[CROPS] Total crops:', croppedCracks.length);
@@ -649,7 +663,7 @@ export class CameraPage2Page implements AfterViewInit {
         console.warn('[CameraPage2] Failed to add parent image to session', e);
       }
       if (Array.isArray((entry as any).croppedCracks) && (entry as any).croppedCracks.length > 0) {
-        const storedCroppedCracks = await this.persistCroppedCracksAsSessionImages((entry as any).croppedCracks, originalName || entry.fileImageName || entry.filename, entry.timestamp, userId, sessionImgIndex);
+        const storedCroppedCracks = await this.persistCroppedCracksAsSessionImages((entry as any).croppedCracks, originalName || entry.fileImageName || entry.filename, entry.timestamp, userId, sessionImgIndex, originalId);
         (entry as any).croppedCracks = storedCroppedCracks;
         try {
           if (typeof (this.imageStorage as any).setEntryForImage === 'function') {
@@ -699,7 +713,9 @@ export class CameraPage2Page implements AfterViewInit {
           hasPrediction: false,
           statusMessage: inferenceAttempted ? 'Prediction failed' : 'No prediction',
           userId: userId,
-          sessionId: this.selectedSessionId || undefined
+          sessionId: this.selectedSessionId || undefined,
+          original_id: originalId,
+          cropped_id: originalId
         };
         try {
           if (!claimFinalization()) {
@@ -875,7 +891,8 @@ export class CameraPage2Page implements AfterViewInit {
     originalFilename: string,
     timestamp: string,
     userId?: string,
-    imgIndex?: number
+    imgIndex?: number,
+    parentOriginalId?: string
   ): Promise<any[]> {
     const storedCroppedCracks: any[] = [];
     const service: any = this.imageStorage as any;
@@ -884,6 +901,7 @@ export class CameraPage2Page implements AfterViewInit {
     for (let index = 0; index < croppedCracks.length; index++) {
       const crop = croppedCracks[index];
       const croppedNumber = typeof crop.croppedNumber === 'number' ? crop.croppedNumber : index + 1;
+      const baseName = String(originalFilename || `session-${timestamp}`);
       let generatedFilename = typeof service?.generateSessionFilename === 'function'
         ? service.generateSessionFilename({
             sessionId,
@@ -902,7 +920,7 @@ export class CameraPage2Page implements AfterViewInit {
         original: safeCrop,
         timestamp,
         filename: generatedFilename,
-        fileImageName: `${originalFilename.replace(/\.[^.]+$/, '')}-crop-${croppedNumber}`,
+        fileImageName: `${baseName.replace(/\.[^.]+$/, '')}-crop-${croppedNumber}`,
         prediction: {
           type: crop.type,
           shape: crop.shape,
@@ -914,27 +932,52 @@ export class CameraPage2Page implements AfterViewInit {
         boxes: [crop.box],
         userId,
         sessionId,
+        original_id: parentOriginalId || undefined,
+        cropped_id: this.generateImageRecordId('cropped'),
       };
 
-      await this.imageStorage.addImage(cropEntry, sessionId);
-
-      if (sessionId && typeof (this.imageStorage as any).addImageToSession === 'function') {
-        (this.imageStorage as any).addImageToSession(sessionId, cropEntry.filename);
+      let addedOk = false;
+      try {
+        await this.imageStorage.addImage(cropEntry, sessionId);
+        addedOk = true;
+      } catch (addErr) {
+        console.warn('[CameraPage2] Failed to add cropped crack image to storage', addErr);
       }
 
-      if (userId) {
+      if (addedOk) {
         try {
-          await this.imageStorage.saveImageToUser(userId, cropEntry);
-        } catch (saveErr) {
-          console.warn('[CameraPage2] Failed to save cropped crack to user storage', saveErr);
+          if (sessionId && typeof (this.imageStorage as any).addImageToSession === 'function') {
+            (this.imageStorage as any).addImageToSession(sessionId, cropEntry.filename);
+          }
+        } catch (sessErr) {
+          console.warn('[CameraPage2] Failed to add cropped image to session', sessErr);
         }
-      }
 
-      storedCroppedCracks.push({
-        ...crop,
-        filename: cropEntry.filename,
-        sessionImage: cropEntry,
-      });
+        if (userId) {
+          try {
+            await this.imageStorage.saveImageToUser(userId, cropEntry);
+          } catch (saveErr) {
+            console.warn('[CameraPage2] Failed to save cropped crack to user storage', saveErr);
+          }
+        }
+
+        storedCroppedCracks.push({
+          ...crop,
+          filename: cropEntry.filename,
+          original_id: cropEntry.original_id,
+          cropped_id: cropEntry.cropped_id,
+          sessionImage: cropEntry,
+        });
+      } else {
+        storedCroppedCracks.push({
+          ...crop,
+          filename: generatedFilename,
+          original_id: parentOriginalId || undefined,
+          cropped_id: this.generateImageRecordId('cropped'),
+          sessionImage: null,
+          error: true,
+        });
+      }
     }
 
     return storedCroppedCracks;
@@ -1699,7 +1742,7 @@ export class CameraPage2Page implements AfterViewInit {
       deleteBtn.style.marginRight = '8px';
 
       btnRow.appendChild(deleteBtn);
-      btnRow.appendChild(reprocessBtn);
+      // btnRow.appendChild(reprocessBtn);
 
       box.appendChild(topBar);
       box.appendChild(toggleRow);

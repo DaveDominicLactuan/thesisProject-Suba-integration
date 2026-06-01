@@ -575,13 +575,45 @@ export class PdfPageTest03Page {
               const imgHeight = this.calculateDynamicImageHeight(img);
 
               if (isCropped) {
-                content.push({
-                  image: originalImg,
-                  width: 250,
-                  height: imgHeight,
-                  alignment: 'center',
-                  margin: [0, 0, 0, 20]
-                });
+                const croppedInfoTable: Content = {
+                  table: {
+                    widths: [92, '*'],
+                    body: [
+                      [
+                        { text: 'Shape:', bold: false, alignment: 'left', margin: [12, 12, 10, 12] as [number, number, number, number] },
+                        { text: String(shape), alignment: 'center', margin: [10, 12, 12, 12] as [number, number, number, number] }
+                      ],
+                      [
+                        { text: 'Type:', bold: false, alignment: 'left', margin: [12, 12, 10, 12] as [number, number, number, number] },
+                        { text: String(type), alignment: 'center', margin: [10, 12, 12, 12] as [number, number, number, number] }
+                      ],
+                      [
+                        { text: 'Severity:', bold: false, alignment: 'left', margin: [12, 12, 10, 12] as [number, number, number, number] },
+                        { text: String(severity), alignment: 'center', margin: [10, 12, 12, 12] as [number, number, number, number] }
+                      ]
+                    ]
+                  },
+                  layout: {
+                    hLineWidth: (index: number, node: any) => 2,
+                    vLineWidth: (index: number, node: any) => 2,
+                    hLineColor: () => '#222222',
+                    vLineColor: () => '#222222',
+                    paddingLeft: () => 0,
+                    paddingRight: () => 0,
+                    paddingTop: () => 0,
+                    paddingBottom: () => 0
+                  },
+                  margin: [0, 18, 0, 0] as [number, number, number, number]
+                };
+
+                content.push(({
+                  columns: [
+                    { image: originalImg, width: 250, height: imgHeight, alignment: 'center' },
+                    { width: '*' as const, stack: [croppedInfoTable], margin: [18, 0, 0, 0] as [number, number, number, number] }
+                  ],
+                  columnGap: 10,
+                  margin: [0, 0, 0, 20] as [number, number, number, number]
+                } as Content));
               } else {
                 const withBoxesImg = extractedBoxed ? this.normalizePdfImageSource(extractedBoxed, imgBoxFallback) : imgBoxFallback;
                 const withBoxesHeight = this.calculateDynamicImageHeight({

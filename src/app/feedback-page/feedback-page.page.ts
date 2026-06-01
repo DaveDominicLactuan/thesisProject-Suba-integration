@@ -10,6 +10,8 @@ interface DisplayImage {
   withBoxes: string;
   filename?: string;
   fileName?: string;
+  original_id?: string;
+  cropped_id?: string;
   detectionMessage?: string;
   detectionResult?: string;
   // raw prediction and status copied from StoredImage for easy access
@@ -25,6 +27,21 @@ interface DisplayImage {
   // S3 key fields for mobile compatibility
   originalS3Key?: string;
   originalS3Url?: string;
+}
+
+interface SessionImageGroup {
+  groupKey: string;
+  groupIndex: number | null;
+  images: DisplayImage[];
+  representative: DisplayImage;
+}
+
+interface AggregateStats {
+  type: Record<string, number>;
+  severity: Record<string, number>;
+  shape: Record<string, number>;
+  totalCracks: number;
+  totalImages: number;
 }
 
 interface BoundingBox {
@@ -59,6 +76,15 @@ formDataMap: {
 
 imagePaths: DisplayImage[] = [];
 displayedImagePaths: DisplayImage[] = [];
+availableSessionImages: DisplayImage[] = [];
+groupedSessionImages: SessionImageGroup[] = [];
+stats: AggregateStats = {
+  type: {},
+  severity: {},
+  shape: {},
+  totalCracks: 0,
+  totalImages: 0,
+};
 galleryViewState: 'originalState' | 'croppedState' = 'originalState';
 activeOriginalIndex: number | null = null;
 showWithBoxes: boolean = false;
@@ -122,6 +148,8 @@ private lastImageTitleDebugAt: number = 0;
   detectionResult: string = '';
   userRole: string | null = null; // User role for access control
   userId: string | null = null; // Current user ID
+  selectedGraphType: 'type' | 'shape' | 'severity' | 'all' = 'type';
+  private pieColors: string[] = ['#ff6b2d', '#ff9f43', '#ffbf7a', '#ffd9b8', '#ffeedd', '#ffd0a6'];
 
   /**
    * Inject router, API, storage service, and CameraPreview (native).
@@ -414,6 +442,258 @@ private lastImageTitleDebugAt: number = 0;
     }
   }
 
+  private getImageGroupIndex(filename: string): number | null {
+    const base = this.getFilenameBase(filename);
+    const match = base.match(/img(\d+)/i);
+    return match ? Number(match[1]) : null;
+  }
+
+  private getImageVariantRank(filename: string): number {
+    const base = this.getFilenameBase(filename);
+    if (base.includes('original')) return 0;
+    const croppedMatch = base.match(/cropped(\d+)?/i);
+    if (croppedMatch) {
+      return croppedMatch[1] ? Number(croppedMatch[1]) : 1;
+    }
+    return 2;
+  }
+
+  private getImageSortLabel(img: DisplayImage): string {
+    return this.getImageKey(img) || img.filename || img.original || '';
+  }
+
+  private getPredictionSource(img: DisplayImage): { type?: string; shape?: string; severity?: string; boxes?: any[] } | undefined {
+    return (img.correctedPrediction as any) ?? (img.rawPrediction as any) ?? (img.prediction as any) ?? undefined;
+  }
+
+  private buildSessionImageGroups(images: DisplayImage[]): SessionImageGroup[] {
+    const groupMap = new Map<string, SessionImageGroup>();
+
+    (images || []).forEach((img) => {
+      const filename = img.filename || img.fileName || img.original || img.withBoxes || '';
+      const groupIndex = this.getImageGroupIndex(filename);
+      const groupKey = groupIndex !== null ? `img${groupIndex}` : (filename || 'ungrouped');
+      const existing = groupMap.get(groupKey);
+      if (existing) {
+        existing.images.push(img);
+        return;
+      }
+
+      groupMap.set(groupKey, {
+        groupKey,
+        groupIndex,
+        images: [img],
+        representative: img,
+      });
+    });
+
+    const groups = Array.from(groupMap.values()).map((group) => {
+      const sortedImages = [...group.images].sort((left, right) => {
+        const leftLabel = this.getImageSortLabel(left);
+        const rightLabel = this.getImageSortLabel(right);
+        const leftRank = this.getImageVariantRank(leftLabel);
+        const rightRank = this.getImageVariantRank(rightLabel);
+        if (leftRank !== rightRank) return leftRank - rightRank;
+        return leftLabel.localeCompare(rightLabel);
+      });
+
+      return {
+        ...group,
+        images: sortedImages,
+        representative: sortedImages[0] || group.representative,
+      };
+    });
+
+    groups.sort((left, right) => {
+      if (left.groupIndex !== null && right.groupIndex !== null && left.groupIndex !== right.groupIndex) {
+        return left.groupIndex - right.groupIndex;
+      }
+      if (left.groupIndex !== null) return -1;
+      if (right.groupIndex !== null) return 1;
+      return left.groupKey.localeCompare(right.groupKey);
+    });
+
+    console.group('[FeedbackPage] Grouped session images');
+    groups.forEach((group) => {
+      console.group(`${group.groupKey}`);
+      console.log('Ordered filenames:', group.images.map((img) => img.filename || img.fileName || img.original || img.withBoxes || '(unnamed)'));
+      console.log('Representative:', group.representative.filename || group.representative.fileName || group.representative.original || group.representative.withBoxes || '(unnamed)');
+      console.groupEnd();
+    });
+    console.groupEnd();
+
+    return groups;
+  }
+
+  private refreshGroupedSessionStats(): void {
+    const summaryImages = this.getSummaryScopeImages();
+    const type: Record<string, number> = {};
+    const severity: Record<string, number> = {};
+    const shape: Record<string, number> = {};
+    let totalCracks = 0;
+
+    summaryImages.forEach((image) => {
+      const source = this.getPredictionSource(image);
+      if (!source) {
+        return;
+      }
+
+      const boxCount = Array.isArray(source.boxes) && source.boxes.length > 0 ? source.boxes.length : 1;
+      totalCracks += boxCount;
+      if (source.type) type[source.type] = (type[source.type] || 0) + 1;
+      if (source.severity) severity[source.severity] = (severity[source.severity] || 0) + 1;
+      if (source.shape) shape[source.shape] = (shape[source.shape] || 0) + 1;
+    });
+
+    this.stats = {
+      type,
+      severity,
+      shape,
+      totalCracks,
+      totalImages: summaryImages.length,
+    };
+  }
+
+  private getSummaryScopeImages(referenceImage?: DisplayImage): DisplayImage[] {
+    const resolveCurrentImage = (): DisplayImage | undefined => {
+      if (referenceImage) {
+        return referenceImage;
+      }
+
+      const selectedSrc = this.selectedImage || '';
+      if (!selectedSrc) {
+        return undefined;
+      }
+
+      return this.displayedImagePaths.find((img) => img.original === selectedSrc || img.withBoxes === selectedSrc)
+        ?? this.imagePaths.find((img) => img.original === selectedSrc || img.withBoxes === selectedSrc);
+    };
+
+    const currentImage = resolveCurrentImage();
+
+    if (this.galleryViewState === 'croppedState' && this.activeOriginalIndex !== null) {
+      const croppedImages = this.imagePaths.filter((img) => {
+        const meta = this.parseImageGroup(this.getImageFilename(img));
+        return meta.isCropped && meta.index === this.activeOriginalIndex;
+      });
+
+      if (croppedImages.length > 0) {
+        return croppedImages;
+      }
+    }
+
+    if (this.galleryViewState === 'originalState' && currentImage) {
+      const meta = this.parseImageGroup(this.getImageFilename(currentImage));
+      if (meta.index !== null) {
+        const croppedImages = this.imagePaths.filter((img) => {
+          const imageMeta = this.parseImageGroup(this.getImageFilename(img));
+          return imageMeta.isCropped && imageMeta.index === meta.index;
+        });
+
+        if (croppedImages.length > 0) {
+          return croppedImages;
+        }
+      }
+    }
+
+    if (this.galleryViewState === 'croppedState') {
+      return this.displayedImagePaths.length > 0 ? this.displayedImagePaths : this.imagePaths;
+    }
+
+    return currentImage ? [currentImage] : this.displayedImagePaths.length > 0 ? this.displayedImagePaths : this.imagePaths;
+  }
+
+  getScopeText(): string {
+    return this.selectedSessionId || this.routeSessionId ? 'This Session' : 'All Sessions';
+  }
+
+  get totalShapes(): number {
+    return Object.values(this.stats.shape as Record<string, number> || {}).reduce((sum, value) => sum + Number(value || 0), 0);
+  }
+
+  get totalTypes(): number {
+    return Object.values(this.stats.type as Record<string, number> || {}).reduce((sum, value) => sum + Number(value || 0), 0);
+  }
+
+  get totalSeverities(): number {
+    return Object.values(this.stats.severity as Record<string, number> || {}).reduce((sum, value) => sum + Number(value || 0), 0);
+  }
+
+  getFailedImagesProcessedCount(): number {
+    const summaryImages = this.getSummaryScopeImages();
+    return summaryImages.reduce((count, img) => {
+      const lower = ((img as any)?.statusMessage || '').toString().toLowerCase();
+      return lower.includes('prediction failed') || lower.includes('no prediction') ? count + 1 : count;
+    }, 0);
+  }
+
+  selectGraphType(type: 'type' | 'shape' | 'severity' | 'all') {
+    this.selectedGraphType = type;
+    console.log(`[Graph Selection] Data Type selected: ${type}`);
+  }
+
+  getSelectedData(): { [k: string]: number } {
+    if (this.selectedGraphType === 'all') {
+      const out: { [k: string]: number } = {};
+      Object.entries(this.stats.type as Record<string, number> || {}).forEach(([k, v]) => { out[`Type - ${k}`] = Number(v || 0); });
+      Object.entries(this.stats.shape as Record<string, number> || {}).forEach(([k, v]) => { out[`Shape - ${k}`] = Number(v || 0); });
+      Object.entries(this.stats.severity as Record<string, number> || {}).forEach(([k, v]) => { out[`Severity - ${k}`] = Number(v || 0); });
+      return out;
+    }
+
+    switch (this.selectedGraphType) {
+      case 'type':
+        return this.stats.type || {};
+      case 'shape':
+        return this.stats.shape || {};
+      case 'severity':
+        return this.stats.severity || {};
+      default:
+        return this.stats.type || {};
+    }
+  }
+
+  getGraphTitle(): string {
+    switch (this.selectedGraphType) {
+      case 'type':
+        return 'Type';
+      case 'shape':
+        return 'Shape';
+      case 'severity':
+        return 'Severity';
+      case 'all':
+        return 'All Categories';
+      default:
+        return 'Type';
+    }
+  }
+
+  get pieData(): Array<{ key: string; value: number; percent: number; color: string }> {
+    const src = this.getSelectedData() || {};
+    const entries = Object.entries(src);
+    const total = entries.reduce((sum, [, value]) => sum + (typeof value === 'number' ? value : 0), 0) || 0;
+    if (entries.length === 0) return [];
+    let index = 0;
+    return entries
+      .map(([key, value]) => ({ key, value: value as number, percent: total ? Math.round(((value as number) / total) * 100) : 0, color: this.pieColors[index++ % this.pieColors.length] }))
+      .sort((left, right) => right.value - left.value);
+  }
+
+  getPieGradient(): string {
+    const data = this.pieData;
+    if (!data || data.length === 0) return 'linear-gradient(#eee,#eee)';
+    let cumulative = 0;
+    const parts: string[] = [];
+    data.forEach((slice) => {
+      const start = cumulative;
+      const end = cumulative + slice.percent;
+      parts.push(`${slice.color} ${start}% ${end}%`);
+      cumulative = end;
+    });
+    if (cumulative < 100) parts.push(`#eee ${cumulative}% 100%`);
+    return `conic-gradient(${parts.join(', ')})`;
+  }
+
   /**
    * Log user context for debugging (userId, sessionId, and related metadata).
    */
@@ -423,6 +703,10 @@ private lastImageTitleDebugAt: number = 0;
 
   private getImageFilenameRaw(img: DisplayImage): string {
     return (img.filename || img.fileName || '').trim();
+  }
+
+  getImageKey(img: DisplayImage): string {
+    return img.filename || img.fileName || img.original || img.withBoxes || img.storagePath || img.originalS3Key || img.originalS3Url || img.storageUrl || '';
   }
 
   private getImageFilename(img: DisplayImage): string {
@@ -801,6 +1085,8 @@ private lastImageTitleDebugAt: number = 0;
         await this.hydrateSessionImagesFromS3();
       }
 
+      this.availableSessionImages = [...this.imagePaths];
+
       // After hydration, check if there are any images with boxes that still need withBoxes generated
       // This is a fallback in case hydration didn't handle all cases
       const imagesToProcessForBoxes = this.imagePaths.filter((img: DisplayImage) => {
@@ -820,6 +1106,9 @@ private lastImageTitleDebugAt: number = 0;
           Math.max(2000, imagesToProcessForBoxes.length * 800)
         );
       }
+
+      this.groupedSessionImages = this.buildSessionImageGroups(this.imagePaths);
+      this.refreshGroupedSessionStats();
 
       // Log the current selected session and its image objects to console
       if (this.selectedSessionId) {
@@ -1128,6 +1417,8 @@ private lastImageTitleDebugAt: number = 0;
       withBoxes: withBoxesSrc,
       filename: img.filename || '',
       fileName: img.filename || '',
+        original_id: img.original_id,
+        cropped_id: img.cropped_id,
       boxes: Array.isArray(img.boxes) ? img.boxes : [],
       storagePath: img.storagePath,
       storageUrl: img.storageUrl,
@@ -1201,6 +1492,15 @@ private lastImageTitleDebugAt: number = 0;
       shape: this.dropdown2 ?? '',
       severity: this.dropdown3 ?? ''
     };
+  }
+
+  /**
+   * Compatibility helper for save-time cropped image uploads.
+   * The feedback page already stores image payloads in their current form,
+   * so this returns the supplied data URL unchanged.
+   */
+  private async shrinkDataUrlToBytes(dataUrl: string): Promise<string> {
+    return dataUrl;
   }
 
   /**
@@ -1392,6 +1692,8 @@ detectCenterImage() {
       'severe',
       'very severe'
     ];
+
+    this.refreshGroupedSessionStats();
   }
 }
 
@@ -1595,6 +1897,7 @@ addEntry() {
 
     // Also refresh selectedImage to the correct src based on toggle
     this.selectedImage = this.showWithBoxes ? matched.withBoxes : matched.original;
+    this.refreshGroupedSessionStats();
   }
 
 
@@ -1643,6 +1946,8 @@ addEntry() {
       // remove from in-memory display list and update selection
       this.imagePaths.splice(idx, 1);
       this.refreshDisplayedImagesByState(false);
+      this.groupedSessionImages = this.buildSessionImageGroups(this.imagePaths);
+      this.refreshGroupedSessionStats();
 
       if (this.imagePaths.length > 0) {
         const first = this.displayedImagePaths[0] || this.imagePaths[0];
@@ -1737,6 +2042,15 @@ addEntry() {
   handleBackTap(event: Event) {
     event.preventDefault();
     event.stopPropagation();
+
+    if (this.galleryViewState === 'croppedState') {
+      this.showOriginalState();
+      return;
+    }
+
+    if (this.galleryViewState !== 'originalState') {
+      return;
+    }
 
     const now = Date.now();
     if (this.backNavigationInProgress || now - this.lastBackTapAt < 400) {
@@ -1970,6 +2284,9 @@ addEntry() {
     const imageKey = entry.filename || entry.fileName || entry.original || '';
     const form = (imageKey && this.formDataMap[imageKey]) ? this.formDataMap[imageKey] : undefined;
     const originalPrediction = entry.prediction ?? entry.originalPrediction ?? entry.rawPrediction ?? null;
+    const fallbackIdBase = imageKey || entry.storagePath || entry.originalS3Key || entry.originalS3Url || entry.original || 'image';
+    const fallbackOriginalId = entry.original_id || fallbackIdBase;
+    const fallbackCroppedId = entry.cropped_id || fallbackOriginalId;
     const preservedBoxes = Array.isArray(entry.boxes)
       ? [...entry.boxes]
       : Array.isArray(originalPrediction?.boxes)
@@ -2029,9 +2346,109 @@ addEntry() {
         : `${shape || ''}${severity ? ' â€” ' + severity : ''}`.trim();
     }
 
+    entry.original_id = fallbackOriginalId;
+    entry.cropped_id = fallbackCroppedId;
     entry.engineerCheckedSession = entry.engineerCheckedSession ?? (this.userRole?.toLowerCase() === 'engineer' && this.engineerLookedSessionChecked);
+    entry.correctedByEngineer = entry.correctedByEngineer ?? entry.engineerCheckedSession ?? (this.userRole?.toLowerCase() === 'engineer' && this.engineerLookedSessionChecked);
 
     return entry;
+  }
+
+  /**
+   * Upload any croppedCracks that were captured earlier but not yet written to S3.
+   * This is invoked from the save flow so cropped session-image objects are finalized
+   * only when the user actually saves the session.
+   */
+  private async uploadPendingCroppedCracks(entry: any): Promise<void> {
+    const service: any = this.imageStorageService as any;
+    const sessionId = this.selectedSessionId || entry?.sessionId || this.routeSessionId || undefined;
+    const croppedCracks = Array.isArray(entry?.croppedCracks) ? entry.croppedCracks : [];
+
+    if (!sessionId || croppedCracks.length === 0 || typeof service?.uploadSessionImageCropped !== 'function') {
+      return;
+    }
+
+    const parentOriginalId = entry?.original_id || croppedCracks[0]?.sessionImage?.original_id || croppedCracks[0]?.original_id || undefined;
+    const parentCroppedId = entry?.cropped_id || croppedCracks[0]?.sessionImage?.cropped_id || croppedCracks[0]?.cropped_id || parentOriginalId;
+
+    if (parentOriginalId) {
+      entry.original_id = parentOriginalId;
+    }
+    if (parentCroppedId) {
+      entry.cropped_id = parentCroppedId;
+    }
+
+    const updatedCracks: any[] = [];
+
+    for (let index = 0; index < croppedCracks.length; index++) {
+      const crop = croppedCracks[index] || {};
+      const croppedNumber = typeof crop.croppedNumber === 'number' ? crop.croppedNumber : index + 1;
+      const cropFilename = crop.filename || crop.sessionImage?.filename || entry?.filename || entry?.fileName || 'cropped';
+
+      if (crop.s3Key || crop.s3Url || crop.sessionImage?.originalS3Key || crop.sessionImage?.storagePath) {
+        updatedCracks.push(crop);
+        continue;
+      }
+
+      const sourceDataUrl = crop.image || crop.sessionImage?.original || crop.sessionImage?.withBoxes || entry?.original || entry?.withBoxes || '';
+      if (!sourceDataUrl) {
+        updatedCracks.push(crop);
+        continue;
+      }
+
+      try {
+        const uploadResult = await service.uploadSessionImageCropped(sourceDataUrl, sessionId, cropFilename, croppedNumber, crop.imgIndex ?? entry?.sessionImgIndex);
+
+        if (uploadResult) {
+          const updatedSessionImage = crop.sessionImage ? {
+            ...crop.sessionImage,
+            original: sourceDataUrl,
+            original_id: crop.sessionImage.original_id || parentOriginalId || uploadResult.s3Key,
+            cropped_id: crop.sessionImage.cropped_id || parentCroppedId || uploadResult.s3Key,
+            originalS3Key: uploadResult.s3Key,
+            originalS3Url: uploadResult.url,
+            storagePath: uploadResult.s3Key,
+            storageUrl: uploadResult.url,
+          } : crop.sessionImage;
+
+          const updatedCrop = {
+            ...crop,
+            image: sourceDataUrl,
+            s3Key: uploadResult.s3Key,
+            s3Url: uploadResult.url,
+            filename: crop.filename || uploadResult.s3Key,
+            original_id: crop.original_id || parentOriginalId || uploadResult.s3Key,
+            cropped_id: crop.cropped_id || uploadResult.s3Key,
+            sessionImage: updatedSessionImage,
+          };
+
+          if (updatedSessionImage && updatedSessionImage.filename && typeof service.setEntryForImage === 'function') {
+            try {
+              service.setEntryForImage(updatedSessionImage.filename, updatedSessionImage);
+            } catch (setErr) {
+              console.warn('[FeedbackPage] Failed to update stored cropped session image', setErr);
+            }
+          }
+
+          updatedCracks.push(updatedCrop);
+        } else {
+          updatedCracks.push(crop);
+        }
+      } catch (err) {
+        console.warn('[FeedbackPage] Failed to upload pending cropped crack', err);
+        updatedCracks.push(crop);
+      }
+    }
+
+    entry.croppedCracks = updatedCracks;
+
+    if (entry.filename && typeof service.setEntryForImage === 'function') {
+      try {
+        service.setEntryForImage(entry.filename, entry);
+      } catch (err) {
+        console.warn('[FeedbackPage] Failed to persist croppedCracks back to storage', err);
+      }
+    }
   }
 
   /**
@@ -2079,6 +2496,12 @@ addEntry() {
    */
   async saveCurrentStoredImageAndGoHome() {
     try {
+      console.log('[FeedbackPage] saveCurrentStoredImageAndGoHome triggered', {
+        selectedImage: this.selectedImage || null,
+        selectedImageTitle: this.selectedImageTitle || null,
+        selectedSessionId: this.selectedSessionId || null,
+      });
+
       // Try service current image first
       //Try to get the service "current image"
       let entry: any = undefined;
@@ -2104,6 +2527,8 @@ addEntry() {
             timestamp: new Date().toISOString(),
             detectionMessage: found.detectionMessage ?? '',
             filename: found.fileName,
+            original_id: found.original_id,
+            cropped_id: found.cropped_id,
             prediction: originalPrediction ? { ...originalPrediction } : undefined,
             rawPrediction: correctedPrediction,
             correctedPrediction,
@@ -2125,6 +2550,7 @@ addEntry() {
       }
 
       // mark entry as saved session and persist to service
+      await this.uploadPendingCroppedCracks(entry);
       entry = this.normalizePredictionFields(entry);
       entry.statusMessage = entry.statusMessage ?? 'Saved as session';
       entry.engineerCheckedSession = this.userRole?.toLowerCase() === 'engineer' && this.engineerLookedSessionChecked;
@@ -2133,6 +2559,8 @@ addEntry() {
       console.log('Session image object:', entry);
       console.table({
         filename: entry.filename || '(unnamed)',
+        original_id: entry.original_id || '(none)',
+        cropped_id: entry.cropped_id || '(none)',
         boxCount: Array.isArray(entry.boxes) ? entry.boxes.length : 0,
         predictionBoxCount: Array.isArray(entry.prediction?.boxes) ? entry.prediction.boxes.length : 0,
         correctedPredictionBoxCount: Array.isArray(entry.correctedPrediction?.boxes) ? entry.correctedPrediction.boxes.length : 0,
@@ -2154,6 +2582,8 @@ addEntry() {
       console.log('Session Image Entry:', entry);
       console.table({
         filename: entry.filename || '(unnamed)',
+        original_id: entry.original_id || '(none)',
+        cropped_id: entry.cropped_id || '(none)',
         hasPrediction: !!entry.prediction || !!entry.rawPrediction,
         predictionType: entry.prediction?.type || entry.rawPrediction?.type || 'N/A',
         predictionShape: entry.prediction?.shape || entry.rawPrediction?.shape || 'N/A',
@@ -2167,6 +2597,11 @@ addEntry() {
 
       // Prompt user for session name and allow Save or Cancel via custom overlay
       try {
+        console.log('[FeedbackPage] saveCurrentStoredImageAndGoHome calling showSaveSessionPrompt', {
+          selectedSessionId: this.selectedSessionId || null,
+          selectedImage: this.selectedImage || null,
+          resolvedEntry: entry,
+        });
         await this.showSaveSessionPrompt(entry);
       } catch (e) {
         console.warn('Session prompt failed', e);
@@ -2189,6 +2624,30 @@ addEntry() {
         : (this.sessions.length > 0 ? this.sessions[0] : null);
       const currentSessionName = typeof currentSession?.name === 'string' ? currentSession.name.trim() : '';
       const hasExistingSessionName = currentSessionName.length > 0;
+      let correctedByEngineer = !!currentSession?.correctedByEngineer;
+      let correctionState = this.getSaveSessionPromptCheckboxState(correctedByEngineer);
+
+      const sessionImageObjects = currentSession && Array.isArray(currentSession.imageKeys)
+        ? currentSession.imageKeys
+            .map((imageKey: string) => typeof (this.imageStorageService as any).getEntryForImage === 'function'
+              ? (this.imageStorageService as any).getEntryForImage(imageKey)
+              : null)
+            .filter((image: any) => !!image)
+        : [];
+
+      console.group('[FeedbackPage] showSaveSessionPrompt session context');
+      console.log('Full session object:', currentSession);
+      console.log('Session image objects:', sessionImageObjects);
+      console.table((sessionImageObjects || []).map((img: any, index: number) => ({
+        index: index + 1,
+        filename: img?.filename || '(unnamed)',
+        original_id: img?.original_id || '(none)',
+        cropped_id: img?.cropped_id || '(none)',
+        hasPrediction: !!img?.prediction || !!img?.rawPrediction,
+        statusMessage: img?.statusMessage || '(none)',
+      })));
+      console.log('Entry passed to prompt:', entry);
+      console.groupEnd();
 
       // Create full-screen overlay element and style it
       const overlay = document.createElement('div');
@@ -2221,6 +2680,36 @@ addEntry() {
       title.style.fontWeight = '700';
       title.style.marginBottom = '4px';
       title.style.fontSize = '16px';
+
+      const promptMessage = document.createElement('div');
+      promptMessage.innerText = 'Are you sure of the information on the images';
+      promptMessage.style.marginBottom = '10px';
+      promptMessage.style.fontSize = '14px';
+      promptMessage.style.lineHeight = '1.4';
+
+      const correctionRow = document.createElement('label');
+      correctionRow.style.display = 'flex';
+      correctionRow.style.alignItems = 'center';
+      correctionRow.style.gap = '10px';
+      correctionRow.style.marginBottom = '12px';
+      correctionRow.style.fontSize = '14px';
+      correctionRow.style.cursor = 'pointer';
+
+      const correctionCheckbox = document.createElement('input');
+      correctionCheckbox.type = 'checkbox';
+      correctionCheckbox.checked = correctionState.checked;
+
+      const correctionText = document.createElement('span');
+      correctionText.innerText = correctionState.value;
+
+      correctionCheckbox.addEventListener('change', () => {
+        correctionState = this.getSaveSessionPromptCheckboxState(correctionCheckbox.checked);
+        correctedByEngineer = correctionState.checked;
+        correctionText.innerText = correctionState.value;
+      });
+
+      correctionRow.appendChild(correctionCheckbox);
+      correctionRow.appendChild(correctionText);
 
       // const titleSubtext = document.createElement('div');
       // titleSubtext.innerText = hasExistingSessionName ? 'selected session name' : 'session name';
@@ -2334,6 +2823,9 @@ addEntry() {
           const svc: any = this.imageStorageService as any;
           const imageKey = entry.filename || entry.original;
           let savedSessionId: string | null = null;
+          entry.correctedByEngineer = correctionState.checked;
+          entry.correctedByEngineerValue = correctionState.value;
+          entry.engineerCheckedSession = correctionState.checked;
 
           updateProgress(5, 'Saving Session: 5%');
 
@@ -2347,7 +2839,9 @@ addEntry() {
             const existingSession = typeof svc.getSession === 'function' ? svc.getSession(this.selectedSessionId) : null;
             if (existingSession) {
               existingSession.notes = this.notesText;
-              existingSession.engineerCheckedSession = this.userRole?.toLowerCase() === 'engineer' && this.engineerLookedSessionChecked;
+              existingSession.engineerCheckedSession = correctionState.checked;
+              existingSession.correctedByEngineer = correctionState.checked;
+              existingSession.correctedByEngineerValue = correctionState.value;
             }
             if (typeof svc.updateSessionName === 'function') {
               try { svc.updateSessionName(this.selectedSessionId, val); } catch (e) { /* ignore */ }
@@ -2364,7 +2858,9 @@ addEntry() {
                 try { svc.setLastCreatedSession(s.id, s.name); } catch (e) { /* ignore */ }
               }
               if (s && s.id) {
-                s.engineerCheckedSession = this.userRole?.toLowerCase() === 'engineer' && this.engineerLookedSessionChecked;
+                s.engineerCheckedSession = correctionState.checked;
+                s.correctedByEngineer = correctionState.checked;
+                s.correctedByEngineerValue = correctionState.value;
                 this.selectedSessionId = s.id;
                 savedSessionId = s.id;
               }
@@ -2396,6 +2892,9 @@ addEntry() {
 
               if (savedSessionId && typeof svc.getSession === 'function') {
                 sessionObject = svc.getSession(savedSessionId);
+              }
+              if (sessionObject) {
+                sessionObject.correctedByEngineer = correctedByEngineer;
               }
 
               // Get all images in the session
@@ -2434,7 +2933,8 @@ addEntry() {
                   name: val,
                   imageKeys: sessionImagesToStore.map(img => img.filename || img.original),
                   notes: this.notesText,
-                  engineerCheckedSession: this.userRole?.toLowerCase() === 'engineer' && this.engineerLookedSessionChecked
+                  engineerCheckedSession: correctionState.checked,
+                  correctedByEngineer
                 },
                 sessionImages: sessionImagesToStore.map((img: StoredImage, index: number) => ({
                   index,
@@ -2447,7 +2947,8 @@ addEntry() {
                   prediction: img.prediction ? { ...img.prediction } : undefined,
                   correctedPrediction: img.correctedPrediction ? { ...img.correctedPrediction } : undefined,
                   statusMessage: img.statusMessage,
-                  engineerCheckedSession: img.engineerCheckedSession,
+                  engineerCheckedSession: correctionState.checked,
+                  correctedByEngineer: correctionState.checked,
                   timestamp: img.timestamp,
                   detectionMessage: img.detectionMessage,
                   faceDetected: img.faceDetected,
@@ -2575,6 +3076,9 @@ addEntry() {
               for (let imgIndex = 0; imgIndex < sessionImages.length; imgIndex++) {
                 const imgEntry = this.normalizePredictionFields(sessionImages[imgIndex]);
                 const imgKey = imgEntry.filename || imgEntry.original;
+                imgEntry.engineerCheckedSession = correctionState.checked;
+                imgEntry.correctedByEngineer = correctionState.checked;
+                imgEntry.correctedByEngineerValue = correctionState.value;
                 
                 console.log(`[FeedbackPage] Uploading image ${imgIndex + 1}/${sessionImages.length}: ${imgKey}`);
                 
@@ -2760,33 +3264,15 @@ addEntry() {
 
           if (firestoreSaved && savedSessionId) {
             // Build summary from all uploaded images in the session
-            const s3Summary: string[] = [];
-            if (sessionImages && sessionImages.length > 0) {
-              sessionImages.forEach((img: StoredImage, index: number) => {
-                const imgName = img.filename || `Image ${index + 1}`;
-                if (img.storagePath) {
-                  s3Summary.push(`âœ… Original [${imgName}]: ${img.storagePath}`);
-                }
-              });
-            }
-            
-            const firestoreMessage = `âœ… Session saved to Firestore: ${savedSessionId}\n${s3Summary.length > 0 ? 'ðŸ“ S3 Files:\n' + s3Summary.join('\n') : 'No S3 uploads found'}`;
-            console.log(firestoreMessage);
-            await this.showFirestoreSavePrompt(firestoreMessage);
-          } else if (sessionImages && sessionImages.some((img: StoredImage) => img.storagePath)) {
-            // Build summary from images with S3 references
-            const s3Summary: string[] = [];
-            sessionImages.forEach((img: StoredImage, index: number) => {
-              const imgName = img.filename || `Image ${index + 1}`;
-              if (img.storagePath) {
-                s3Summary.push(`âœ… Original [${imgName}]: ${img.storagePath}`);
-              }
+            console.log('[FeedbackPage] Save successful', {
+              savedSessionId,
+              imageCount: sessionImages?.length || 0,
             });
-            
-            const successMessage = `âœ… Images uploaded to S3\nðŸ“ S3 Files:\n${s3Summary.join('\n')}`;
-            alert(successMessage);
+            await this.showFirestoreSavePrompt('Save successful');
+          } else if (sessionImages && sessionImages.some((img: StoredImage) => img.storagePath)) {
+            alert('Save successful');
           } else {
-            alert('Session saved successfully');
+            alert('Save successful');
           }
 
           this.router.navigate(['/home-page2']);
@@ -2803,6 +3289,8 @@ addEntry() {
       btnRow.appendChild(saveBtn);
 
       box.appendChild(title);
+      box.appendChild(promptMessage);
+      box.appendChild(correctionRow);
       // box.appendChild(titleSubtext);
       box.appendChild(input);
       box.appendChild(btnRow);
@@ -2812,6 +3300,19 @@ addEntry() {
       // Focus input for inactive state
       setTimeout(() => input.focus(), 50);
     });
+  }
+
+  /** Return the checked state and a human-readable value for the save-session checkbox. */
+  private getSaveSessionPromptCheckboxState(isChecked: boolean): { checked: boolean; value: string } {
+    return {
+      checked: isChecked,
+      value: isChecked ? 'Corrected by engineer' : 'Not corrected by engineer'
+    };
+  }
+
+  /** Backward-compatible alias used by older callers. */
+  private getEngineerCorrectionState(isChecked: boolean): { checked: boolean; value: string } {
+    return this.getSaveSessionPromptCheckboxState(isChecked);
   }
 
   /**
@@ -2949,14 +3450,9 @@ addEntry() {
       box.style.maxWidth = '500px';
       box.style.boxShadow = '0 6px 30px rgba(0,0,0,0.3)';
 
-      const title = document.createElement('div');
-      title.innerText = 'Session Saved';
-      title.style.fontWeight = '700';
-      title.style.marginBottom = '8px';
-
       const body = document.createElement('div');
-      body.innerText = message;
-      body.style.marginBottom = '12px';
+      body.innerText = message || 'Save successful';
+      body.style.marginBottom = '16px';
       body.style.wordBreak = 'break-word';
 
       const closeBtn = document.createElement('button');
@@ -2975,8 +3471,7 @@ addEntry() {
         resolve();
       });
 
-      box.appendChild(title);
-      // box.appendChild(body);
+      box.appendChild(body);
       box.appendChild(closeBtn);
       overlay.appendChild(box);
       document.body.appendChild(overlay);

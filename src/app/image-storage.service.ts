@@ -29,6 +29,9 @@ export interface StoredImage {
   // S3 upload keys for session copying
   originalS3Key?: string;
   withBoxesS3Key?: string;
+  original_id?: string;
+  cropped_id?: string;
+  // withBoxes S3 key removed — withBoxes kept in-memory only
   // Source tracking for session copying (Approach 1)
   sourceFilename?: string;
   sourceOriginalS3Key?: string;
@@ -40,6 +43,7 @@ export interface ImageSession {
   name: string;
   imageKeys: string[]; // original image keys
   created: string;
+  correctedByEngineer?: boolean;
 }
 
 @Injectable({
@@ -190,7 +194,7 @@ export class ImageStorageService {
           filename: entry.filename,
           key: key.substring(0, 50) + '...',
           hasS3Original: !!entry.originalS3Key,
-          hasS3WithBoxes: !!entry.withBoxesS3Key
+          hasWithBoxes: !!entry.withBoxes
         });
         
         const safeId = `${sessionId}_${(entry.filename || key).toString().slice(0, 50).replace(/[^a-zA-Z0-9_-]/g, '_')}`;
@@ -208,7 +212,6 @@ export class ImageStorageService {
           prediction: entry.prediction ?? null,
           correctedPrediction: entry.correctedPrediction ?? null,
           originalS3Key: entry.originalS3Key,
-          withBoxesS3Key: entry.withBoxesS3Key,
           createdAt: serverTimestamp(),
           createdBy: createdBy || null
         };
@@ -219,14 +222,14 @@ export class ImageStorageService {
           docPath: `images/${safeId}`,
           filename: entry.filename,
           s3KeyOriginal: entry.originalS3Key,
-          s3KeyWithBoxes: entry.withBoxesS3Key,
+          s3KeyWithBoxes: (entry.withBoxes ? '(in-memory)' : '(none)'),
           createdBy: createdBy,
           hasOriginal: !!entry.original,
           hasWithBoxes: !!entry.withBoxes,
-          s3KeyInfo: {
+            s3KeyInfo: {
             originalS3KeyPreview: entry.originalS3Key?.substring(0, 80) + '...' || '(undefined)',
-            withBoxesS3KeyPreview: entry.withBoxesS3Key?.substring(0, 80) + '...' || '(undefined)',
-            bothKeysPresent: !!entry.originalS3Key && !!entry.withBoxesS3Key ? '✅ YES' : '❌ NO'
+            withBoxesPreview: entry.withBoxes ? '(in-memory)' : '(none)',
+            bothKeysPresent: !!entry.originalS3Key && !!entry.withBoxes ? '✅ YES' : '❌ NO'
           }
         });
         
@@ -266,10 +269,9 @@ export class ImageStorageService {
                   docPath: `images/${safeId}`,
                   filename: imgData?.['filename'],
                   originalS3Key: imgData?.['originalS3Key'],
-                  withBoxesS3Key: imgData?.['withBoxesS3Key'],
                   s3KeysPresent: {
                     originalS3Key: !!imgData?.['originalS3Key'] ? '✅ YES' : '❌ NO',
-                    withBoxesS3Key: !!imgData?.['withBoxesS3Key'] ? '✅ YES' : '❌ NO'
+                    withBoxesPresent: !!imgData?.['withBoxes'] ? '✅ YES' : '❌ NO'
                   }
                 });
               }

@@ -103,7 +103,8 @@
       </div>
 
       <!-- Form metadata section -->
-      <div class="login-form" [class.notes-open]="notesExpanded" [class.engineer-checked-session]="engineerLookedSessionChecked" [class.engineer-role]="userRole === 'engineer'">
+      <div class="login-form" [class.board-mode]="galleryViewState === 'originalState'" [class.notes-open]="notesExpanded" [class.engineer-checked-session]="engineerLookedSessionChecked" [class.engineer-role]="userRole === 'engineer'">
+        <ng-container *ngIf="galleryViewState !== 'originalState'; else originalStateSummary">
         <!-- Wrapper keeps the title in the same visual position; delete button is placed to its left -->
         <div class="image-title-wrapper">
           <button class="delete-left-btn" type="button" (click)="deleteSelectedImage()" title="Delete selected image">
@@ -237,7 +238,124 @@
           <button class="sign-in-button debug-button" (click)="testS3Fetch()" title="Check S3 fetch status in console">🔍 Test S3 Fetch</button>
         </div> -->
 
+        </ng-container>
       </div>
+
+        <ng-template #originalStateSummary>
+          <div class="original-state-summary">
+            <div class="summary-header">
+              <div class="login-title">Session Summary</div>
+              <div class="login-subtitle">{{ getScopeText() }} · grouped by img number</div>
+            </div>
+
+            <div class="overall-board-container">
+              <div class="board-stats">
+                <div class="board-row-top">
+                  <!-- <div class="board-left">
+                    <div class="board-icon" aria-hidden="true">
+                      <div class="board-icon-circle">
+                        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                          <rect x="3" y="6" width="14" height="12" rx="2" stroke="#f09819" stroke-width="1.6" fill="#fff" />
+                          <path d="M7 10l2 2 3-3 5 5" stroke="#f09819" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
+                      </div>
+                    </div>
+                  </div> -->
+                  <div class="board-item">
+                    <div class="board-label">Image Groups</div>
+                    <div class="board-value">{{ stats.totalImages }}</div>
+                    <div class="board-caption">Total</div>
+                  </div>
+                  <div class="board-item">
+                    <div class="board-label">Failed Groups</div>
+                    <div class="board-value">{{ getFailedImagesProcessedCount() }}</div>
+                    <div class="board-caption">Total</div>
+                  </div>
+                </div>
+                <div class="board-row-bottom">
+                    <div class="board-item highlighted" style="width:140px;height:100px;display:flex;flex-direction:column;align-items:center;justify-content:center;border-radius:8px;background:rgba(255,230,200,0.12);">
+                      <div class="board-label">Shape</div>
+                      <div class="board-value orange">{{ totalShapes }}</div>
+                      <div class="board-caption">Total</div>
+                    </div>
+                    <div class="board-item highlighted" style="width:140px;height:100px;display:flex;flex-direction:column;align-items:center;justify-content:center;border-radius:8px;background:rgba(255,230,200,0.12);">
+                      <div class="board-label">Type</div>
+                      <div class="board-value orange">{{ totalTypes }}</div>
+                      <div class="board-caption">Total</div>
+                    </div>
+                    <div class="board-item highlighted" style="width:140px;height:100px;display:flex;flex-direction:column;align-items:center;justify-content:center;border-radius:8px;background:rgba(255,230,200,0.12);">
+                      <div class="board-label">Severity</div>
+                      <div class="board-value orange">{{ totalSeverities }}</div>
+                      <div class="board-caption">Total</div>
+                    </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="sessions-section">
+              <div class="graph-tabs-shell">
+                <div class="tabs-pill" role="tablist" aria-label="Grouped session categories">
+                  <button class="tab-btn" [class.active]="selectedGraphType === 'type'" (click)="selectGraphType('type')" role="tab">
+                    <span class="tab-inner">
+                      <span class="tab-text">Type</span>
+                    </span>
+                  </button>
+
+                  <button class="tab-btn" [class.active]="selectedGraphType === 'shape'" (click)="selectGraphType('shape')" role="tab">
+                    <span class="tab-inner">
+                      <span class="tab-text">Shape</span>
+                    </span>
+                  </button>
+
+                  <button class="tab-btn" [class.active]="selectedGraphType === 'severity'" (click)="selectGraphType('severity')" role="tab">
+                    <span class="tab-inner">
+                      <span class="tab-text">Severity</span>
+                    </span>
+                  </button>
+
+                  <button class="tab-btn" [class.active]="selectedGraphType === 'all'" (click)="selectGraphType('all')" role="tab">
+                    <span class="tab-inner">
+                      <span class="tab-text">All</span>
+                    </span>
+                  </button>
+                </div>
+              </div>
+
+              <div class="graph-display">
+                <div class="graph-card">
+                  <div class="pie-layout">
+                    <div class="pie-card">
+                      <div class="pie-title">Distribution by {{ getGraphTitle() }}</div>
+                      <div class="pie-chart" [ngStyle]="{'background': getPieGradient()}">
+                        <div class="pie-hole">{{ stats.totalImages }}</div>
+                      </div>
+                    </div>
+
+                    <div class="legend-card">
+                      <div class="legend-list">
+                        <div class="legend-item" *ngFor="let s of pieData">
+                          <div class="legend-left">
+                            <span class="legend-dot" [style.background]="s.color"></span>
+                            <div class="legend-label">{{ s.key }}</div>
+                          </div>
+                          <div class="legend-right">
+                            <div class="legend-value">{{ s.value }}</div>
+                            <div class="legend-percent">{{ s.percent }}%</div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="button-group board-actions">
+              <button class="sign-in-button" (click)="viewResults()">View Results</button>
+              <!-- <button class="sign-in-button" (click)="saveCurrentStoredImageAndGoHome()">Save Session</button> -->
+            </div>
+          </div>
+        </ng-template>
     </div>
   </ion-content>
 </div>

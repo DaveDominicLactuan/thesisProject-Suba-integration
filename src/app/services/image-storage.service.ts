@@ -30,7 +30,18 @@ export interface StoredImage {
   original: string; // Base64 image
   withBoxes?: string;
   boxes?: any[];
-  croppedCracks?: {image: string; box: any; type: string; shape: string; severity: string;}[];
+  croppedCracks?: Array<{
+    croppedNumber?: number;
+    image?: string;
+    s3Key?: string;
+    s3Url?: string;
+    filename?: string;
+    box: any;
+    type: string;
+    shape: string;
+    severity: string;
+    sessionImage?: Partial<StoredImage>;
+  }>;
   faceDetected?: boolean;
   faceData?: any[];
   timestamp: string;
@@ -45,16 +56,17 @@ export interface StoredImage {
   sessionId?: string; // optional link to a session
   userId?: string; // optional link to a user (if multi-user support is added)
   engineerCheckedSession?: boolean;
+  correctedByEngineer?: boolean;
   fileImageName?: string; // optional original filename if available
   storagePath?: string; // Cloud Storage object path for original image
   storageUrl?: string; // Cloud Storage download URL for original image
-  withBoxesStoragePath?: string; // Cloud Storage object path for withBoxes image
-  withBoxesStorageUrl?: string; // Cloud Storage download URL for withBoxes image
+  withBoxesS3Key?: string; // Cloud Storage object path for withBoxes image
+  original_id?: string;
+  cropped_id?: string;
+  // NOTE: withBoxes storage/S3 helper fields removed to simplify object shape
   // New explicit S3 key fields with userID:sessionId prefix (for clarity in Firestore)
-  originalS3Key?: string; // Full S3 key for original (e.g., "userID:abc123sessionId:xyz789img1crack1041120261109original.jpg")
+  originalS3Key?: string; // Full S3 key for original
   originalS3Url?: string; // HTTPS URL for original image
-  withBoxesS3Key?: string; // Full S3 key for withBoxes (e.g., "userID:abc123sessionId:xyz789img1crack1041120261109withBoxes.jpg")
-  withBoxesS3Url?: string; // HTTPS URL for withBoxes image
 }
 
 //session
@@ -70,6 +82,7 @@ export interface ImageSession {
   // Optional freeform notes attached to the session
   notes?: string;
   engineerCheckedSession?: boolean;
+  correctedByEngineer?: boolean;
 }
 
 @Injectable({
@@ -290,6 +303,46 @@ export class ImageStorageService {
     }
   }
 
+  /** Upload a cropped crack image to S3 with session-scoped filename. */
+  async uploadSessionImageCropped(dataUrl: string, sessionId: string, originalFilename: string, croppedNumber: number, imgIndex?: number): Promise<{ url: string; s3Key: string } | null> {
+    try {
+      const s3Filename = this.generateSessionFilename({
+        sessionId,
+        filename: originalFilename,
+        originalFilename,
+        designatedPart: 'cropped',
+        croppedNumber,
+        imageType: 'cropped',
+        imgIndex,
+        timestamp: new Date().toISOString()
+      });
+
+      const uint8Array = this.dataUrlToUint8Array(dataUrl);
+      const params = {
+        Bucket: this.bucketName,
+        Key: s3Filename,
+        Body: uint8Array,
+        ContentType: 'image/jpeg'
+      };
+
+      console.log('[ImageStorageService] Attempting to upload cropped image to S3:', s3Filename);
+      const command = new PutObjectCommand(params);
+      await this.s3Client.send(command);
+
+      const finalUrl = `https://${this.bucketName}.s3.${this.region}.amazonaws.com/${s3Filename}`;
+
+      console.log('✅ Cropped image uploaded to S3 with key:', s3Filename);
+      console.log('🔗 Cropped image URL:', finalUrl);
+
+      return { url: finalUrl, s3Key: s3Filename };
+    } catch (error: any) {
+      console.error('❌ Failed to upload cropped image to S3:', error?.message || error);
+      console.warn('[ImageStorageService] S3 upload failed (CORS or network issue). Image will be stored locally.');
+      console.warn('[ImageStorageService] To fix S3 uploads, ensure CORS is configured on the S3 bucket for origin: http://localhost:8100');
+      return null;
+    }
+  }
+
   /** Helper: Convert data URL to Uint8Array */
   private dataUrlToUint8Array(dataUrl: string): Uint8Array {
     if (!dataUrl || typeof dataUrl !== 'string') {
@@ -372,9 +425,7 @@ export class ImageStorageService {
             hasWithBoxes: !!img.withBoxes,
             s3References: {
               originalS3Key: img.storagePath || '(not uploaded)',
-              originalS3Url: img.storageUrl ? '✅ Available' : '❌ Missing',
-              withBoxesS3Key: img.withBoxesStoragePath || '(not uploaded)',
-              withBoxesS3Url: img.withBoxesStorageUrl ? '✅ Available' : '❌ Missing'
+              originalS3Url: img.storageUrl ? '✅ Available' : '❌ Missing'
             },
             prediction: img.prediction || null,
             statusMessage: img.statusMessage || ''
@@ -397,10 +448,7 @@ export class ImageStorageService {
           key: img.s3References.originalS3Key,
           url: img.s3References.originalS3Url
         });
-        console.log('  WithBoxes S3:', {
-          key: img.s3References.withBoxesS3Key,
-          url: img.s3References.withBoxesS3Url
-        });
+        console.log('  WithBoxes available:', img.hasWithBoxes ? '✅ Yes' : '❌ No');
       });
       console.groupEnd();
 
@@ -408,7 +456,6 @@ export class ImageStorageService {
       console.log('[ImageStorageService] ✅ Firestore Save Process:');
       console.log('  - S3 references will be stored in Firestore documents');
       console.log('  - Original image S3 key:', workflowLog.s3Uploads[0]?.s3References.originalS3Key);
-      console.log('  - WithBoxes S3 key:', workflowLog.s3Uploads[0]?.s3References.withBoxesS3Key);
     } catch (error) {
       console.error('[ImageStorageService] Error logging workflow status:', error);
     }
@@ -587,14 +634,10 @@ export class ImageStorageService {
               fileImageName: firestoreImage.fileImageName,
               storagePath: firestoreImage.storagePath,
               storageUrl: firestoreImage.storageUrl,
-              withBoxesStoragePath: firestoreImage.withBoxesStoragePath,
-              withBoxesStorageUrl: firestoreImage.withBoxesStorageUrl,
               croppedCracks: firestoreImage.croppedCracks || [],
               // ✅ FIX: Also retrieve the explicit S3 key fields that were saved to Firestore
               originalS3Key: firestoreImage.originalS3Key || firestoreImage.storagePath || null,
-              originalS3Url: firestoreImage.originalS3Url || firestoreImage.storageUrl || null,
-              withBoxesS3Key: firestoreImage.withBoxesS3Key || firestoreImage.withBoxesStoragePath || null,
-              withBoxesS3Url: firestoreImage.withBoxesS3Url || firestoreImage.withBoxesStorageUrl || null
+              originalS3Url: firestoreImage.originalS3Url || firestoreImage.storageUrl || null
             };
             this.images.push(localImage);
           } else {
@@ -605,12 +648,7 @@ export class ImageStorageService {
             if (!localImage.originalS3Url && firestoreImage.originalS3Url) {
               localImage.originalS3Url = firestoreImage.originalS3Url;
             }
-            if (!localImage.withBoxesS3Key && firestoreImage.withBoxesS3Key) {
-              localImage.withBoxesS3Key = firestoreImage.withBoxesS3Key;
-            }
-            if (!localImage.withBoxesS3Url && firestoreImage.withBoxesS3Url) {
-              localImage.withBoxesS3Url = firestoreImage.withBoxesS3Url;
-            }
+            // withBoxes S3/storage helper fields intentionally omitted
             if (!localImage.croppedCracks && firestoreImage.croppedCracks) {
               localImage.croppedCracks = firestoreImage.croppedCracks;
             }
@@ -629,15 +667,7 @@ export class ImageStorageService {
             }
           }
 
-          // Fetch withBoxes image from S3 if withBoxesStoragePath is available
-          if (firestoreImage.withBoxesStoragePath && !localImage.withBoxes) {
-            console.log(`[ImageStorageService] Fetching withBoxes image from S3: ${firestoreImage.withBoxesStoragePath}`);
-            const withBoxesDataUrl = await this.fetchS3ObjectAsDataUrl(firestoreImage.withBoxesStoragePath);
-            if (withBoxesDataUrl) {
-              localImage.withBoxes = withBoxesDataUrl;
-              console.log(`✅ WithBoxes image fetched for ${firestoreImage.filename}`);
-            }
-          }
+          // withBoxes S3/storage fields removed; skip automatic fetch of withBoxes from S3
 
           fetchedCount++;
           if (onProgress) {
@@ -953,7 +983,8 @@ export class ImageStorageService {
       userId: session.userId,
       sessionId: session.sessionId,
       notes: (session as any).notes,
-      engineerCheckedSession: !!session.engineerCheckedSession
+      engineerCheckedSession: !!session.engineerCheckedSession,
+      correctedByEngineer: !!(session as any).correctedByEngineer
     };
 
     this.sessions.unshift(normalized);
@@ -1033,10 +1064,58 @@ export class ImageStorageService {
     return `${filename.slice(0, dotIdx)}_boxes${filename.slice(dotIdx)}`;
   }
 
+  private sanitizeCroppedCracksForFirestore(croppedCracks: StoredImage['croppedCracks']): any[] {
+    if (!Array.isArray(croppedCracks)) {
+      return [];
+    }
+
+    return croppedCracks.map((crop: any) => ({
+      croppedNumber: crop?.croppedNumber ?? null,
+      filename: crop?.filename || crop?.sessionImage?.filename || null,
+      box: crop?.box || null,
+      type: crop?.type || '',
+      shape: crop?.shape || '',
+      severity: crop?.severity || '',
+      s3Key: crop?.s3Key || crop?.sessionImage?.originalS3Key || crop?.sessionImage?.storagePath || null,
+      s3Url: crop?.s3Url || crop?.sessionImage?.originalS3Url || crop?.sessionImage?.storageUrl || null,
+      original_id: crop?.original_id ?? crop?.sessionImage?.original_id ?? null,
+      cropped_id: crop?.cropped_id ?? crop?.sessionImage?.cropped_id ?? null,
+    }));
+  }
+
+  private sanitizeStoredImageForFirestore(image: StoredImage): any {
+    const fallbackOriginalId = image.original_id ?? image.fileImageName ?? image.originalS3Key ?? image.storagePath ?? image.original ?? null;
+    const fallbackCroppedId = image.cropped_id ?? fallbackOriginalId ?? image.fileImageName ?? image.originalS3Key ?? image.storagePath ?? image.original ?? null;
+
+    return {
+      timestamp: image.timestamp,
+      filename: image.filename,
+      userId: image.userId || null,
+      sessionId: image.sessionId || null,
+      original_id: fallbackOriginalId,
+      cropped_id: fallbackCroppedId,
+      hasPrediction: image.hasPrediction || false,
+      statusMessage: image.statusMessage || '',
+      detectionMessage: image.detectionMessage || '',
+      prediction: image.prediction || null,
+      multiPredictions: image.multiPredictions || [],
+      correctedPrediction: image.correctedPrediction || null,
+      engineerCheckedSession: !!image.engineerCheckedSession,
+      correctedByEngineer: !!image.correctedByEngineer,
+      boxes: image.boxes || [],
+      croppedCracks: this.sanitizeCroppedCracksForFirestore(image.croppedCracks),
+      originalS3Key: image.originalS3Key || image.storagePath || null,
+      originalS3Url: image.originalS3Url || image.storageUrl || null,
+      withBoxesS3Key: image.withBoxesS3Key || null,
+      storagePath: image.storagePath || null,
+      storageUrl: image.storageUrl || null,
+    };
+  }
+
   /** Persist a single session and its images to Firestore using filename as image doc ID 
    * @param sessionId Session ID to save
    * @param receiverId Optional receiver user ID for sharing
-   * @param excludeWithBoxes If true, withBoxes fields (withBoxesS3Key, withBoxesS3Url, etc.) are excluded from Firestore payload
+  * @param excludeWithBoxes If true, withBoxes helper fields are excluded from Firestore payload
    */
   async saveSessionWithImagesToFirestore(sessionId: string, receiverId?: string, excludeWithBoxes: boolean = false): Promise<void> {
     const session = this.sessions.find(s => s.id === sessionId);
@@ -1104,6 +1183,7 @@ export class ImageStorageService {
         sessionId: this.newSessionIdForFileShare || null,
         notes: session.notes || '',
           engineerCheckedSession: engineerCheckedSnapshot,
+        correctedByEngineer: !!session.correctedByEngineer,
         
       };
 
@@ -1124,6 +1204,8 @@ export class ImageStorageService {
       for (const image of imagesForSession) {
         // CRITICAL: Ensure userId is always concrete and share writes include a creator marker.
         image.userId = receiverId || currentUid;
+        const preservedOriginalId = image.original_id ?? (image as any)?.sessionImage?.original_id ?? null;
+        const preservedCroppedId = image.cropped_id ?? (image as any)?.sessionImage?.cropped_id ?? preservedOriginalId ?? null;
         const preservedBoxes = Array.isArray(image.boxes) ? [...image.boxes] : [];
         const correctedPredictionSource = image.correctedPrediction || image.prediction || null;
         const predictionPayload = image.prediction
@@ -1137,31 +1219,24 @@ export class ImageStorageService {
         // const safeWithBoxes = await this.clampDataUrlToBytes(image.withBoxes, this.FIRESTORE_DOC_MAX_BYTES);
         const imageRef = doc(imagesCollection, image.filename);
         const imageWritePayload: any = {
-          timestamp: image.timestamp,
-          filename: image.filename,
-          userId: receiverId || currentUid,
+          ...this.sanitizeStoredImageForFirestore({
+            ...image,
+            userId: receiverId || currentUid,
+            sessionId: session.id,
+            original_id: preservedOriginalId ?? undefined,
+            cropped_id: preservedCroppedId ?? undefined,
+            prediction: predictionPayload || undefined,
+            correctedPrediction: correctedPrediction || undefined,
+            boxes: preservedBoxes,
+            originalS3Key: image.storagePath || null,
+            originalS3Url: image.storageUrl || null,
+            correctedByEngineer: !!session.correctedByEngineer,
+          } as StoredImage),
           createdBy,
           ReceivedBy: receiverId || currentUid,
           OriginUserId: currentUid,
-          sessionId: session.id,
-          // NOTE: Commented out - base64 data stored in S3 instead
-          // original: safeOriginal,
-          // withBoxes: safeWithBoxes,
-          hasPrediction: image.hasPrediction || false,
-          statusMessage: image.statusMessage || '',
-          detectionMessage: image.detectionMessage || '',
-          prediction: predictionPayload,
-          correctedPrediction,
           engineerCheckedSession: !!session.engineerCheckedSession,
-          boxes: preservedBoxes,
-          // S3 references for original image (full generated filename with userID:sessionId prefix)
-          originalS3Key: image.storagePath || null,   // e.g., "userID:abc123sessionId:xyz789img1crack1041120261109original.jpg"
-          originalS3Url: image.storageUrl || null,    // HTTPS URL to original image
-          croppedCracks: image.croppedCracks || [],
-          multiPredictions: image.multiPredictions || [],
-          // Backward compatibility
-          storagePath: image.storagePath || null,
-          storageUrl: image.storageUrl || null
+          correctedByEngineer: !!session.correctedByEngineer,
         };
 
         console.group('[ImageStorageService] 🖼️ Session Image Object Being Saved');
@@ -1176,19 +1251,11 @@ export class ImageStorageService {
           hasPrediction: !!image.prediction,
           hasCorrectedPrediction: !!image.correctedPrediction,
           hasS3Original: !!image.originalS3Key,
-          hasS3WithBoxes: !!image.withBoxesS3Key
+          hasWithBoxes: !!image.withBoxes
         });
         console.groupEnd();
 
-        // Conditionally exclude withBoxes fields if requested (e.g., for offline scenarios)
-        if (!excludeWithBoxes) {
-          // S3 references for withBoxes image (full generated filename with userID:sessionId prefix)
-          imageWritePayload.withBoxesS3Key = image.withBoxesStoragePath || null;   // e.g., "userID:abc123sessionId:xyz789img1crack1041120261109withBoxes.jpg"
-          imageWritePayload.withBoxesS3Url = image.withBoxesStorageUrl || null;    // HTTPS URL to withBoxes image
-          // Backward compatibility
-          imageWritePayload.withBoxesStoragePath = image.withBoxesStoragePath || null;
-          imageWritePayload.withBoxesStorageUrl = image.withBoxesStorageUrl || null;
-        }
+        // withBoxes S3/storage helper fields intentionally omitted from Firestore payload
 
         batch.set(imageRef, imageWritePayload);
 
@@ -1236,19 +1303,10 @@ export class ImageStorageService {
       const docRef = doc(imagesCollection, docId);
 
       const firestoreData: any = {
-        timestamp: image.timestamp,
-        filename: image.filename,
-        userId: image.userId || uid,
-        sessionId: image.sessionId || null,
-        hasPrediction: image.hasPrediction || false,
-        statusMessage: image.statusMessage || '',
-        detectionMessage: image.detectionMessage || '',
-        prediction: image.prediction || null,
-        multiPredictions: image.multiPredictions || [],
-        correctedPrediction: image.correctedPrediction || null,
-        engineerCheckedSession: !!image.engineerCheckedSession,
-        boxes: image.boxes || [],
-        croppedCracks: image.croppedCracks || [],
+        ...this.sanitizeStoredImageForFirestore({
+          ...image,
+          userId: image.userId || uid,
+        } as StoredImage),
       };
 
       await setDoc(docRef, firestoreData);
@@ -1273,6 +1331,7 @@ export class ImageStorageService {
         userId: session.userId || uid,
         notes: session.notes || '',
         engineerCheckedSession: !!session.engineerCheckedSession,
+        correctedByEngineer: !!session.correctedByEngineer,
       };
       await setDoc(docRef, firestoreData);
       console.log(`✅ Session saved to user Firestore: ${uid}/${session.id}`);
@@ -1320,31 +1379,18 @@ export class ImageStorageService {
       if ((!entry.storageUrl || entry.storageUrl.trim().length === 0) && existing.storageUrl) {
         entry.storageUrl = existing.storageUrl;
       }
-      if ((!entry.withBoxesStoragePath || entry.withBoxesStoragePath.trim().length === 0) && existing.withBoxesStoragePath) {
-        entry.withBoxesStoragePath = existing.withBoxesStoragePath;
-      }
-      if ((!entry.withBoxesStorageUrl || entry.withBoxesStorageUrl.trim().length === 0) && existing.withBoxesStorageUrl) {
-        entry.withBoxesStorageUrl = existing.withBoxesStorageUrl;
-      }
+      // withBoxes storage helper fields removed; skip merging those values from existing entries
       if ((!entry.originalS3Key || entry.originalS3Key.trim().length === 0) && existing.originalS3Key) {
         entry.originalS3Key = existing.originalS3Key;
       }
       if ((!entry.originalS3Url || entry.originalS3Url.trim().length === 0) && existing.originalS3Url) {
         entry.originalS3Url = existing.originalS3Url;
       }
-      if ((!entry.withBoxesS3Key || entry.withBoxesS3Key.trim().length === 0) && existing.withBoxesS3Key) {
-        entry.withBoxesS3Key = existing.withBoxesS3Key;
-      }
-      if ((!entry.withBoxesS3Url || entry.withBoxesS3Url.trim().length === 0) && existing.withBoxesS3Url) {
-        entry.withBoxesS3Url = existing.withBoxesS3Url;
-      }
     }
 
     // If boxed data is still missing but we have an S3 reference, keep the
     // reference so callers can rehydrate later instead of losing the key.
-    if ((!entry.withBoxes || entry.withBoxes.trim().length === 0) && !entry.withBoxesS3Key && entry.withBoxesStoragePath) {
-      entry.withBoxesS3Key = entry.withBoxesStoragePath;
-    }
+    // withBoxes S3/storage helper fields removed; do not synthesize withBoxes S3 keys
 
     const idx = this.images.findIndex(i => i.filename === imageKey);
     if (idx !== -1) this.images[idx] = entry;
@@ -1440,7 +1486,8 @@ export class ImageStorageService {
       userId: userId,
       sessionId: sessionId,
       notes: notes,
-      engineerCheckedSession: false
+      engineerCheckedSession: false,
+      correctedByEngineer: false
     };
     //The new session is added to the beginning of the sessions array using unshift.
     this.sessions.unshift(s);
@@ -1669,8 +1716,7 @@ export class ImageStorageService {
       i.original === imageKey ||
       (i.withBoxes && i.withBoxes === imageKey) ||
       i.storagePath === imageKey ||
-      i.originalS3Key === imageKey ||
-      i.withBoxesS3Key === imageKey
+      i.originalS3Key === imageKey
     );
   }
 
@@ -1804,7 +1850,6 @@ export class ImageStorageService {
         
         if (image) {
           if (image.originalS3Key) s3KeysToDelete.push(image.originalS3Key);
-          if (image.withBoxesS3Key) s3KeysToDelete.push(image.withBoxesS3Key);
         }
         
         if (onProgress) onProgress('Collecting S3 keys...', i + 1, imageKeysToDelete.length);
@@ -1893,16 +1938,10 @@ export class ImageStorageService {
       
       // Prepare data (exclude Base64 'original' and 'withBoxes' if too large for Firestore doc limit)
       const firestoreData: any = {
-        timestamp: image.timestamp,
-        filename: image.filename,
-        userId: currentUid,
-        sessionId: image.sessionId || null,
-        hasPrediction: image.hasPrediction || false,
-        statusMessage: image.statusMessage || '',
-        detectionMessage: image.detectionMessage || '',
-        prediction: image.prediction || null,
-        boxes: image.boxes || [],
-        // Note: Omitting 'original' and 'withBoxes' Base64 strings to avoid Firestore doc size limits
+        ...this.sanitizeStoredImageForFirestore({
+          ...image,
+          userId: currentUid,
+        } as StoredImage),
       };
       
       await setDoc(docRef, firestoreData);
@@ -1958,12 +1997,8 @@ export class ImageStorageService {
         fileImageName: `currentData:${currentDateText}TimeTaken:${currentTimeText}`,
         storagePath: sample?.storagePath || null || 'sample-session',
         storageUrl: sample?.storageUrl || null || 'sample-session',
-        withBoxesStoragePath: sample?.withBoxesStoragePath || null || 'sample-session',
-        withBoxesStorageUrl: sample?.withBoxesStorageUrl || null || 'sample-session',
         originalS3Key: sample?.originalS3Key || null || 'sample-session',
         originalS3Url: sample?.originalS3Url || null || 'sample-session',
-        withBoxesS3Key: sample?.withBoxesS3Key || null || 'sample-session',
-        withBoxesS3Url: sample?.withBoxesS3Url || null || 'sample-session',
       };
 
       console.log("Step 2, sampleImage", sampleImage);
@@ -1983,10 +2018,7 @@ export class ImageStorageService {
         originalS3Url: sampleImage.originalS3Url || null,
         storagePath: sampleImage.storagePath || null,
         storageUrl: sampleImage.storageUrl || null,
-        withBoxesS3Key: sampleImage.withBoxesS3Key || null,
-        withBoxesS3Url: sampleImage.withBoxesS3Url || null,
-        withBoxesStoragePath: sampleImage.withBoxesStoragePath || null,
-        withBoxesStorageUrl: sampleImage.withBoxesStorageUrl || null,
+        // withBoxes storage/S3 helper fields omitted
       };
 
       console.log('[ImageStorageService] Sample object to upload (images collection):', {
@@ -2038,7 +2070,7 @@ export class ImageStorageService {
 
       const sampleImage: StoredImage = {
         original: imgObj?.originalS3Key || '',
-        withBoxes: imgObj?.withBoxesS3Key,
+        withBoxes: imgObj?.withBoxes,
         boxes: imgObj?.boxes || [],
         faceDetected: imgObj?.faceDetected || false,
         faceData: imgObj?.faceData || [],
@@ -2053,12 +2085,8 @@ export class ImageStorageService {
         fileImageName: imgObj?.fileImageName || 'sample-image.jpg',
         storagePath: imgObj?.storagePath || null || 'sample-session',
         storageUrl: imgObj?.storageUrl || null || 'sample-session',
-        withBoxesStoragePath: imgObj?.withBoxesStoragePath || null || 'sample-session',
-        withBoxesStorageUrl: imgObj?.withBoxesStorageUrl || null || 'sample-session',
         originalS3Key: imgObj?.originalS3Key || null || 'sample-session',
         originalS3Url: imgObj?.originalS3Url || null || 'sample-session',
-        withBoxesS3Key: imgObj?.withBoxesS3Key || null || 'sample-session',
-        withBoxesS3Url: imgObj?.withBoxesS3Url || null || 'sample-session',
       };
 
      
@@ -2068,7 +2096,7 @@ export class ImageStorageService {
         filename: sampleImage.filename,
         userId: effectiveUserId,
         original: sampleImage.originalS3Key,
-        withBoxes: sampleImage.withBoxesS3Key,
+        withBoxes: sampleImage.withBoxes,
         sessionId: this.newSessionIdForFileShare,
         hasPrediction: sampleImage.hasPrediction || false,
         statusMessage: sampleImage.statusMessage || '',
@@ -2079,10 +2107,6 @@ export class ImageStorageService {
         originalS3Url: sampleImage.originalS3Url || null,
         storagePath: sampleImage.storagePath || null,
         storageUrl: sampleImage.storageUrl || null,
-        withBoxesS3Key: sampleImage.withBoxesS3Key || null,
-        withBoxesS3Url: sampleImage.withBoxesS3Url || null,
-        withBoxesStoragePath: sampleImage.withBoxesStoragePath || null,
-        withBoxesStorageUrl: sampleImage.withBoxesStorageUrl || null,
       };
 
       console.log('Old [ImageStorageService] Sample object to upload (images collection) Version2:', {
@@ -2137,71 +2161,7 @@ export class ImageStorageService {
   //     //   boxes: imgObj?.boxes || [],
   //     //   faceDetected: imgObj?.faceDetected || false,
   //     //   faceData: imgObj?.faceData || [],
-  //     //   timestamp,
-  //     //   filename: imgObj?.filename || `sample-image-${timestamp}.jpg`,
-  //     //   prediction: imgObj?.prediction || { type: 'sample', shape: 'unknown', severity: 'test' },
-  //     //   hasPrediction: imgObj?.hasPrediction ?? true,
-  //     //   statusMessage: imgObj?.statusMessage || 'Sample image document created for Firestore testing',
-  //     //   detectionMessage: imgObj?.detectionMessage || 'Sample detection payload',
-  //     //   sessionId: imgObj?.sessionId || null || 'sample-session',
-  //     //   userId: effectiveUserId,
-  //     //   fileImageName: imgObj?.fileImageName || 'sample-image.jpg',
-  //     //   storagePath: imgObj?.storagePath || null || 'sample-session',
-  //     //   storageUrl: imgObj?.storageUrl || null || 'sample-session',
-  //     //   withBoxesStoragePath: imgObj?.withBoxesStoragePath || null || 'sample-session',
-  //     //   withBoxesStorageUrl: imgObj?.withBoxesStorageUrl || null || 'sample-session',
-  //     //   originalS3Key: imgObj?.originalS3Key || null || 'sample-session',
-  //     //   originalS3Url: imgObj?.originalS3Url || null || 'sample-session',
-  //     //   withBoxesS3Key: imgObj?.withBoxesS3Key || null || 'sample-session',
-  //     //   withBoxesS3Url: imgObj?.withBoxesS3Url || null || 'sample-session',
-  //     // };
-
-     
-
-  //     const sampleImage: StoredImage = {
-  //       original: imgObj?.original || '',
-  //       withBoxes: imgObj?.withBoxes,
-  //       boxes: imgObj?.boxes || [],
-  //       faceDetected: imgObj?.faceDetected || false,
-  //       faceData: imgObj?.faceData || [],
-  //       timestamp,
-  //       filename: imgObj?.filename || `sample-image-${timestamp}.jpg`,
-  //       prediction: imgObj?.prediction || { type: 'sample', shape: 'unknown', severity: 'test' },
-  //       hasPrediction: imgObj?.hasPrediction ?? true,
-  //       statusMessage: imgObj?.statusMessage || 'Sample image document created for Firestore testing',
-  //       detectionMessage: imgObj?.detectionMessage || 'Sample detection payload',
-  //       sessionId: imgObj?.sessionId || null || 'sample-session',
-  //       userId: effectiveUserId,
-  //       fileImageName: imgObj?.fileImageName || 'sample-image.jpg',
-  //       storagePath: imgObj?.storagePath || null || 'sample-session',
-  //       storageUrl: imgObj?.storageUrl || null || 'sample-session',
-  //       withBoxesStoragePath: imgObj?.withBoxesStoragePath || null || 'sample-session',
-  //       withBoxesStorageUrl: imgObj?.withBoxesStorageUrl || null || 'sample-session',
-  //       originalS3Key: imgObj?.originalS3Key || null || 'sample-session',
-  //       originalS3Url: imgObj?.originalS3Url || null || 'sample-session',
-  //       withBoxesS3Key: imgObj?.withBoxesS3Key || null || 'sample-session',
-  //       withBoxesS3Url: imgObj?.withBoxesS3Url || null || 'sample-session',
-  //     };
-
-  //     //   const firestoreData: any = {
-  //     //   timestamp: sampleImage.timestamp,
-  //     //   filename: sampleImage.filename,
-  //     //   userId: effectiveUserId,
-  //     //   sessionId: sampleImage.sessionId || null,
-  //     //   hasPrediction: sampleImage.hasPrediction || false,
-  //     //   statusMessage: sampleImage.statusMessage || '',
-  //     //   detectionMessage: sampleImage.detectionMessage || '',
-  //     //   prediction: sampleImage.prediction || null,
-  //     //   boxes: sampleImage.boxes || [],
-  //     //   originalS3Key: sampleImage.originalS3Key || null,
-  //     //   originalS3Url: sampleImage.originalS3Url || null,
-  //     //   storagePath: sampleImage.storagePath || null,
-  //     //   storageUrl: sampleImage.storageUrl || null,
-  //     //   withBoxesS3Key: sampleImage.withBoxesS3Key || null,
-  //     //   withBoxesS3Url: sampleImage.withBoxesS3Url || null,
-  //     //   withBoxesStoragePath: sampleImage.withBoxesStoragePath || null,
-  //     //   withBoxesStorageUrl: sampleImage.withBoxesStorageUrl || null,
-  //     // };
+  
 
   //     const firestoreData: any = {
   //       timestamp: sampleImage.timestamp,
@@ -2428,14 +2388,7 @@ export class ImageStorageService {
           }
         }
 
-        if (originalImage.withBoxesS3Key) {
-          try {
-            const fetchedWithBoxes = await this.fetchS3ObjectAsDataUrl(originalImage.withBoxesS3Key);
-            if (fetchedWithBoxes) withBoxesDataUrl = fetchedWithBoxes;
-          } catch (e) {
-            console.warn('[ImageStorageService] Failed to fetch withBoxes from S3:', e);
-          }
-        }
+        // withBoxes S3 helper removed; do not attempt to fetch withBoxes from S3 by key
 
         // Transform filename to use new userId
         const newFilename = this.transformImageFilenameUserId(imageKey, newUserId);

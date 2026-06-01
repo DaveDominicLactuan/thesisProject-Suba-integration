@@ -102,12 +102,18 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
   sessionIsPristine: boolean = false; // Tracks if current session has had images added during this visit
   imagesUploadedThisSession: number = 0; // Track number of images uploaded during this page visit
   totalBoundingBoxesCreated: number = 0; // Counter for cumulative bounding boxes across all images
+  private imageRecordCounter = 0;
   // Process Window state
   isProcessWindowOpen: boolean = false;
   private backButtonSub: any; // hardware back handler
 
   get countdown() {
     return this.photosTaken - this.photosProcessed;
+  }
+
+  private generateImageRecordId(prefix: 'original' | 'cropped'): string {
+    this.imageRecordCounter += 1;
+    return `${prefix}-${Date.now()}-${this.imageRecordCounter}`;
   }
 
   constructor(
@@ -118,17 +124,16 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
     private imageStorage: ImageStorageService,
     private cdr: ChangeDetectorRef
   ) {
-  
     try {
-      //whenever it detects an image selection change, update selected thumbnail src and other variables
-      this.imageStorage.getCurrentImage$().subscribe(img => {
+      this.imageStorage.getCurrentImage$().subscribe((img) => {
         if (img) {
-          this.selectedThumbSrc = img.withBoxes ?? img.original;
+          this.selectedThumbSrc = img.withBoxes || img.original || null;
           this.selectedImageSelectionKey = this.getImageSelectionKey(img);
-          this.selectedImageTitle = img.filename ?? '';
+          this.selectedImageTitle = this.getShortImageTitle(img.filename ? img.filename : (img.fileImageName ? img.fileImageName : ''));
         }
       });
-    } catch (e) {
+    }
+    catch (e) {
       // ignore if observable not present
     }
   }
@@ -533,6 +538,7 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
     const sessionImgIndex = typeof (this.imageStorage as any).getNextOriginalImageNumber === 'function'
       ? (this.imageStorage as any).getNextOriginalImageNumber(this.selectedSessionId || undefined)
       : undefined;
+    const originalId = this.generateImageRecordId('original');
     
     //actual process and run interfrence
     const doWork = async () => {
@@ -565,7 +571,9 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
         hasPrediction: !!prediction,
         statusMessage: prediction ? 'Prediction succeeded' : (inferenceCalled ? 'Prediction failed' : 'No prediction'),
         userId: userId,
-        sessionId: this.selectedSessionId || undefined
+        sessionId: this.selectedSessionId || undefined,
+        original_id: originalId,
+        cropped_id: originalId
       };
 
       // If the model returned bounding boxes, create a "withBoxes" image and attach boxes
@@ -586,25 +594,28 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
 
           for (const box of boxesToDraw) {
             const croppedNumber = croppedCracks.length + 1;
+            try {
+              const crop = await this.cropBoxFromImage(
+                dataUrl,
+                box,
+                maskW,
+                maskH
+              );
 
-            const crop = await this.cropBoxFromImage(
-              dataUrl,
-              box,
-              maskW,
-              maskH
-            );
+              const cropTensor = await this.preprocessImage(crop);
+              const cropPrediction = await this.crackDetectionService.runInference(cropTensor);
 
-            const cropTensor = await this.preprocessImage(crop);
-            const cropPrediction = await this.crackDetectionService.runInference(cropTensor);
-
-            croppedCracks.push({
-              croppedNumber,
-              image: crop,
-              box,
-              type: cropPrediction?.type ?? 'unknown',
-              shape: cropPrediction?.shape ?? 'unknown',
-              severity: cropPrediction?.severity ?? 'unknown'
-            });
+              croppedCracks.push({
+                croppedNumber,
+                image: crop,
+                box,
+                type: cropPrediction?.type ?? 'unknown',
+                shape: cropPrediction?.shape ?? 'unknown',
+                severity: cropPrediction?.severity ?? 'unknown'
+              });
+            } catch (cropErr) {
+              console.warn('[UploadImagePage] Failed processing one cropped crack, continuing with others', cropErr);
+            }
           }
 
           console.log('[CROPS] Total crops:', croppedCracks.length);
@@ -652,26 +663,39 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
         console.warn('[UploadImagePage] Failed to add parent image to session', e);
       }
 
-      if (Array.isArray((entry as any).croppedCracks) && (entry as any).croppedCracks.length > 0) {
-        const storedCroppedCracks = await this.persistCroppedCracksAsSessionImages((entry as any).croppedCracks, filename, entry.timestamp, userId, sessionImgIndex);
-        (entry as any).croppedCracks = storedCroppedCracks;
-        try {
-          if (typeof (this.imageStorage as any).setEntryForImage === 'function') {
-            (this.imageStorage as any).setEntryForImage(entry.filename, entry);
-          }
-        } catch (setErr) {
-          console.warn('[UploadImagePage] Failed to update stored parent entry with cropped cracks', setErr);
-        }
-      }
+      const croppedCracksProcessed = await this.processAndStoreCroppedCracks(entry, filename, userId, sessionImgIndex, originalId);
+      console.log('[UploadImagePage] processDataUrl cropped crack summary:', {
+        filename: entry.filename,
+        croppedCracksTotal: Array.isArray((entry as any).croppedCracks) ? (entry as any).croppedCracks.length : 0,
+        croppedCracksProcessed,
+      });
 
       // Debug: log the full entry after processing and storage
       console.log('[UploadImagePage] processDataUrl saved entry:', entry);
+      // Also log the session image object (from service if available) and explicit ids for debugging
+      try {
+        const svc: any = this.imageStorage as any;
+        const storedSessionImage = (svc && typeof svc.getEntryForImage === 'function') ? svc.getEntryForImage(entry.filename) : null;
+        console.log('[UploadImagePage] processDataUrl SESSION IMAGE OBJECT:', storedSessionImage ?? entry, {
+          original_id: entry?.original_id,
+          cropped_id: entry?.cropped_id,
+        });
+      } catch (logErr) {
+        console.warn('[UploadImagePage] Failed to read stored session image object for logging', logErr);
+      }
       try {
         await this.refreshDisplayedImages();
       } catch (e) {
         console.warn('[UploadImagePage] Failed to add upload to session or refresh display', e);
       }
-      this.imagePaths.unshift({ original: entry.original, withBoxes: (entry as any).withBoxes || entry.original, fileName: entry.filename, rawPrediction: entry.prediction });
+      this.imagePaths.unshift({
+        original: entry.original,
+        withBoxes: (entry as any).withBoxes || entry.original,
+        fileName: entry.filename,
+        rawPrediction: entry.prediction,
+        original_id: (entry as any).original_id,
+        cropped_id: (entry as any).cropped_id,
+      });
       // Persist entry and current session to user-scoped Firestore if userId is available
       if (userId) {
         try {
@@ -702,8 +726,8 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
     };
 
     try {
-      // overall timeout: 10s
-      await Promise.race([doWork(), new Promise((_, rej) => setTimeout(() => rej(new Error('processing-timeout')), 10_000))]);
+      // overall timeout: 17s
+      await Promise.race([doWork(), new Promise((_, rej) => setTimeout(() => rej(new Error('processing-timeout')), 17_000))]);
     } catch (err: any) {
       if (err && err.message === 'processing-timeout') {
         console.warn('[UploadImagePage] processDataUrl overall timeout');
@@ -720,7 +744,9 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
             hasPrediction: false,
             statusMessage: inferenceCalled ? 'Prediction failed' : 'No prediction',
             userId: userId,
-            sessionId: this.selectedSessionId || undefined
+            sessionId: this.selectedSessionId || undefined,
+            original_id: originalId,
+            cropped_id: originalId
           };
           if (!claimFinalization()) {
             console.warn('[UploadImagePage] Skipping timeout fallback because processing was already finalized');
@@ -736,7 +762,14 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
             console.warn('[UploadImagePage] Failed to add fallback upload to session', e);
           }
           await this.refreshDisplayedImages();
-          this.imagePaths.unshift({ original: entry.original, withBoxes: entry.original, fileName: entry.filename, rawPrediction: entry.prediction });
+          this.imagePaths.unshift({
+            original: entry.original,
+            withBoxes: entry.original,
+            fileName: entry.filename,
+            rawPrediction: entry.prediction,
+            original_id: (entry as any).original_id,
+            cropped_id: (entry as any).cropped_id,
+          });
           // Increment upload counter for this session
           this.imagesUploadedThisSession += 1;
           await this.updatePhotoCounts();
@@ -749,6 +782,7 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
     } finally {
       // Do NOT increment photosProcessed here - let updatePhotoCounts handle it from storage
       this.isProcessing = false;
+      await this.logCurrentSessionStateAfterProcessDataUrl(filename);
       // Log cumulative bounding box stats after upload processing
       this.logBoundingBoxStats();
     }
@@ -837,13 +871,109 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
     }
   }
 
+  /** Always log active session + session images after processDataUrl finishes for id diagnostics. */
+  private async logCurrentSessionStateAfterProcessDataUrl(filename: string) {
+    try {
+      if (!this.selectedSessionId) {
+        console.log('[UploadImagePage] processDataUrl finished without active session:', { filename });
+        return;
+      }
+
+      const session = typeof (this.imageStorage as any).getSession === 'function'
+        ? (this.imageStorage as any).getSession(this.selectedSessionId)
+        : null;
+
+      const sessionImageObjects = session && Array.isArray(session.imageKeys)
+        ? session.imageKeys
+            .map((imageKey: string) => typeof (this.imageStorage as any).getEntryForImage === 'function'
+              ? (this.imageStorage as any).getEntryForImage(imageKey)
+              : null)
+            .filter((image: StoredImage | null) => !!image)
+        : [];
+
+      console.log('[UploadImagePage] processDataUrl finished - current session object:', {
+        filename,
+        sessionId: this.selectedSessionId,
+        session,
+      });
+
+      console.log('[UploadImagePage] processDataUrl finished - current session image objects:', {
+        filename,
+        sessionId: this.selectedSessionId,
+        imageCount: sessionImageObjects.length,
+        images: sessionImageObjects,
+      });
+
+      console.log('[UploadImagePage] processDataUrl finished - id population snapshot:',
+        sessionImageObjects.map((img: any, index: number) => ({
+          index,
+          filename: img?.filename,
+          original_id: img?.original_id,
+          cropped_id: img?.cropped_id,
+        }))
+      );
+    } catch (e) {
+      console.warn('[UploadImagePage] Failed post-processDataUrl session logging', e);
+    }
+  }
+
+  /** Check croppedCracks, store them, and log counts for the current entry. */
+  private async processAndStoreCroppedCracks(
+    entry: StoredImage,
+    originalFilename: string,
+    userId?: string,
+    sessionImgIndex?: number,
+    originalId?: string
+  ): Promise<number> {
+    const croppedCracks = Array.isArray((entry as any).croppedCracks) ? (entry as any).croppedCracks : [];
+    const croppedCount = croppedCracks.length;
+
+    console.log('[UploadImagePage] croppedCracks check:', {
+      filename: entry.filename,
+      croppedCracksCount: croppedCount,
+    });
+
+    if (croppedCount === 0) {
+      console.log('[UploadImagePage] No croppedCracks found to process for:', entry.filename);
+      return 0;
+    }
+
+    const storedCroppedCracks = await this.persistCroppedCracksAsSessionImages(
+      croppedCracks,
+      originalFilename,
+      entry.timestamp,
+      userId,
+      sessionImgIndex,
+      originalId
+    );
+
+    (entry as any).croppedCracks = storedCroppedCracks;
+
+    try {
+      if (typeof (this.imageStorage as any).setEntryForImage === 'function') {
+        (this.imageStorage as any).setEntryForImage(entry.filename, entry);
+      }
+    } catch (setErr) {
+      console.warn('[UploadImagePage] Failed to update stored parent entry with cropped cracks', setErr);
+    }
+
+    console.log('[UploadImagePage] croppedCracks processed:', {
+      filename: entry.filename,
+      croppedCracksCount: croppedCount,
+      processedCount: storedCroppedCracks.length,
+    });
+
+    return storedCroppedCracks.length;
+  }
+
   /** Persist cropped crack results as individual session image objects. */
   private async persistCroppedCracksAsSessionImages(
     croppedCracks: Array<{ croppedNumber?: number; image: string; box: BoundingBox; type: string; shape: string; severity: string; }>,
     originalFilename: string,
     timestamp: string,
     userId?: string,
-    imgIndex?: number
+    imgIndex?: number,
+    parentOriginalId?: string
   ): Promise<any[]> {
     const storedCroppedCracks: any[] = [];
     const service: any = this.imageStorage as any;
@@ -852,6 +982,7 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
     for (let index = 0; index < croppedCracks.length; index++) {
       const crop = croppedCracks[index];
       const croppedNumber = typeof crop.croppedNumber === 'number' ? crop.croppedNumber : index + 1;
+      const baseName = String(originalFilename || `session-${timestamp}`);
       let generatedFilename = typeof service?.generateSessionFilename === 'function'
         ? service.generateSessionFilename({
             sessionId,
@@ -866,11 +997,12 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
         : this.generateFilename();
 
       const safeCrop = await this.shrinkDataUrlToBytes(crop.image, 900_000, 4000);
+      const croppedId = this.generateImageRecordId('cropped');
       const cropEntry: StoredImage = {
         original: safeCrop,
         timestamp,
         filename: generatedFilename,
-        fileImageName: `${originalFilename.replace(/\.[^.]+$/, '')}-crop-${croppedNumber}`,
+        fileImageName: `${baseName.replace(/\.[^.]+$/, '')}-crop-${croppedNumber}`,
         prediction: {
           type: crop.type,
           shape: crop.shape,
@@ -882,27 +1014,63 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
         boxes: [crop.box],
         userId,
         sessionId,
+        original_id: parentOriginalId || undefined,
+        cropped_id: croppedId,
       };
 
-      await this.imageStorage.addImage(cropEntry, sessionId);
-
-      if (sessionId && typeof (this.imageStorage as any).addImageToSession === 'function') {
-        (this.imageStorage as any).addImageToSession(sessionId, cropEntry.filename);
+      let addedOk = false;
+      try {
+        await this.imageStorage.addImage(cropEntry, sessionId);
+        addedOk = true;
+      } catch (addErr) {
+        console.warn('[UploadImagePage] Failed to add cropped crack image to storage', addErr);
       }
 
-      if (userId) {
+      if (addedOk) {
         try {
-          await this.imageStorage.saveImageToUser(userId, cropEntry);
-        } catch (saveErr) {
-          console.warn('[UploadImagePage] Failed to save cropped crack to user storage', saveErr);
+          if (sessionId && typeof (this.imageStorage as any).addImageToSession === 'function') {
+            (this.imageStorage as any).addImageToSession(sessionId, cropEntry.filename);
+          }
+        } catch (sessErr) {
+          console.warn('[UploadImagePage] Failed to add cropped image to session', sessErr);
         }
-      }
 
-      storedCroppedCracks.push({
-        ...crop,
-        filename: cropEntry.filename,
-        sessionImage: cropEntry,
-      });
+        if (userId) {
+          try {
+            await this.imageStorage.saveImageToUser(userId, cropEntry);
+          } catch (saveErr) {
+            console.warn('[UploadImagePage] Failed to save cropped crack to user storage', saveErr);
+          }
+        }
+
+        storedCroppedCracks.push({
+          croppedNumber,
+          image: safeCrop,
+          s3Key: null,
+          s3Url: null,
+          filename: cropEntry.filename,
+          box: crop.box,
+          type: crop.type,
+          shape: crop.shape,
+          severity: crop.severity,
+          sessionImage: cropEntry,
+        });
+      } else {
+        // push a best-effort record so the caller can still reference it
+        storedCroppedCracks.push({
+          croppedNumber,
+          image: safeCrop,
+          s3Key: null,
+          s3Url: null,
+          filename: generatedFilename,
+          box: crop.box,
+          type: crop.type,
+          shape: crop.shape,
+          severity: crop.severity,
+          sessionImage: null,
+          error: true,
+        });
+      }
     }
 
     return storedCroppedCracks;
