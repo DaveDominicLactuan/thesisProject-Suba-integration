@@ -34,6 +34,8 @@ export class PdfPageTest03Page {
   private headerLogoDataUrl: string | null = null;
     // Images passed via navigation state or history.state
     sessionImages: any[] = [];
+    selectedGraphType: 'type' | 'shape' | 'severity' | 'all' = 'type';
+    selectedChartType: 'bar' | 'pie' = 'pie';
     showSessionLoadingWindow: boolean = false;
     sessionLoadingMessage: string = 'Fetching S3 images...';
     sessionLoadingDetail: string = 'Preparing session images';
@@ -94,6 +96,11 @@ export class PdfPageTest03Page {
         // 3. History state
         // 4. ImageStorageService by sessionId
         try {
+          const navState = this.router.getCurrentNavigation()?.extras?.state as any;
+          const histState = (window as any).history?.state || {};
+          this.selectedGraphType = navState?.selectedGraphType || histState?.selectedGraphType || 'type';
+          this.selectedChartType = navState?.selectedChartType || histState?.selectedChartType || 'pie';
+
           // First, try sessionStorage (contains sorted images from feedback-page)
           let imagesLoaded = false;
           try {
@@ -101,7 +108,7 @@ export class PdfPageTest03Page {
             if (storedData) {
               const parsed = JSON.parse(storedData);
               if (parsed.imagePaths && Array.isArray(parsed.imagePaths) && parsed.imagePaths.length > 0) {
-                this.sessionImages = parsed.imagePaths;
+                this.sessionImages = this.normalizeLoadedSessionImages(parsed.imagePaths);
                 console.log('[PDF ngOnInit] Loaded session images from sessionStorage (sorted, descending):', this.sessionImages.length, 'images');
                 imagesLoaded = true;
               }
@@ -116,7 +123,7 @@ export class PdfPageTest03Page {
             //(this.router.getCurrentNavigation()?.extras?.state). If present, stores them in sessionImages.
             const navImages = this.router.getCurrentNavigation()?.extras?.state as any;
             if (navImages && navImages.images) {
-              this.sessionImages = navImages.images;
+              this.sessionImages = this.normalizeLoadedSessionImages(navImages.images);
               console.log('Loaded session images from navigation state:', this.sessionImages.length);
               imagesLoaded = true;
             } else {
@@ -124,7 +131,7 @@ export class PdfPageTest03Page {
               // browser/history state (window.history.state) for an images property and use it if found.
               const hist = (window as any).history?.state || {};
               if (hist && hist.images) {
-                this.sessionImages = hist.images;
+                this.sessionImages = this.normalizeLoadedSessionImages(hist.images);
                 console.log('Loaded session images from history.state:', this.sessionImages.length);
                 imagesLoaded = true;
               }
@@ -138,7 +145,7 @@ export class PdfPageTest03Page {
               const s = this.imageStorage.getSession(this.sessionId);
               if (s && Array.isArray(s.imageKeys) && s.imageKeys.length > 0) {
                 const imgs = s.imageKeys.map((k: string) => this.imageStorage.getEntryForImage(k)).filter((x: any) => !!x);
-                this.sessionImages = imgs as any[];
+                this.sessionImages = this.normalizeLoadedSessionImages(imgs as any[]);
                 console.log('Loaded session images from ImageStorageService:', this.sessionImages.length);
               } else {
                 console.warn('No session entry or no imageKeys for sessionId', this.sessionId);
@@ -424,6 +431,19 @@ export class PdfPageTest03Page {
       };
     }
 
+    private getRelatedCroppedCountForImage(img: any): number {
+      const info = this.getPdfImageGroupInfo(img);
+      if (info.groupIndex < 0 || !info.isOriginal) {
+        return 0;
+      }
+
+      const prefix = `img${info.groupIndex}cropped`;
+      return (Array.isArray(this.sessionImages) ? this.sessionImages : []).filter((entry) => {
+        const filename = this.getPdfFilenameBase((entry?.filename || entry?.fileName || entry?.originalS3Key || entry?.storagePath || '').toString());
+        return filename.startsWith(prefix);
+      }).length;
+    }
+
     private isPdfCroppedImage(img: any): boolean {
       const filename = (img?.filename || img?.fileName || img?.originalS3Key || img?.storagePath || '').toString();
       return /cropped/i.test(filename);
@@ -504,6 +524,244 @@ export class PdfPageTest03Page {
       return sortedImages;
     }
 
+    private normalizeLoadedSessionImages(images: any[]): any[] {
+      if (!Array.isArray(images)) {
+        return [];
+      }
+
+      return images.map((img) => this.normalizeLoadedSessionImage(img));
+    }
+
+    private normalizeLoadedSessionImage(img: any): any {
+      if (!img || typeof img !== 'object') {
+        return img;
+      }
+
+      const correctedPrediction = img.correctedPrediction ?? img.prediction ?? img.rawPrediction ?? undefined;
+      const rawPrediction = img.rawPrediction ?? img.prediction ?? undefined;
+
+      const normalizedCorrectedPrediction = correctedPrediction
+        ? {
+            ...correctedPrediction,
+            boxes: Array.isArray(correctedPrediction.boxes) ? [...correctedPrediction.boxes] : Array.isArray(img.boxes) ? [...img.boxes] : []
+          }
+        : undefined;
+
+      const normalizedRawPrediction = rawPrediction
+        ? {
+            ...rawPrediction,
+            boxes: Array.isArray(rawPrediction.boxes) ? [...rawPrediction.boxes] : Array.isArray(img.boxes) ? [...img.boxes] : []
+          }
+        : undefined;
+
+      if (normalizedCorrectedPrediction) {
+        console.log('[PDF ngOnInit] correctedPrediction loaded for', img.filename || img.fileName || '(unnamed)', normalizedCorrectedPrediction);
+      }
+
+      return {
+        ...img,
+        prediction: img.prediction ?? normalizedRawPrediction,
+        rawPrediction: normalizedRawPrediction,
+        correctedPrediction: normalizedCorrectedPrediction,
+        boxes: Array.isArray(img.boxes) ? [...img.boxes] : []
+      };
+    }
+
+    private getResolvedPredictionValues(img: any): { type: string; shape: string; severity: string } {
+      const correctedPrediction = img?.correctedPrediction || {};
+      const rawPrediction = img?.rawPrediction || {};
+
+      return {
+        type: String(correctedPrediction.type ?? rawPrediction.type ?? img?.dropdown1 ?? img?.type ?? img?.fileName ?? 'Type'),
+        shape: String(correctedPrediction.shape ?? rawPrediction.shape ?? img?.dropdown2 ?? img?.shape ?? 'Shape'),
+        severity: String(correctedPrediction.severity ?? rawPrediction.severity ?? img?.dropdown3 ?? img?.severity ?? 'Severity')
+      };
+    }
+
+    private getPredictionEntriesForPie(img: any): Array<{ type?: string; shape?: string; severity?: string; boxes?: any[] }> {
+      const corrected = img?.correctedPrediction;
+      if (corrected && typeof corrected === 'object' && !Array.isArray(corrected)) {
+        return [corrected];
+      }
+
+      const raw = img?.rawPrediction;
+      if (Array.isArray(raw)) {
+        return raw.filter((entry: any) => !!entry);
+      }
+      if (raw && typeof raw === 'object') {
+        return [raw];
+      }
+
+      const prediction = img?.prediction;
+      if (Array.isArray(prediction)) {
+        return prediction.filter((entry: any) => !!entry);
+      }
+      if (prediction && typeof prediction === 'object') {
+        return [prediction];
+      }
+
+      return [this.getResolvedPredictionValues(img)];
+    }
+
+    private getPieLayoutData(graphType: 'type' | 'shape' | 'severity' | 'all'): Array<{ key: string; value: number; percent: number; color: string }> {
+      const sourceImages = this.getGroupedSessionImagesForPdf();
+      const counts: Record<string, number> = {};
+
+      for (const img of sourceImages) {
+        const predictions = this.getPredictionEntriesForPie(img);
+
+        for (const prediction of predictions) {
+          if (graphType === 'all') {
+            const typeLabel = prediction?.type ? `Type - ${prediction.type}` : 'Type - Unknown';
+            const shapeLabel = prediction?.shape ? `Shape - ${prediction.shape}` : 'Shape - Unknown';
+            const severityLabel = prediction?.severity ? `Severity - ${prediction.severity}` : 'Severity - Unknown';
+            counts[typeLabel] = (counts[typeLabel] || 0) + 1;
+            counts[shapeLabel] = (counts[shapeLabel] || 0) + 1;
+            counts[severityLabel] = (counts[severityLabel] || 0) + 1;
+            continue;
+          }
+
+          const label = prediction?.[graphType] || 'Unknown';
+          counts[label] = (counts[label] || 0) + 1;
+        }
+      }
+
+      const entries = Object.entries(counts);
+      const total = entries.reduce((sum, [, value]) => sum + value, 0) || 0;
+      const colors = ['#ff6b2d', '#ff9f43', '#ffbf7a', '#ffd9b8', '#ffeedd', '#e07a3f', '#c95c22', '#b34718'];
+
+      return entries
+        .map(([key, value], index) => ({
+          key,
+          value,
+          percent: total ? Math.round((value / total) * 100) : 0,
+          color: colors[index % colors.length]
+        }))
+        .sort((left, right) => right.value - left.value);
+    }
+
+    private buildPieSlicePath(cx: number, cy: number, radius: number, startAngle: number, endAngle: number): string {
+      const start = this.polarToCartesian(cx, cy, radius, endAngle);
+      const end = this.polarToCartesian(cx, cy, radius, startAngle);
+      const largeArcFlag = endAngle - startAngle <= 180 ? '0' : '1';
+      return [
+        `M ${cx} ${cy}`,
+        `L ${start.x} ${start.y}`,
+        `A ${radius} ${radius} 0 ${largeArcFlag} 0 ${end.x} ${end.y}`,
+        'Z'
+      ].join(' ');
+    }
+
+    private polarToCartesian(cx: number, cy: number, radius: number, angleInDegrees: number): { x: number; y: number } {
+      const angleInRadians = (angleInDegrees - 90) * Math.PI / 180.0;
+      return {
+        x: cx + (radius * Math.cos(angleInRadians)),
+        y: cy + (radius * Math.sin(angleInRadians))
+      };
+    }
+
+    private buildPieChartSvg(data: Array<{ key: string; value: number; percent: number; color: string }>, size: number = 180): string {
+      const center = size / 2;
+      const radius = size * 0.38;
+      let currentAngle = 0;
+
+      const slices = data.length > 0
+        ? data.map((slice) => {
+            const angle = (slice.value / data.reduce((sum, item) => sum + item.value, 0)) * 360;
+            const path = this.buildPieSlicePath(center, center, radius, currentAngle, currentAngle + angle);
+            currentAngle += angle;
+            return `<path d="${path}" fill="${slice.color}" stroke="#ffffff" stroke-width="2" />`;
+          }).join('')
+        : `<circle cx="${center}" cy="${center}" r="${radius}" fill="#f1f1f1" stroke="#dddddd" stroke-width="2" />`;
+
+      return `
+        <svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">
+          <rect x="0" y="0" width="${size}" height="${size}" fill="#ffffff" rx="18" ry="18" />
+          ${slices}
+          <circle cx="${center}" cy="${center}" r="${radius * 0.5}" fill="#ffffff" />
+          // <text x="${center}" y="${center - 4}" text-anchor="middle" font-family="Arial, sans-serif" font-size="16" font-weight="700" fill="#1f2937">Pie Layout</text>
+          // <text x="${center}" y="${center + 16}" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" fill="#6b7280">Session Summary</text>
+        </svg>
+      `;
+    }
+
+    private buildPiePanelContent(graphType: 'type' | 'shape' | 'severity', label: string): Content {
+      const data = this.getPieLayoutData(graphType);
+
+      const legendRows = data.length > 0
+        ? data.map((item) => ([
+            { text: '', fillColor: item.color, margin: [0, 4, 0, 4] as [number, number, number, number] },
+            { text: item.key, fontSize: 8, margin: [5, 4, 0, 4] as [number, number, number, number] },
+            { text: String(item.value), fontSize: 8, alignment: 'center', margin: [0, 4, 0, 4] as [number, number, number, number] },
+            { text: `${item.percent}%`, fontSize: 8, alignment: 'center', margin: [0, 4, 0, 4] as [number, number, number, number] }
+          ]))
+        : [[
+            { text: '', fillColor: '#f1f1f1', margin: [0, 4, 0, 4] as [number, number, number, number] },
+            { text: 'No data', colSpan: 3, fontSize: 8, italics: true, color: '#6b7280', margin: [5, 4, 0, 4] as [number, number, number, number] },
+            {},
+            {}
+          ]];
+
+      return {
+        stack: [
+          { text: label, bold: true, alignment: 'center', fontSize: 11, margin: [0, 0, 0, 6] },
+          {
+            svg: this.buildPieChartSvg(data, 170),
+            width: 180,
+            alignment: 'center',
+            margin: [0, 0, 0, 8]
+          },
+          {
+            table: {
+              headerRows: 1,
+              widths: [12, '*', 28, 32],
+              body: [
+                [
+                  { text: '', fillColor: '#ffffff' },
+                  { text: 'Label', bold: true, fontSize: 8 },
+                  { text: 'Count', bold: true, alignment: 'center', fontSize: 8 },
+                  { text: '%', bold: true, alignment: 'center', fontSize: 8 }
+                ],
+                ...legendRows
+              ]
+            },
+            layout: {
+              hLineWidth: () => 0.6,
+              vLineWidth: () => 0,
+              hLineColor: () => '#e5e7eb',
+              paddingLeft: () => 0,
+              paddingRight: () => 0,
+              paddingTop: () => 0,
+              paddingBottom: () => 0
+            }
+          }
+        ]
+      };
+    }
+
+    private buildPieLayoutContent(): Content[] {
+      const typeData = this.getPieLayoutData('type');
+      const shapeData = this.getPieLayoutData('shape');
+      const severityData = this.getPieLayoutData('severity');
+
+      if ((!typeData || typeData.length === 0) && (!shapeData || shapeData.length === 0) && (!severityData || severityData.length === 0)) {
+        return [];
+      }
+
+      return [
+        { text: 'Pie Layout Summary', style: 'header', alignment: 'center', margin: [0, 0, 0, 18] },
+        {
+          columns: [
+            this.buildPiePanelContent('type', 'Type'),
+            this.buildPiePanelContent('shape', 'Shape'),
+            this.buildPiePanelContent('severity', 'Severity')
+          ],
+          columnGap: 10,
+          margin: [0, 0, 0, 0]
+        }
+      ];
+    }
+
     // store incoming session id if any
     sessionId: string | null = null;
   
@@ -531,21 +789,33 @@ export class PdfPageTest03Page {
           if (sessionImages.length > 0) {
             sessionImages.forEach((img: any, idx: number) => {
               const i = idx + 1;
-              const type = img?.rawPrediction?.type ?? img?.dropdown1 ?? img?.type ?? img?.fileName ?? 'Type';
-              const shape = img?.rawPrediction?.shape ?? img?.dropdown2 ?? img?.shape ?? 'Shape';
-              const severity = img?.rawPrediction?.severity ?? img?.dropdown3 ?? img?.severity ?? 'Severity';
+              const { type, shape, severity } = this.getResolvedPredictionValues(img);
+              const imageInfo = this.getPdfImageGroupInfo(img);
+              const relatedCroppedCount = this.getRelatedCroppedCountForImage(img);
     
               // Insert descriptive paragraph with values inserted and bolded
               content.push({
-                text: [
-                  `The crack shown in image ${i} is a `,
-                  { text: type, bold: true },
-                  ', the shape of the crack is ',
-                  { text: shape, bold: true },
-                  ' and it is a ',
-                  { text: severity, bold: true },
-                  ' in severity'
-                ],
+                text: imageInfo.isOriginal
+                  ? [
+                      `The system identified ${relatedCroppedCount} related cropped crack${relatedCroppedCount === 1 ? '' : 's'} for image ${i}. `,
+                      'The crack shown in image ',
+                      `${i} is a `,
+                      { text: type, bold: true },
+                      ', the shape of the crack is ',
+                      { text: shape, bold: true },
+                      ' and it is a ',
+                      { text: severity, bold: true },
+                      ' in severity'
+                    ]
+                  : [
+                      `The crack shown in image ${i} is a `,
+                      { text: type, bold: true },
+                      ', the shape of the crack is ',
+                      { text: shape, bold: true },
+                      ' and it is a ',
+                      { text: severity, bold: true },
+                      ' in severity'
+                    ],
                 alignment: 'justify',
                 margin: [0, 0, 0, 20]
               });
@@ -638,6 +908,9 @@ export class PdfPageTest03Page {
                 content.push({ text: '', pageBreak: 'after', margin: [0, 0, 0, 0] });
               }
             });
+
+            content.push({ text: '', pageBreak: 'before', margin: [0, 0, 0, 0] });
+            content.push(...this.buildPieLayoutContent());
           } else {
             // no session images — keep a single placeholder block
             content.push({

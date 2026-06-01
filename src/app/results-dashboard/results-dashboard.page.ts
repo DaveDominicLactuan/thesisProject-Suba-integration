@@ -666,6 +666,8 @@ export class ResultsDashboardPage implements OnInit {
       queryParams,
       state: {
         sessionId: this.sessionId,
+        selectedGraphType: this.selectedGraphType,
+        selectedChartType: this.selectedChartType,
         images: selectedImages.length > 0 ? selectedImages : this.availableSessionImages,
       },
     });

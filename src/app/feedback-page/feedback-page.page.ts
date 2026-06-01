@@ -1358,9 +1358,17 @@ private lastImageTitleDebugAt: number = 0;
    */
   private storeSessionToSessionStorage(): void {
     try {
+      const snapshotImages = (this.imagePaths || []).map((img: any) => ({
+        ...img,
+        prediction: img?.prediction ? { ...img.prediction } : undefined,
+        rawPrediction: img?.rawPrediction ? { ...img.rawPrediction } : undefined,
+        correctedPrediction: img?.correctedPrediction ? { ...img.correctedPrediction } : undefined,
+        boxes: Array.isArray(img?.boxes) ? [...img.boxes] : []
+      }));
+
       const sessionData = {
         selectedSessionId: this.selectedSessionId,
-        imagePaths: this.imagePaths,
+        imagePaths: snapshotImages,
         timestamp: new Date().toISOString(),
         imageCount: this.imagePaths.length
       };
@@ -1894,6 +1902,8 @@ addEntry() {
     if (typeof svc.setEntryForImage === 'function') {
       svc.setEntryForImage(storageKey, updatedStored);
     }
+
+    this.storeSessionToSessionStorage();
 
     // Also refresh selectedImage to the correct src based on toggle
     this.selectedImage = this.showWithBoxes ? matched.withBoxes : matched.original;
