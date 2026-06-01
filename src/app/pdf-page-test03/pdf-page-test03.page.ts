@@ -336,7 +336,7 @@ export class PdfPageTest03Page {
       }
 
       try {
-        this.headerLogoDataUrl = await this.ensureImageDataUrl('assets/DamageLogo2.png');
+        this.headerLogoDataUrl = await this.ensureImageDataUrl('assets/DamageLogo3.png');
       } catch (err) {
         console.warn('[PDF] Failed to load header logo, using text-only title', err);
         this.headerLogoDataUrl = '';
@@ -437,11 +437,19 @@ export class PdfPageTest03Page {
         return 0;
       }
 
-      const prefix = `img${info.groupIndex}cropped`;
-      return (Array.isArray(this.sessionImages) ? this.sessionImages : []).filter((entry) => {
-        const filename = this.getPdfFilenameBase((entry?.filename || entry?.fileName || entry?.originalS3Key || entry?.storagePath || '').toString());
-        return filename.startsWith(prefix);
-      }).length;
+      const groupedImages = (Array.isArray(this.sessionImages) ? this.sessionImages : [])
+        .map((entry) => ({ entry, entryInfo: this.getPdfImageGroupInfo(entry) }))
+        .filter(({ entryInfo }) => entryInfo.groupIndex === info.groupIndex);
+
+      const relatedCroppedImages = groupedImages.filter(({ entryInfo }) => !entryInfo.isOriginal);
+
+      console.log(
+        `[PDF] relatedCroppedCount for img${info.groupIndex}:`,
+        relatedCroppedImages.length,
+        relatedCroppedImages.map(({ entryInfo }) => entryInfo.filename || '(unnamed)')
+      );
+
+      return relatedCroppedImages.length;
     }
 
     private isPdfCroppedImage(img: any): boolean {
@@ -679,8 +687,6 @@ export class PdfPageTest03Page {
           <rect x="0" y="0" width="${size}" height="${size}" fill="#ffffff" rx="18" ry="18" />
           ${slices}
           <circle cx="${center}" cy="${center}" r="${radius * 0.5}" fill="#ffffff" />
-          // <text x="${center}" y="${center - 4}" text-anchor="middle" font-family="Arial, sans-serif" font-size="16" font-weight="700" fill="#1f2937">Pie Layout</text>
-          // <text x="${center}" y="${center + 16}" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" fill="#6b7280">Session Summary</text>
         </svg>
       `;
     }
@@ -785,6 +791,8 @@ export class PdfPageTest03Page {
     
           // If sessionImages exist, create one page per image with page breaks
           const sessionImages = this.getGroupedSessionImagesForPdf();
+          let croppedCount = 0;
+          let originalCount = 0;
 
           if (sessionImages.length > 0) {
             sessionImages.forEach((img: any, idx: number) => {
@@ -792,23 +800,34 @@ export class PdfPageTest03Page {
               const { type, shape, severity } = this.getResolvedPredictionValues(img);
               const imageInfo = this.getPdfImageGroupInfo(img);
               const relatedCroppedCount = this.getRelatedCroppedCountForImage(img);
+              const isOriginalImage = imageInfo.isOriginal;
+              const isCroppedImage = this.isPdfCroppedImage(img);
+              if (isOriginalImage) {
+                croppedCount = 0;
+                originalCount += 1;
+              } else if (isCroppedImage) {
+                croppedCount += 1;
+              }
+              console.log("croppedCount value", croppedCount);
     
               // Insert descriptive paragraph with values inserted and bolded
               content.push({
-                text: imageInfo.isOriginal
+                text: isCroppedImage
                   ? [
-                      `The system identified ${relatedCroppedCount} related cropped crack${relatedCroppedCount === 1 ? '' : 's'} for image ${i}. `,
-                      'The crack shown in image ',
-                      `${i} is a `,
-                      { text: type, bold: true },
-                      ', the shape of the crack is ',
-                      { text: shape, bold: true },
-                      ' and it is a ',
-                      { text: severity, bold: true },
-                      ' in severity'
+                      `Cropped image ${croppedCount}, shows a severity `,
+                      { text: String(severity), bold: true },
+                      ', the type is a ',
+                      { text: String(type), bold: true },
+                      ', and shows a shape of ',
+                      { text: String(shape), bold: true },
+                      '.'
+                    ]
+                  : isOriginalImage
+                  ? [
+                      `The system identified ${relatedCroppedCount} related cropped crack${relatedCroppedCount === 1 ? '' : 's'} for image ${originalCount}. `,
                     ]
                   : [
-                      `The crack shown in image ${i} is a `,
+                      `The crack shown in image ${croppedCount} is a `,
                       { text: type, bold: true },
                       ', the shape of the crack is ',
                       { text: shape, bold: true },
