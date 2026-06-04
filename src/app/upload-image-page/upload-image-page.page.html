@@ -74,7 +74,7 @@
     <!-- Top section: keep existing controls here (spinner + action buttons) -->
     <div class="bottom-top-row">
       <!-- Images processed block (spinner on top, label below) -->
-      <div class="func-action" (click)="openProcessWindow()">
+      <!-- <div class="func-action" (click)="openProcessWindow()">
           <div class="spinner-container-rect" [class.has-processed-images]="processedGlowActive">
           <svg *ngIf="isProcessing" class="rect-spinner" width="70" height="40">
             <rect x="2" y="2" width="66" height="36" rx="12" ry="12" class="rect-spinner-path" />
@@ -82,7 +82,8 @@
           <div class="center-value-rect">{{ photosProcessed }}/{{ photosTaken }}</div>
           <div class="red-circle" [ngClass]="{ 'green': photosProcessed === photosTaken, 'red': photosProcessed < photosTaken }"></div>
         </div>
-      </div>
+      </div> -->
+      <div class="red-circle" [ngClass]="{ 'green': fastApiConnection, 'red': !fastApiConnection }"></div>
 
       <!-- Upload and Finish blocks (now siblings of the spinner block for even spacing) -->
       <!-- <div class="func-action" (click)="reprocessSelectedImage()">

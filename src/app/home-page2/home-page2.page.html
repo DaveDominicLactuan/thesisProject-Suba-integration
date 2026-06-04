@@ -44,6 +44,14 @@
         <img src="assets/updatedSession.png" alt="Map" class="menu-item-icon" />
         <span>Sessions</span>
       </li>
+      <li class="menu-item" (click)="getFastApiMessage()">
+        <img src="assets/ChatIconNew.png" alt="Chat" class="menu-item-icon" />
+        <span>Test</span>      
+      </li>
+       <li class="menu-item" (click)="getFastApiMessage()">
+        <img src="assets/ChatIconNew.png" alt="Chat" class="menu-item-icon" />
+        <span>Test</span>      
+      </li>
        <!-- <li class="menu-item" (click)="goS3Page()">
         <img src="assets/bottomBarMarker.png" alt="Map" class="menu-item-icon" />
         <span>S3</span>
@@ -109,6 +117,39 @@
           <img src="assets/updatedSession.png" alt="Camera" />
         </div>
         <div class="explore-label">Sessions</div>
+      </div>
+
+       <div class="explore-card">
+       <div class="api-container" *ngIf="apiStatus">
+    <h2>Server Status: <span [style.color]="apiStatus === 'success' ? 'green' : 'red'">{{ apiStatus }}</span></h2>
+    <p>{{ apiMessage }}</p>
+  </div>
+
+  <div *ngIf="!apiStatus">
+    <ion-spinner name="crescent"></ion-spinner>
+    <p>Connecting to backend...</p>
+  </div>
+      </div>
+
+      
+
+      <div class="explore-card">
+       <ion-card-title>2. Upload & Display Image</ion-card-title>
+    <ion-card-content>
+      
+      <input type="file" (change)="onFileSelected($event)" accept="image/*" />
+      
+      <ion-button expand="block" color="success" class="ion-margin-top" 
+                  [disabled]="!selectedFile" (click)="uploadImage()">
+        Upload to Server
+      </ion-button>
+
+      <div *ngIf="uploadedImageUrl" class="ion-margin-top ion-text-center">
+        <p><strong>Uploaded Image:</strong></p>
+        <img [src]="uploadedImageUrl" alt="Uploaded Result" style="max-height: 250px; border-radius: 8px;" />
+      </div>
+
+    </ion-card-content>
       </div>
     </div>
   </div>

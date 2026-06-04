@@ -13,6 +13,7 @@ import { Firestore, collection, getDocs } from '@angular/fire/firestore';
 import { UserPrefetchCacheService } from '../services/user-prefetch-cache.service';
 import { firstValueFrom } from 'rxjs';
 import { ChatService } from '../services/chat.service';
+import { HttpClient } from '@angular/common/http';
 
 interface OfficeLocationMarkerData {
   id: string;
@@ -57,9 +58,18 @@ export class HomePage2Page implements OnInit, OnDestroy {
   isLocationAvailable: boolean = false;
   isLocationDataFetched: boolean = false;
   private locationCheckInterval: any = null;
+  apiMessage: string = 'Loading...';
+  apiStatus: string = '';
+  boxes: { w: number; h: number; x: number; y: number }[] = [];
+private apiUrl = 'https://your-vscode-forwarded-url.app.github.dev/';
+apiUrlWeb = 'http://127.0.0.1:8000/';
+apiUrlWeb2 = 'http://127.0.0.1:8000/helloWorld';
+private baseUrl = 'http://127.0.0.1:8000'; 
+  uploadedImageUrl: string = '';
+  selectedFile: File | null = null;
 
   /** Inject auth, router, and image storage services for navigation and data. */
-  constructor(private formBuilder: FormBuilder, private router: Router, private authService: AuthService, private navCtrl: NavController, private auth3: Auth3Service, private imageStorage: ImageStorageService, private platform: Platform, private firestore: Firestore, private userPrefetchCache: UserPrefetchCacheService, private chatService: ChatService) {
+  constructor(private http: HttpClient, private formBuilder: FormBuilder, private router: Router, private authService: AuthService, private navCtrl: NavController, private auth3: Auth3Service, private imageStorage: ImageStorageService, private platform: Platform, private firestore: Firestore, private userPrefetchCache: UserPrefetchCacheService, private chatService: ChatService) {
 
   }
 
@@ -70,6 +80,81 @@ ngOnInit(): void {
   //initializes the data needed for the page such as user data, profile and session
   this.initialize();
 }
+
+// 1. Simple Connection Test
+testFastApi() {
+  this.http.get<any>(this.apiUrlWeb2).subscribe({
+    next: (res) => console.log('Root connection success:', res),
+    error: (err) => console.error('Root connection error:', err)
+  });
+}
+
+// 1. Call Text Function
+  getFastApiMessage() {
+    this.http.get<{ message: string }>(`${this.baseUrl}/api/hello`).subscribe({
+      next: (response) => {
+        this.apiMessage = response.message;
+        this.apiStatus = response.message;
+        console.log("Api Message", this.apiMessage);
+        console.log('Root connection success:', response);
+      },
+      error: (err) => console.error('Error fetching message:', err)
+    });
+  }
+
+  onFileSelected(event: any) {
+  // Access the native target files array safely
+  const fileList: FileList = event.target.files;
+  
+  if (fileList && fileList.length > 0) {
+    this.selectedFile = fileList[0];
+    // Inspect this log in your device/emulator console
+    console.log('Selected file object:', this.selectedFile); 
+  } else {
+    this.selectedFile = null;
+  }
+}
+
+uploadImage() {
+  // Safety check: ensure something is selected and it behaves like a Blob/File
+  if (!this.selectedFile || !(this.selectedFile instanceof Blob)) {
+    console.error('Upload aborted: selectedFile is not a valid Blob/File object.', this.selectedFile);
+    return;
+  }
+
+  const formData = new FormData();
+  // Safe to append now that the instance type is verified
+  formData.append('file', this.selectedFile, this.selectedFile.name);
+
+  // 1. Update the expected response type to match your FastAPI return dictionary
+  interface UploadResponse {
+    message: string;
+    rawImagePath: string;
+    processedImagePath: string;
+    bounding_boxes: { w: number; h: number; x: number; y: number }[];
+  }
+
+
+  this.http.post<UploadResponse>(`${this.baseUrl}/api/upload`, formData)
+    .subscribe({
+      next: (response) => {
+        // this.uploadedImageUrl = `${this.baseUrl}${response.imagePath}`;
+
+        // 2. Capture the paths and prefix them with your base URL
+        this.uploadedImageUrl = `${this.baseUrl}${response.rawImagePath}`;
+        // this.processedImageUrl = `${this.baseUrl}${response.processedImagePath}`;
+        
+        // 3. Capture the bounding boxes array
+        this.boxes = response.bounding_boxes;
+
+        console.log("Success:", response.message);
+        console.log("Found boxes:", this.boxes);
+
+      },
+      error: (err) => console.error('Error uploading image:', err)
+    });
+}
+
 
 /** Perform async initialization tasks (profile + sessions). */
 private async initialize(): Promise<void> {

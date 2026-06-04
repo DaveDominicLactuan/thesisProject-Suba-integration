@@ -12,12 +12,27 @@ import { ImageStorageService, StoredImage } from '../services/image-storage.serv
 import { Capacitor } from '@capacitor/core';
 import { Camera, CameraResultType, CameraSource } from '@capacitor/camera';
 
+import { HttpClient } from '@angular/common/http';
+import { firstValueFrom } from 'rxjs';
+
 // Basic bounding box types used in drawing helper
 interface BoundingBox {
   x: number;
   y: number;
   w: number;
   h: number;
+}
+
+interface QueueItem {
+  dataUrl: string;
+  filename: string;
+}
+
+interface UploadResponse {
+  message: string;
+  rawImagePath: string;
+  processedImagePath: string;
+  bounding_boxes: { w: number; h: number; x: number; y: number }[];
 }
 
 console.log('CameraPagePage component file loaded');
@@ -43,6 +58,7 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
   mediaStream: MediaStream | null = null;
   extraText: string | null = null;
   isProcessing: boolean = false;
+  fastApiConnection: boolean = false;
   photosTaken = 0;
   private _photosProcessed = 0;
   // transient flag to show a short glow when a photo finishes processing
@@ -106,6 +122,17 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
   // Process Window state
   isProcessWindowOpen: boolean = false;
   private backButtonSub: any; // hardware back handler
+private imageQueue: QueueItem[] = [];
+private isQueueProcessing: boolean = false;
+  apiMessage: string = 'Loading...';
+  apiStatus: string = '';
+  boxes: { w: number; h: number; x: number; y: number }[] = [];
+private apiUrl = 'https://your-vscode-forwarded-url.app.github.dev/';
+apiUrlWeb = 'http://127.0.0.1:8000/';
+apiUrlWeb2 = 'http://127.0.0.1:8000/helloWorld';
+private baseUrl = 'http://127.0.0.1:8000'; 
+  uploadedImageUrl: string = '';
+  selectedFile: File | null = null;
 
   get countdown() {
     return this.photosTaken - this.photosProcessed;
@@ -122,7 +149,8 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
     private sanitizer: DomSanitizer,
     private crackDetectionService: CrackDetectionService,
     private imageStorage: ImageStorageService,
-    private cdr: ChangeDetectorRef
+    private cdr: ChangeDetectorRef,
+    private http: HttpClient
   ) {
     try {
       this.imageStorage.getCurrentImage$().subscribe((img) => {
@@ -452,32 +480,86 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
   /** Mobile image picker — attempts Capacitor Photos API, 
    * falls back to camera pick single file */
   async pickImagesMobile() {
-    if (this.isProcessing) {
-      console.warn('[UploadImagePage] pickImagesMobile skipped while processing');
-      return;
+  try {
+    const photo = await Camera.getPhoto({
+      quality: 80,
+      allowEditing: false,
+      resultType: CameraResultType.Base64,
+      source: CameraSource.Photos
+    });
+    if (photo && photo.base64String) {
+      // Create dataURL and filename
+      const dataUrl = `data:image/jpeg;base64,${photo.base64String}`;
+      const galleryFilename = `Gallery-${Date.now()}.jpg`;
+      console.log(`📸 Picked image from gallery: ${galleryFilename}`);
+      
+      // Send directly to the queue pipeline
+      this.processQueue(dataUrl, galleryFilename);
+    } else {
+      console.warn('pickImagesMobile: no photo returned');
     }
-
-    try {
-      //open the device photo picker and return a Base64 image.
-      const photo = await Camera.getPhoto({ quality: 80, allowEditing: false, resultType: CameraResultType.Base64, source: CameraSource.Photos });
-      //build a standard data:image/jpeg;base64,... URL the rest of the code can consume.
-      if (photo && photo.base64String) {
-        const dataUrl = `data:image/jpeg;base64,${photo.base64String}`;
-        const galleryFilename = `Gallery-${Date.now()}.jpg`;
-        console.log(`📸 Picked image from gallery: ${galleryFilename}` && console.log(photo)  && console.log(dataUrl));
-        //call processDataUrl to run inference/store 
-        //the image but race it against a 10s timeout to avoid hanging.
-        try {
-          await Promise.race([this.processDataUrl(dataUrl, `mobile-${Date.now()}.jpg`), new Promise((_, rej) => setTimeout(() => rej(new Error('processing-timeout')), 10_000))]);
-        } catch (e) {
-          //catch and log failures from the Camera API or any unexpected errors.
-          console.warn('[UploadImagePage] pickImagesMobile: processing failed or timed out', e);
-        }
-      }
-    } catch (e) {
-      console.warn('pickImagesMobile failed', e);
-    }
+  } catch (e) {
+    console.warn('pickImagesMobile failed', e);
   }
+}
+
+   /**
+ * Helper function to print the current state of the queue.
+ * Triggered whenever an item is added or popped for processing.
+ */
+private printQueueStatus(action: 'added' | 'sent_to_processing', item: QueueItem): void {
+  console.log(`=== 📋 [Queue Update: ${action.toUpperCase()}] ===`);
+  console.log(`Target File: ${item.filename}`);
+  console.log(`Pending in Queue: ${this.imageQueue.length} image(s)`);
+  console.log(`Current Queue Order:`, this.imageQueue.map(q => q.filename));
+  console.log(`======================================`);
+}
+
+/**
+ * Accepts a captured or selected image, appends it to the queue, 
+ * and initiates processing if the queue processor is idle.
+ */
+async processQueue(dataUrl: string, filename: string): Promise<void> {
+  const newItem: QueueItem = { dataUrl, filename };
+  this.imageQueue.push(newItem);
+
+  // Increment photosTaken immediately so UI spinners reflect the action instantly
+  this.photosTaken += 1;
+
+  // Print queue logs upon item addition
+  this.printQueueStatus('added', newItem);
+
+  // If the background processor isn't running, start it
+  if (!this.isQueueProcessing) {
+    await this.runQueueProcessor();
+  }
+}
+
+/**
+ * Sequentially shifts items out of the queue and processes them one by one.
+ */
+private async runQueueProcessor(): Promise<void> {
+  if (this.imageQueue.length === 0) {
+    this.isQueueProcessing = false;
+    return;
+  }
+
+  this.isQueueProcessing = true;
+  const nextItem = this.imageQueue.shift()!;
+
+  // Print queue logs when an item is sent to processDataUrl
+  this.printQueueStatus('sent_to_processing', nextItem);
+
+  try {
+    // Pass bumpCounters as false because we incremented photosTaken at the time of queueing
+    await this.processDataUrl(nextItem.dataUrl, nextItem.filename, false);
+  } catch (error) {
+    console.error(`[Queue Error] Processing failed for ${nextItem.filename}:`, error);
+  } finally {
+    // Process the next image in line recursively
+    await this.runQueueProcessor();
+  }
+}
 
   /** Process a File object: convert to dataURL, preprocess, run inference, store, and update gallery */
   async processFile(file: File) {
@@ -491,303 +573,389 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
   }
 
   /** Helper to process a data URL (image) — runs inference and stores the image */
-  async processDataUrl(
-    dataUrl: string,
-    filename: string,
-    bumpCounters: boolean = true,
-    addToCapturedImages: boolean = true,
-    refreshCountsAfterSave: boolean = true
-  ) {
-    // Log the current image being processed
-    console.log(`🖼️ [UploadImagePage] Current image name is: ${filename}`);
-    // Update UI
-    this.imagePreview = dataUrl;
-    //prepend to captured images for thumbnail scroller
-    if (addToCapturedImages) {
-      this.capturedImages.unshift(dataUrl);
-    }
-    // detect center thumbnail after UI update
-    setTimeout(() => this.detectCenterThumbnail(), 60);
-    //set processing as true to show indicator
-    this.isProcessing = true;
-    // yield to the event loop so the spinner can render/animate before heavy work
-    await this.sleep(50);
-    try { this.cdr.detectChanges(); } catch (e) { /* ignore */ }
-    let finalizationClaimed = false;
-    const claimFinalization = () => {
-      if (finalizationClaimed) return false;
-      finalizationClaimed = true;
-      return true;
-    };
-
-    //set for tracking inference success/failure
-    let inferenceCalled = false;
-    let inferenceSucceeded = false;
-    
-    // Retrieve the stored userID from storage
-    let userId: string | undefined = undefined;
-    try {
-      const storage = await (this.imageStorage as any)._storage;
-      if (storage) {
-        userId = await storage.get('userID');
-      }
-    } catch (e) {
-      console.warn('[UploadImagePage] processDataUrl: Failed to retrieve userID from storage', e);
-    }
-
-    const sessionImgIndex = typeof (this.imageStorage as any).getNextOriginalImageNumber === 'function'
-      ? (this.imageStorage as any).getNextOriginalImageNumber(this.selectedSessionId || undefined)
-      : undefined;
-    const originalId = this.generateImageRecordId('original');
-    
-    //actual process and run interfrence
-    const doWork = async () => {
-      let prediction: any = null;
-      try {
-        inferenceCalled = true;
-        //converts the img dataURL into exact Float32 tensor the model expects
-        const tensor = await this.preprocessImage(dataUrl);
-        // run the service to call the model to get back end data
-        try {
-          prediction = await this.crackDetectionService.runInference(tensor);
-          inferenceSucceeded = !!prediction;
-        } catch (infErr) {
-          console.warn('Inference error in processDataUrl', infErr);
-        }
-      } catch (err) {
-        console.warn('Preprocess failed in processDataUrl', err);
-      }
-      // Prepare storage entry or build StoredImage entry
-      const maxBytes = 900_000;
-      const safeOriginal = await this.shrinkDataUrlToBytes(dataUrl, maxBytes, 4000);
-      const timestamp = new Date().toISOString();
-      const generatedFilename = this.buildSessionFilename(!!prediction, timestamp, filename, sessionImgIndex);
-      const entry: StoredImage = {
-        original: safeOriginal,
-        timestamp,
-        filename: generatedFilename,
-        fileImageName: filename || undefined,
-        prediction: prediction || undefined,
-        hasPrediction: !!prediction,
-        statusMessage: prediction ? 'Prediction succeeded' : (inferenceCalled ? 'Prediction failed' : 'No prediction'),
-        userId: userId,
-        sessionId: this.selectedSessionId || undefined,
-        original_id: originalId,
-        cropped_id: originalId
-      };
-
-      // If the model returned bounding boxes, create a "withBoxes" image and attach boxes
-      try {
-        if (prediction && Array.isArray(prediction.boxes) && prediction.boxes.length > 0) {
-          const rawBoxes = prediction.boxes;
-          const boxesToDraw = rawBoxes.map((b: any) => ({
-            x: b.x,
-            y: b.y,
-            w: b.w,
-            h: b.h
-          }));
-
-          const maskW = prediction.maskWidth || prediction.maskW || 128;
-          const maskH = prediction.maskHeight || prediction.maskH || 128;
-
-          const croppedCracks: any[] = [];
-
-          for (const box of boxesToDraw) {
-            const croppedNumber = croppedCracks.length + 1;
-            try {
-              const crop = await this.cropBoxFromImage(
-                dataUrl,
-                box,
-                maskW,
-                maskH
-              );
-
-              const cropTensor = await this.preprocessImage(crop);
-              const cropPrediction = await this.crackDetectionService.runInference(cropTensor);
-
-              croppedCracks.push({
-                croppedNumber,
-                image: crop,
-                box,
-                type: cropPrediction?.type ?? 'unknown',
-                shape: cropPrediction?.shape ?? 'unknown',
-                severity: cropPrediction?.severity ?? 'unknown'
-              });
-            } catch (cropErr) {
-              console.warn('[UploadImagePage] Failed processing one cropped crack, continuing with others', cropErr);
-            }
-          }
-
-          console.log('[CROPS] Total crops:', croppedCracks.length);
-         // try to create withBoxes image with drawn boxes based on the bouding box data
-          try {
-            const withBoxesDataUrl = await this.drawBoxesOnImage(dataUrl, boxesToDraw, maskW, maskH);
-            const safeWithBoxes = await this.shrinkDataUrlToBytes(withBoxesDataUrl, maxBytes, 4000);
-            (entry as any).withBoxes = safeWithBoxes;
-            (entry as any).boxes = boxesToDraw;
-            (entry as any).croppedCracks = croppedCracks;
-            (entry as any).detectionMessage = `Rendered ${boxesToDraw.length} detected crack box(es) from ${rawBoxes.length} prediction box(es)`;
-            this.totalBoundingBoxesCreated += boxesToDraw.length;
-            console.log('CROPPED CRACKS', croppedCracks);
-          } catch (renderErr) {
-            console.warn('[UploadImagePage] drawBoxesOnImage failed', renderErr);
-            (entry as any).withBoxes = safeOriginal;
-            (entry as any).boxes = [];
-            (entry as any).detectionMessage = 'Box rendering failed';
-          }
-        } else {
-          (entry as any).withBoxes = safeOriginal;
-          (entry as any).boxes = [];
-          (entry as any).detectionMessage = 'No boxes detected';
-        }
-      } catch (e) {
-        console.warn('[UploadImagePage] Failed to render boxes', e);
-        (entry as any).withBoxes = safeOriginal;
-        (entry as any).boxes = [];
-        (entry as any).detectionMessage = 'Box rendering failed';
-      }
-      //store image entry via image storage service, but only once per invocation
-      if (!claimFinalization()) {
-        console.warn('[UploadImagePage] Skipping persist because processing was already finalized');
-        return entry;
-      }
-      await this.imageStorage.addImage(entry, this.selectedSessionId || undefined);
-
-      // also add to active session if one exists so downstream crop saves can continue the session numbering
-      try {
-        if (this.selectedSessionId && typeof (this.imageStorage.addImageToSession) === 'function') {
-          this.imageStorage.addImageToSession(this.selectedSessionId, entry.filename);
-          this.sessionIsPristine = false; // Mark session as no longer pristine
-        }
-      } catch (e) {
-        console.warn('[UploadImagePage] Failed to add parent image to session', e);
-      }
-
-      const croppedCracksProcessed = await this.processAndStoreCroppedCracks(entry, filename, userId, sessionImgIndex, originalId);
-      console.log('[UploadImagePage] processDataUrl cropped crack summary:', {
-        filename: entry.filename,
-        croppedCracksTotal: Array.isArray((entry as any).croppedCracks) ? (entry as any).croppedCracks.length : 0,
-        croppedCracksProcessed,
-      });
-
-      // Debug: log the full entry after processing and storage
-      console.log('[UploadImagePage] processDataUrl saved entry:', entry);
-      // Also log the session image object (from service if available) and explicit ids for debugging
-      try {
-        const svc: any = this.imageStorage as any;
-        const storedSessionImage = (svc && typeof svc.getEntryForImage === 'function') ? svc.getEntryForImage(entry.filename) : null;
-        console.log('[UploadImagePage] processDataUrl SESSION IMAGE OBJECT:', storedSessionImage ?? entry, {
-          original_id: entry?.original_id,
-          cropped_id: entry?.cropped_id,
-        });
-      } catch (logErr) {
-        console.warn('[UploadImagePage] Failed to read stored session image object for logging', logErr);
-      }
-      try {
-        await this.refreshDisplayedImages();
-      } catch (e) {
-        console.warn('[UploadImagePage] Failed to add upload to session or refresh display', e);
-      }
-      this.imagePaths.unshift({
-        original: entry.original,
-        withBoxes: (entry as any).withBoxes || entry.original,
-        fileName: entry.filename,
-        rawPrediction: entry.prediction,
-        original_id: (entry as any).original_id,
-        cropped_id: (entry as any).cropped_id,
-      });
-      // Persist entry and current session to user-scoped Firestore if userId is available
-      if (userId) {
-        try {
-          await this.imageStorage.saveImageToUser(userId, entry);
-          if (this.selectedSessionId && typeof (this.imageStorage.getSession) === 'function') {
-            const session = this.imageStorage.getSession(this.selectedSessionId);
-            if (session) await this.imageStorage.saveSessionToUser(userId, session);
-          }
-        } catch (e) {
-          console.warn('[UploadImagePage] Failed to save user-scoped Firestore data', e);
-        }
-      }
-      // Count only true new uploads/captures as session additions.
-      if (bumpCounters) {
-        this.imagesUploadedThisSession += 1;
-      }
-      // keep counters in sync with persistent storage unless the caller will refresh later
-      if (refreshCountsAfterSave) {
-        await this.updatePhotoCounts();
-      }
-      await this.logCurrentSessionImageObjects();
-      // Force UI update and center detection with longer delay to ensure DOM is ready
-      setTimeout(() => {
-        // Trigger change detection
-        this.detectCenterThumbnail();
-      }, 250);
-      return entry;
-    };
-
-    try {
-      // overall timeout: 17s
-      await Promise.race([doWork(), new Promise((_, rej) => setTimeout(() => rej(new Error('processing-timeout')), 17_000))]);
-    } catch (err: any) {
-      if (err && err.message === 'processing-timeout') {
-        console.warn('[UploadImagePage] processDataUrl overall timeout');
-        // Persist fallback entry indicating failure/no-prediction
-        try {
-          const timestamp = new Date().toISOString();
-          const fallbackFilename = this.buildSessionFilename(false, timestamp, filename, sessionImgIndex);
-          const entry: StoredImage = {
-            original: dataUrl,
-            timestamp,
-            filename: fallbackFilename,
-            fileImageName: filename || undefined,
-            prediction: undefined,
-            hasPrediction: false,
-            statusMessage: inferenceCalled ? 'Prediction failed' : 'No prediction',
-            userId: userId,
-            sessionId: this.selectedSessionId || undefined,
-            original_id: originalId,
-            cropped_id: originalId
-          };
-          if (!claimFinalization()) {
-            console.warn('[UploadImagePage] Skipping timeout fallback because processing was already finalized');
-            return;
-          }
-          await this.imageStorage.addImage(entry, this.selectedSessionId || undefined);
-          try {
-            if (this.selectedSessionId && typeof (this.imageStorage.addImageToSession) === 'function') {
-              this.imageStorage.addImageToSession(this.selectedSessionId, entry.filename);
-              this.sessionIsPristine = false; // Mark session as no longer pristine
-            }
-          } catch (e) {
-            console.warn('[UploadImagePage] Failed to add fallback upload to session', e);
-          }
-          await this.refreshDisplayedImages();
-          this.imagePaths.unshift({
-            original: entry.original,
-            withBoxes: entry.original,
-            fileName: entry.filename,
-            rawPrediction: entry.prediction,
-            original_id: (entry as any).original_id,
-            cropped_id: (entry as any).cropped_id,
-          });
-          // Increment upload counter for this session
-          this.imagesUploadedThisSession += 1;
-          await this.updatePhotoCounts();
-        } catch (e) {
-          console.warn('[UploadImagePage] Failed to persist fallback entry after timeout', e);
-        }
-      } else {
-        console.warn('processDataUrl failed', err);
-      }
-    } finally {
-      // Do NOT increment photosProcessed here - let updatePhotoCounts handle it from storage
-      this.isProcessing = false;
-      await this.logCurrentSessionStateAfterProcessDataUrl(filename);
-      // Log cumulative bounding box stats after upload processing
-      this.logBoundingBoxStats();
-    }
-  }
-
+ async processDataUrl(
+   dataUrl: string,
+   filename: string, // Standardized signature parameter name
+   bumpCounters: boolean = true,
+   addToCapturedImages: boolean = true,
+   refreshCountsAfterSave: boolean = true
+ ) {
+   // Log the current image being processed
+   console.log(`\ud83d\udcfc [CameraProcessor] Current image name is: ${filename}`);
+ 
+   // 1. CRITICAL FIX: Turn on processing immediately so the UI spinner displays
+   // for the entire duration (including backend upload + tensor calculations)
+   this.isProcessing = true;
+ 
+   // New UI side-effects: update preview panel and prepend to thumbnail array
+   this.imagePreview = dataUrl;
+   if (addToCapturedImages) {
+     this.capturedImages.unshift(dataUrl);
+   }
+ 
+   // Detect center thumbnails after UI updates
+   setTimeout(() => {
+     if (typeof this.detectCenterThumbnail === 'function') {
+       this.detectCenterThumbnail();
+     }
+   }, 60);
+ 
+   // Yield execution to the browser thread so the spinner can animate fluidly before heavy work
+   if (typeof this.sleep === 'function') {
+     await this.sleep(50);
+   } else {
+     await new Promise((resolve) => setTimeout(resolve, 50));
+   }
+   
+   try {
+     this.cdr.detectChanges();
+   } catch (e) {
+     /* ignore change detection spikes */
+   }
+ 
+   // Scope the backend result variable
+   let backendUploadResult: UploadResponse | null = null;
+ 
+   // 2. CRITICAL FIX: Wrap the rest of the function in a master try block to guarantee the finally block clears the spinner
+   try {
+     // --- BACKEND UPLOAD FLOW ---
+     try {
+       const response = await fetch(dataUrl);
+       const blob = await response.blob();
+       const generatedName = filename || `capture-${Date.now()}.png`;
+       
+       this.selectedFile = new File([blob], generatedName, { type: blob.type || 'image/png' });
+ 
+       console.log(`[CameraProcessor] Triggering uploadImage for backend server: ${generatedName}`);
+       backendUploadResult = await this.uploadImage();
+       console.log('[CameraProcessor] Successfully saved backend upload response:', backendUploadResult);
+     } catch (uploadSetupErr) {
+       console.error('[CameraProcessor] Failed to execute backend upload payload:', uploadSetupErr);
+     }
+ 
+     if (bumpCounters) this.photosTaken += 1;
+ 
+     let finalizationClaimed = false;
+     const claimFinalization = () => {
+       if (finalizationClaimed) return false;
+       finalizationClaimed = true;
+       return true;
+     };
+ 
+     let inferenceCalled = false;
+     let userId: string | undefined = undefined;
+ 
+     // Authoritative check on User Identifiers
+     try {
+       const storage = await (this.imageStorage as any)._storage;
+       if (storage) {
+         userId = await storage.get('userID');
+       }
+     } catch (e) {
+       console.warn('[CameraProcessor] Failed to retrieve userID from storage context', e);
+     }
+ 
+     const sessionImgIndex = typeof (this.imageStorage as any).getNextOriginalImageNumber === 'function'
+       ? (this.imageStorage as any).getNextOriginalImageNumber(this.selectedSessionId || undefined)
+       : undefined;
+     const originalId = this.generateImageRecordId('original');
+ 
+     // Execution Core Worker
+     const doWork = async () => {
+       let prediction: any = null;
+ 
+       try {
+         inferenceCalled = true;
+         const tensor = await this.preprocessImage(dataUrl);
+         
+         try {
+           prediction = await this.crackDetectionService.runInference(tensor);
+         } catch (infErr) {
+           console.warn('Local client model inference timed out or faulted', infErr);
+         }
+       } catch (err) {
+         console.warn('Client-side preview preprocessing failed', err);
+       }
+ 
+       // --- CRITICAL FIX: LINK BACKEND RESULTS TO bounding_boxes ENGINE ---
+       // If local inference returned empty or missing results, inject the backend server's bounding boxes!
+       if (!prediction) {
+         prediction = { boxes: [] };
+       }
+       if (!prediction.boxes || prediction.boxes.length === 0) {
+         if (backendUploadResult && Array.isArray(backendUploadResult.bounding_boxes) && backendUploadResult.bounding_boxes.length > 0) {
+           console.log(`[CameraProcessor] Local model found 0 boxes. Feeding ${backendUploadResult.bounding_boxes.length} server boxes into drawing canvas engine.`);
+           prediction.boxes = backendUploadResult.bounding_boxes;
+         }
+       }
+ 
+       const maxBytes = 900_000;
+       const safeOriginal = await this.shrinkDataUrlToBytes(dataUrl, maxBytes, 4000);
+       const timestamp = new Date().toISOString();
+       const generatedFilename = this.buildSessionFilename(
+         !!(prediction.boxes && prediction.boxes.length > 0), 
+         timestamp, 
+         filename, 
+         sessionImgIndex
+       );
+ 
+       const entry: StoredImage = {
+         original: safeOriginal,
+         timestamp,
+         filename: generatedFilename,
+         fileImageName: filename || undefined,
+         prediction: prediction || undefined,
+         hasPrediction: !!(prediction.boxes && prediction.boxes.length > 0),
+         statusMessage: (prediction.boxes && prediction.boxes.length > 0) ? 'Prediction succeeded' : (inferenceCalled ? 'Prediction failed' : 'No prediction'),
+         userId: userId,
+         sessionId: this.selectedSessionId || undefined,
+         original_id: originalId,
+         cropped_id: originalId
+       };
+ 
+       // Canvas Rendering & Cropping Queue Loop
+       try {
+         if (prediction && Array.isArray(prediction.boxes) && prediction.boxes.length > 0) {
+           const rawBoxes = prediction.boxes;
+           const rawBoxes2 = backendUploadResult?.bounding_boxes || []; 
+ 
+           console.log("raw Boxes 2 ", rawBoxes2);
+           const boxesToDraw = rawBoxes.map((b: any) => ({
+             x: b.x,
+             y: b.y,
+             w: b.w,
+             h: b.h
+           }));
+ 
+           const boxesToDraw2 = rawBoxes2.map((b: any) => ({
+             x: b.x,
+             y: b.y,
+             w: b.w,
+             h: b.h
+           }));
+ 
+ 
+           const maskW = prediction.maskWidth || prediction.maskW || 128;
+           const maskH = prediction.maskHeight || prediction.maskH || 128;
+           const croppedCracks: any[] = [];
+ 
+           for (const box of boxesToDraw2) {
+             const croppedNumber = croppedCracks.length + 1;
+             try {
+               const crop = await this.cropBoxFromImage(dataUrl, box, maskW, maskH);
+               const cropTensor = await this.preprocessImage(crop);
+               const cropPrediction = await this.crackDetectionService.runInference(cropTensor);
+ 
+               croppedCracks.push({
+                 croppedNumber,
+                 image: crop,
+                 box,
+                 type: cropPrediction?.type ?? 'unknown',
+                 shape: cropPrediction?.shape ?? 'unknown',
+                 severity: cropPrediction?.severity ?? 'unknown'
+               });
+             } catch (cropErr) {
+               console.warn('[CameraProcessor] Failed handling specific bounding box cropping frame', cropErr);
+             }
+           }
+ 
+           console.log('[CROPS] Total bounding boxes cropped:', croppedCracks.length);
+ 
+           // Render canvas overlays
+           try {
+             const withBoxesDataUrl = await this.drawBoxesOnImage(dataUrl, boxesToDraw2, maskW, maskH);
+             const safeWithBoxes = await this.shrinkDataUrlToBytes(withBoxesDataUrl, maxBytes, 4000);
+             
+             (entry as any).withBoxes = safeWithBoxes;
+             (entry as any).boxes = boxesToDraw2;
+             (entry as any).croppedCracks = croppedCracks;
+             (entry as any).detectionMessage = `Rendered ${boxesToDraw2.length} detected crack box(es)`;
+             this.totalBoundingBoxesCreated += boxesToDraw2.length;
+           } catch (renderErr) {
+             console.warn('[CameraProcessor] drawBoxesOnImage canvas drawing threw exception:', renderErr);
+             (entry as any).withBoxes = safeOriginal;
+             (entry as any).boxes = [];
+             (entry as any).detectionMessage = 'Box rendering failed';
+           }
+         } else {
+           (entry as any).withBoxes = safeOriginal;
+           (entry as any).boxes = [];
+           (entry as any).detectionMessage = 'No boxes detected';
+         }
+       } catch (e) {
+         console.warn('[CameraProcessor] Context breakdown while handling canvas configurations', e);
+         (entry as any).withBoxes = safeOriginal;
+         (entry as any).boxes = [];
+         (entry as any).detectionMessage = 'Box rendering failed';
+       }
+ 
+       if (!claimFinalization()) {
+         console.warn('[CameraProcessor] Skipping storage write because processing state is already completed');
+         return entry;
+       }
+ 
+       // Authoritative Local Session Storing
+       await this.imageStorage.addImage(entry, this.selectedSessionId || undefined);
+ 
+       try {
+         if (this.selectedSessionId && typeof (this.imageStorage.addImageToSession) === 'function') {
+           this.imageStorage.addImageToSession(this.selectedSessionId, entry.filename);
+           this.sessionIsPristine = false;
+         }
+       } catch (e) {
+         console.warn('[CameraProcessor] Failed linking image identifier to active session key', e);
+       }
+ 
+       // Harmonized sub-crack persistence strategy (supports old and new signatures)
+       if (typeof (this as any).processAndStoreCroppedCracks === 'function') {
+         await (this as any).processAndStoreCroppedCracks(entry, filename, userId, sessionImgIndex, originalId);
+       } else if (Array.isArray((entry as any).croppedCracks) && (entry as any).croppedCracks.length > 0) {
+         const storedCroppedCracks = await this.persistCroppedCracksAsSessionImages(
+           (entry as any).croppedCracks, 
+           filename, 
+           entry.timestamp, 
+           userId, 
+           sessionImgIndex, 
+           originalId
+         );
+         (entry as any).croppedCracks = storedCroppedCracks;
+         try {
+           if (typeof (this.imageStorage as any).setEntryForImage === 'function') {
+             (this.imageStorage as any).setEntryForImage(entry.filename, entry);
+           }
+         } catch (setErr) {
+           console.warn('[CameraProcessor] Failed matching parent index to sub-crops object mapping', setErr);
+         }
+       }
+ 
+       try {
+         await this.refreshDisplayedImages();
+       } catch (e) {
+         console.warn('[CameraProcessor] Layout refreshed failed', e);
+       }
+ 
+       // Appending paths to scroll arrays from New Version
+       if (this.imagePaths) {
+         this.imagePaths.unshift({
+           original: entry.original,
+           withBoxes: (entry as any).withBoxes || entry.original,
+           fileName: entry.filename,
+           rawPrediction: entry.prediction,
+           original_id: (entry as any).original_id,
+           cropped_id: (entry as any).cropped_id,
+         });
+       }
+ 
+       // Sync data changes directly to Firestore if User ID is mapped
+       if (userId) {
+         try {
+           if (typeof this.imageStorage.saveImageToUser === 'function') {
+             await this.imageStorage.saveImageToUser(userId, entry);
+           }
+           if (this.selectedSessionId && typeof (this.imageStorage.getSession) === 'function' && typeof this.imageStorage.saveSessionToUser === 'function') {
+             const session = this.imageStorage.getSession(this.selectedSessionId);
+             if (session) await this.imageStorage.saveSessionToUser(userId, session);
+           }
+         } catch (e) {
+           console.warn('[CameraProcessor] Cloud storage transaction rejected', e);
+         }
+       }
+ 
+       if (bumpCounters) {
+         this.imagesUploadedThisSession += 1;
+       }
+       if (prediction && prediction.boxes && prediction.boxes.length > 0) {
+         this.photosProcessed += 1;
+       }
+       if (refreshCountsAfterSave) {
+         await this.updatePhotoCounts();
+       }
+       
+       await this.logCurrentSessionImageObjects();
+ 
+       // UI Frame alignment correction delay
+       setTimeout(() => {
+         if (typeof this.detectCenterThumbnail === 'function') {
+           this.detectCenterThumbnail();
+         }
+       }, 250);
+ 
+       return entry;
+     };
+ 
+     // Race Configuration setup
+     const overallTimeoutMs = 17_000;
+     try {
+       await Promise.race([
+         doWork(), 
+         new Promise((_, rej) => setTimeout(() => rej(new Error('processing-timeout')), overallTimeoutMs))
+       ]);
+     } catch (err: any) {
+       if (err && err.message === 'processing-timeout') {
+         console.warn('[CameraProcessor] Pipeline race completed with an overall processing timeout status.');
+ 
+         const maxBytes = 900_000;
+         const safeOriginal = await this.shrinkDataUrlToBytes(dataUrl, maxBytes, 4000);
+         const timestamp = new Date().toISOString();
+         const fallbackFilename = this.buildSessionFilename(false, timestamp, filename, sessionImgIndex);
+         
+         const entry: StoredImage = {
+           original: safeOriginal,
+           timestamp,
+           filename: fallbackFilename,
+           fileImageName: filename || undefined,
+           prediction: undefined,
+           hasPrediction: false,
+           statusMessage: inferenceCalled ? 'Prediction failed' : 'No prediction',
+           userId: userId,
+           sessionId: this.selectedSessionId || undefined,
+           original_id: originalId,
+           cropped_id: originalId
+         };
+ 
+         try {
+           if (claimFinalization()) {
+             await this.imageStorage.addImage(entry, this.selectedSessionId || undefined);
+             if (this.selectedSessionId && typeof (this.imageStorage.addImageToSession) === 'function') {
+               this.imageStorage.addImageToSession(this.selectedSessionId, entry.filename);
+               this.sessionIsPristine = false;
+             }
+             await this.refreshDisplayedImages();
+             
+             if (this.imagePaths) {
+               this.imagePaths.unshift({
+                 original: entry.original,
+                 withBoxes: entry.original,
+                 fileName: entry.filename,
+                 rawPrediction: entry.prediction,
+                 original_id: entry.original_id,
+                 cropped_id: entry.cropped_id,
+               });
+             }
+             this.imagesUploadedThisSession += 1;
+             await this.updatePhotoCounts();
+           }
+         } catch (fallbackErr) {
+           console.warn('[CameraProcessor] Aborting database write operations during fallback handling', fallbackErr);
+         }
+       } else {
+         console.warn('[CameraProcessor] processDataUrl encountered an runtime error:', err);
+       }
+     }
+   } finally {
+     // 3. CRITICAL FIX: The master finally block ensures that regardless of failures, 
+     // timeouts, or cloud crashes, the loader indicator is always turned off safely!
+     this.isProcessing = false;
+ 
+     if (typeof this.logCurrentSessionStateAfterProcessDataUrl === 'function') {
+       await this.logCurrentSessionStateAfterProcessDataUrl();
+     }
+     if (typeof this.logBoundingBoxStats === 'function') {
+       this.logBoundingBoxStats();
+     }
+   }
+ }
+ 
   
   /**
    * Draw bounding boxes on the supplied Base64 image and return a new Base64 image.
@@ -872,50 +1040,50 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
   }
 
   /** Always log active session + session images after processDataUrl finishes for id diagnostics. */
-  private async logCurrentSessionStateAfterProcessDataUrl(filename: string) {
-    try {
-      if (!this.selectedSessionId) {
-        console.log('[UploadImagePage] processDataUrl finished without active session:', { filename });
-        return;
-      }
+  // private async logCurrentSessionStateAfterProcessDataUrl(filename: string) {
+  //   try {
+  //     if (!this.selectedSessionId) {
+  //       console.log('[UploadImagePage] processDataUrl finished without active session:', { filename });
+  //       return;
+  //     }
 
-      const session = typeof (this.imageStorage as any).getSession === 'function'
-        ? (this.imageStorage as any).getSession(this.selectedSessionId)
-        : null;
+  //     const session = typeof (this.imageStorage as any).getSession === 'function'
+  //       ? (this.imageStorage as any).getSession(this.selectedSessionId)
+  //       : null;
 
-      const sessionImageObjects = session && Array.isArray(session.imageKeys)
-        ? session.imageKeys
-            .map((imageKey: string) => typeof (this.imageStorage as any).getEntryForImage === 'function'
-              ? (this.imageStorage as any).getEntryForImage(imageKey)
-              : null)
-            .filter((image: StoredImage | null) => !!image)
-        : [];
+  //     const sessionImageObjects = session && Array.isArray(session.imageKeys)
+  //       ? session.imageKeys
+  //           .map((imageKey: string) => typeof (this.imageStorage as any).getEntryForImage === 'function'
+  //             ? (this.imageStorage as any).getEntryForImage(imageKey)
+  //             : null)
+  //           .filter((image: StoredImage | null) => !!image)
+  //       : [];
 
-      console.log('[UploadImagePage] processDataUrl finished - current session object:', {
-        filename,
-        sessionId: this.selectedSessionId,
-        session,
-      });
+  //     console.log('[UploadImagePage] processDataUrl finished - current session object:', {
+  //       filename,
+  //       sessionId: this.selectedSessionId,
+  //       session,
+  //     });
 
-      console.log('[UploadImagePage] processDataUrl finished - current session image objects:', {
-        filename,
-        sessionId: this.selectedSessionId,
-        imageCount: sessionImageObjects.length,
-        images: sessionImageObjects,
-      });
+  //     console.log('[UploadImagePage] processDataUrl finished - current session image objects:', {
+  //       filename,
+  //       sessionId: this.selectedSessionId,
+  //       imageCount: sessionImageObjects.length,
+  //       images: sessionImageObjects,
+  //     });
 
-      console.log('[UploadImagePage] processDataUrl finished - id population snapshot:',
-        sessionImageObjects.map((img: any, index: number) => ({
-          index,
-          filename: img?.filename,
-          original_id: img?.original_id,
-          cropped_id: img?.cropped_id,
-        }))
-      );
-    } catch (e) {
-      console.warn('[UploadImagePage] Failed post-processDataUrl session logging', e);
-    }
-  }
+  //     console.log('[UploadImagePage] processDataUrl finished - id population snapshot:',
+  //       sessionImageObjects.map((img: any, index: number) => ({
+  //         index,
+  //         filename: img?.filename,
+  //         original_id: img?.original_id,
+  //         cropped_id: img?.cropped_id,
+  //       }))
+  //     );
+  //   } catch (e) {
+  //     console.warn('[UploadImagePage] Failed post-processDataUrl session logging', e);
+  //   }
+  // }
 
   /** Check croppedCracks, store them, and log counts for the current entry. */
   private async processAndStoreCroppedCracks(
@@ -1932,21 +2100,7 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
     }
   }
 
-  onFileSelected(event: Event) {
-    const input = event.target as HTMLInputElement;
-    if (!input) return;
-    const files = input.files;
-    if (!files || files.length === 0) return;
-
-    // Process multiple files sequentially to avoid overwhelming the device
-    const fileArray = Array.from(files);
-    (async () => {
-      for (const f of fileArray) {
-        await this.processFile(f);
-      }
-    })();
-  }
-
+ 
 
       /** Capture a frame, preprocess, run inference, and save result */
   async takePicture() {
@@ -2071,7 +2225,147 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
     }
   }
 
+  
+  // 1. Call Text Function
+  getFastApiMessage() {
+    this.http.get<{ message: string }>(`${this.baseUrl}/api/hello`).subscribe({
+      next: (response) => {
+        this.apiMessage = response.message;
+        this.apiStatus = response.message;
+        console.log("Api Message", this.apiMessage);
+        console.log('Root connection success:', response);
+        this.fastApiConnection = true;
+        console.log("Fast API Connection", this.fastApiConnection);
+      },
+      error: (err) => console.error('Error fetching message:', err)
+    });
+  }
+
+  
+  onFileSelected(event: any) {
+  // Access the native target files array safely
+  const fileList: FileList = event.target.files;
+  
+  if (fileList && fileList.length > 0) {
+    this.selectedFile = fileList[0];
+    // Inspect this log in your device/emulator console
+    console.log('Selected file object:', this.selectedFile); 
+  } else {
+    this.selectedFile = null;
+  }
 }
+
+//  onFileSelected(event: Event) {
+//     const input = event.target as HTMLInputElement;
+//     if (!input) return;
+//     const files = input.files;
+//     if (!files || files.length === 0) return;
+
+//     // Process multiple files sequentially to avoid overwhelming the device
+//     const fileArray = Array.from(files);
+//     (async () => {
+//       for (const f of fileArray) {
+//         await this.processFile(f);
+//       }
+//     })();
+//   }
+
+
+// uploadImage() {
+//   // Safety check: ensure something is selected and it behaves like a Blob/File
+//   if (!this.selectedFile || !(this.selectedFile instanceof Blob)) {
+//     console.error('Upload aborted: selectedFile is not a valid Blob/File object.', this.selectedFile);
+//     return;
+//   }
+
+//   const formData = new FormData();
+//   // Safe to append now that the instance type is verified
+//   formData.append('file', this.selectedFile, this.selectedFile.name);
+
+//   // 1. Update the expected response type to match your FastAPI return dictionary
+//   interface UploadResponse {
+//     message: string;
+//     rawImagePath: string;
+//     processedImagePath: string;
+//     bounding_boxes: { w: number; h: number; x: number; y: number }[];
+//   }
+
+
+//   this.http.post<UploadResponse>(`${this.baseUrl}/api/upload`, formData)
+//     .subscribe({
+//       next: (response) => {
+//         // this.uploadedImageUrl = `${this.baseUrl}${response.imagePath}`;
+
+//         // 2. Capture the paths and prefix them with your base URL
+//         this.uploadedImageUrl = `${this.baseUrl}${response.rawImagePath}`;
+//         // this.processedImageUrl = `${this.baseUrl}${response.processedImagePath}`;
+        
+//         // 3. Capture the bounding boxes array
+//         this.boxes = response.bounding_boxes;
+
+//         console.log("Success:", response.message);
+//         console.log("Found boxes:", this.boxes);
+
+//       },
+//       error: (err) => console.error('Error uploading image:', err)
+//     });
+// }
+
+async uploadImage(): Promise<UploadResponse | null> {
+  // Safety check: ensure something is selected and it behaves like a Blob/File
+  if (!this.selectedFile || !(this.selectedFile instanceof Blob)) {
+    console.error('Upload aborted: selectedFile is not a valid Blob/File object.', this.selectedFile);
+    return null;
+  }
+
+  const formData = new FormData();
+  formData.append('file', this.selectedFile, this.selectedFile.name);
+
+  try {
+    // Convert the Angular HTTP Observable to a Promise using firstValueFrom
+    const response = await firstValueFrom(
+      this.http.post<UploadResponse>(`${this.baseUrl}/api/upload`, formData)
+    );
+
+    // Capture the paths and prefix them with your base URL
+    this.uploadedImageUrl = `${this.baseUrl}${response.rawImagePath}`;
+    this.boxes = response.bounding_boxes;
+
+    console.log("Success:", response.message);
+    console.log("Found boxes:", this.boxes);
+
+    // Return the response object to whoever called this function
+    return response;
+
+  } catch (err) {
+    console.error('Error uploading image:', err);
+    return null;
+  }
+}
+
+public async logCurrentSessionStateAfterProcessDataUrl(): Promise<void> {
+  console.log('📊 [CameraPage2] Post-Processing Session State Snapshot:');
+  console.log(`   • Active Session ID: ${this.selectedSessionId || 'N/A'}`);
+  console.log(`   • Session Status:    ${this.sessionIsPristine ? 'Pristine (Empty)' : 'Dirty (Modified)'}`);
+  console.log(`   • Photos Taken:      ${this.photosTaken}`);
+  console.log(`   • Photos Processed:  ${this.photosProcessed}`);
+  console.log(`   • Uploads This Sess: ${this.imagesUploadedThisSession}`);
+  console.log(`   • Total Boxes Drawn: ${this.totalBoundingBoxesCreated}`);
+  console.log(`   • Remaining Queue:   ${this.imageQueue.length} item(s)`);
+
+  // Log underlying database tracking states if storage is initialized
+  if (this.selectedSessionId && typeof (this.imageStorage as any).getSessionImages === 'function') {
+    try {
+      const currentSessionItems = await (this.imageStorage as any).getSessionImages(this.selectedSessionId);
+      console.log(`   • Authority Count:  ${currentSessionItems?.length || 0} records in storage`);
+    } catch (e) {
+      console.warn('[CameraPage2] Could not append authoritative storage logs', e);
+    }
+  }
+}
+
+}
+
 
 // Small helper type used in class
 interface ScaledBox {

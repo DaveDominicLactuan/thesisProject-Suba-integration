@@ -9,7 +9,8 @@ import { CrackDetectionService } from '../services/crack-detection.service';
 import { ImageStorageService, StoredImage } from '../services/image-storage.service';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-
+import { HttpClient } from '@angular/common/http';
+import { firstValueFrom } from 'rxjs';
 // declare var ort: any;
 
 // ort.env.wasm.wasmPaths = 'assets/onnx/';
@@ -28,6 +29,19 @@ interface ScaledBox {
   h: number;
   original: BoundingBox;
 }
+
+interface QueueItem {
+  dataUrl: string;
+  filename: string;
+}
+
+interface UploadResponse {
+  message: string;
+  rawImagePath: string;
+  processedImagePath: string;
+  bounding_boxes: { w: number; h: number; x: number; y: number }[];
+}
+
 
 console.log('CameraPagePage component file loaded');
 
@@ -50,7 +64,9 @@ export class CameraPage2Page implements AfterViewInit {
   usingFrontCamera = false;
   mediaStream: MediaStream | null = null;
   extraText: string | null = null;
+  public imagePaths: any[] = [];
   isProcessing: boolean = true;
+  fastApiConnection: boolean = false;
   photosTaken = 0;
   private _photosProcessed = 0;
   // public transient flag used to show a short glow when a photo finishes processing
@@ -58,6 +74,9 @@ export class CameraPage2Page implements AfterViewInit {
   private _processedGlowTimer?: any;
   // glow duration in milliseconds (default 2.5s)
   glowDurationMs: number = 2500;
+  // Define an interface for items in the queue
+
+
   get photosProcessed() {
     return this._photosProcessed;
   }
@@ -119,11 +138,28 @@ export class CameraPage2Page implements AfterViewInit {
   cooldownMs: number = 500; // minimum time between pictures
   private backButtonSub: any; // hardware back handler
   private imageRecordCounter = 0;
+  // Add these inside your CameraPage2Page class declaration
+private imageQueue: QueueItem[] = [];
+private isQueueProcessing: boolean = false;
+
+apiMessage: string = 'Loading...';
+  apiStatus: string = '';
+  boxes: { w: number; h: number; x: number; y: number }[] = [];
+private apiUrl = 'https://your-vscode-forwarded-url.app.github.dev/';
+apiUrlWeb = 'http://127.0.0.1:8000/';
+apiUrlWeb2 = 'http://127.0.0.1:8000/helloWorld';
+private baseUrl = 'http://127.0.0.1:8000'; 
+  uploadedImageUrl: string = '';
+  selectedFile: File | null = null;
 
   private generateImageRecordId(prefix: 'original' | 'cropped'): string {
     this.imageRecordCounter += 1;
     return `${prefix}-${Date.now()}-${this.imageRecordCounter}`;
   }
+
+  private sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
 
   private updateLevelIndicatorState(absRollDeg: number): void {
     const threshold = this.isPhoneLeveled
@@ -227,7 +263,8 @@ export class CameraPage2Page implements AfterViewInit {
     private crackDetectionService: CrackDetectionService,
     private imageStorage: ImageStorageService,
     private route: ActivatedRoute,
-    private cdr: ChangeDetectorRef
+    private cdr: ChangeDetectorRef,
+    private http: HttpClient
   ) {
     this.requestCameraPermission();
     // subscribe to current image changes so UI can react when another page selects one
@@ -261,6 +298,7 @@ export class CameraPage2Page implements AfterViewInit {
     } catch (e) {
       console.warn('[CameraPage2] failed to register hardware back handler', e);
     }
+    this.getFastApiMessage();
 
     
     // initialize page: load images, sessions and create a new session for this visit
@@ -327,52 +365,103 @@ export class CameraPage2Page implements AfterViewInit {
    * Debounced via cooldown; updates session, counters, and lastPrediction.
    */
   async takePicture() {
-    // Prevent spamming the shutter: if currently cooling down, ignore
-    if (this.isCooldown) {
-      console.log('[CameraPage2] takePicture blocked: cooldown active');
-      return;
-    }
-
-    // When the level guide is active, only allow capture while the phone is level.
-    if (this.isLevelEnabled && !this.isPhoneLeveled) {
-      console.log('[CameraPage2] takePicture blocked: phone is not level');
-      return;
-    }
-
-    // Ensure UI shows processing state immediately
-    this.isProcessing = true;
-    // this.photosTaken += 1;
-
-    // Start cooldown immediately and show a short visual flash
-    this.isCooldown = true;
-    this.showFlash = true;
-    setTimeout(() => { this.showFlash = false; }, this.flashDurationMs);
-    setTimeout(() => { this.isCooldown = false; }, this.cooldownMs);
-
-    try {
-      const video = this.videoRef.nativeElement;
-      const canvas = this.canvasRef.nativeElement;
-      const ctx = canvas.getContext('2d')!;
-
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-
-      const dataUrl = canvas.toDataURL('image/png');
-
-      // Generate a descriptive filename for camera capture
-      const cameraFilename = `Camera-${Date.now()}.jpg`;
-      console.log(`📸 Captured image from camera: ${cameraFilename}` && console.log(dataUrl));
-      // Delegate processing to processDataUrl
-      await this.processDataUrl(dataUrl, cameraFilename);
-    } catch (err) {
-      console.error('Failed to take picture:', err);
-      alert('Failed to capture/process image. See console for details.');
-    } finally {
-      this.isProcessing = false;
-      this.logBoundingBoxStats();
-    }
+  // Prevent spamming the shutter: if currently cooling down, ignore
+  if (this.isCooldown) {
+    console.log('[CameraPage2] takePicture blocked: cooldown active');
+    return;
   }
+
+  // When the level guide is active, only allow capture while the phone is level.
+  if (this.isLevelEnabled && !this.isPhoneLeveled) {
+    console.log('[CameraPage2] takePicture blocked: phone is not level');
+    return;
+  }
+
+  // Start cooldown immediately and show a short visual flash
+  this.isCooldown = true;
+  this.showFlash = true;
+  setTimeout(() => { this.showFlash = false; }, this.flashDurationMs);
+  setTimeout(() => { this.isCooldown = false; }, this.cooldownMs);
+
+  try {
+    const video = this.videoRef.nativeElement;
+    const canvas = this.canvasRef.nativeElement;
+    const ctx = canvas.getContext('2d')!;
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+    const dataUrl = canvas.toDataURL('image/png');
+    // Generate a descriptive filename for camera capture
+    const cameraFilename = `Camera-${Date.now()}.jpg`;
+    console.log(`📸 Captured image from camera: ${cameraFilename}`);
+
+    // Delegate processing to the new sequential processQueue function
+    this.processQueue(dataUrl, cameraFilename);
+  } catch (err) {
+    console.error('Failed to take picture:', err);
+    alert('Failed to capture image. See console for details.');
+  } finally {
+    this.logBoundingBoxStats();
+  }
+}
+  /**
+ * Helper function to print the current state of the queue.
+ * Triggered whenever an item is added or popped for processing.
+ */
+private printQueueStatus(action: 'added' | 'sent_to_processing', item: QueueItem): void {
+  console.log(`=== 📋 [Queue Update: ${action.toUpperCase()}] ===`);
+  console.log(`Target File: ${item.filename}`);
+  console.log(`Pending in Queue: ${this.imageQueue.length} image(s)`);
+  console.log(`Current Queue Order:`, this.imageQueue.map(q => q.filename));
+  console.log(`======================================`);
+}
+
+/**
+ * Accepts a captured or selected image, appends it to the queue, 
+ * and initiates processing if the queue processor is idle.
+ */
+async processQueue(dataUrl: string, filename: string): Promise<void> {
+  const newItem: QueueItem = { dataUrl, filename };
+  this.imageQueue.push(newItem);
+
+  // Increment photosTaken immediately so UI spinners reflect the action instantly
+  this.photosTaken += 1;
+
+  // Print queue logs upon item addition
+  this.printQueueStatus('added', newItem);
+
+  // If the background processor isn't running, start it
+  if (!this.isQueueProcessing) {
+    await this.runQueueProcessor();
+  }
+}
+
+/**
+ * Sequentially shifts items out of the queue and processes them one by one.
+ */
+private async runQueueProcessor(): Promise<void> {
+  if (this.imageQueue.length === 0) {
+    this.isQueueProcessing = false;
+    return;
+  }
+
+  this.isQueueProcessing = true;
+  const nextItem = this.imageQueue.shift()!;
+
+  // Print queue logs when an item is sent to processDataUrl
+  this.printQueueStatus('sent_to_processing', nextItem);
+
+  try {
+    // Pass bumpCounters as false because we incremented photosTaken at the time of queueing
+    await this.processDataUrl(nextItem.dataUrl, nextItem.filename, false);
+  } catch (error) {
+    console.error(`[Queue Error] Processing failed for ${nextItem.filename}:`, error);
+  } finally {
+    // Process the next image in line recursively
+    await this.runQueueProcessor();
+  }
+}
 
   /** Create a new session for this camera visit and set it active */
   /**
@@ -461,57 +550,672 @@ export class CameraPage2Page implements AfterViewInit {
    * Pick a photo from device gallery (Capacitor) and process it.
    * if successful, calls processDataUrl() which runs inference and stores results.
    */
-  async pickImagesMobile() {
-    try {
-      const photo = await Camera.getPhoto({
-        quality: 80,
-        allowEditing: false,
-        resultType: CameraResultType.Base64,
-        source: CameraSource.Photos
-      });
-
-      if (photo && photo.base64String) {
-        //create dataURL and filename
-        const dataUrl = `data:image/jpeg;base64,${photo.base64String}`;
-        const galleryFilename = `Gallery-${Date.now()}.jpg`;
-        console.log(`📸 Picked image from gallery: ${galleryFilename}` && console.log(photo)  && console.log(dataUrl));
-        // reuse existing processing pipeline with a 10s overall timeout
-        try {
-          await this.processDataUrl(dataUrl, galleryFilename);
-        } catch (e) {
-          // processDataUrl handles its own timeout/cleanup, but catch here to avoid unhandled rejections
-          console.warn('[CameraPage2] pickImagesMobile: processing failed or timed out', e);
-        }
-      } else {
-        //no photo selected or errror
-        console.warn('pickImagesMobile: no photo returned');
-      }
-    } catch (e) {
-      //error picking image
-      console.warn('pickImagesMobile failed', e);
+ async pickImagesMobile() {
+  try {
+    const photo = await Camera.getPhoto({
+      quality: 80,
+      allowEditing: false,
+      resultType: CameraResultType.Base64,
+      source: CameraSource.Photos
+    });
+    if (photo && photo.base64String) {
+      // Create dataURL and filename
+      const dataUrl = `data:image/jpeg;base64,${photo.base64String}`;
+      const galleryFilename = `Gallery-${Date.now()}.jpg`;
+      console.log(`📸 Picked image from gallery: ${galleryFilename}`);
+      
+      // Send directly to the queue pipeline
+      this.processQueue(dataUrl, galleryFilename);
+    } else {
+      console.warn('pickImagesMobile: no photo returned');
     }
+  } catch (e) {
+    console.warn('pickImagesMobile failed', e);
   }
+}
 
   /**
    * End-to-end pipeline for a provided dataUrl: preprocess → inference → store.
    * Updates session state via ImageStorageService and refreshes thumbnails/counters.
    */
-  async processDataUrl(
-    dataUrl: string,
-    originalName?: string,
-    bumpCounters: boolean = true,
-    addToCapturedImages: boolean = true,
-    refreshCountsAfterSave: boolean = true
-  ) {
-    // Log the current image being processed
-    console.log(`🖼️ [CameraPage2] Current image name is: ${originalName || 'Unknown'}`);
-    // mimic upload-image-page behaviour: preprocess, run inference, store
-    if (addToCapturedImages) {
-      this.capturedImages.unshift(dataUrl);
+  // async processDataUrl(
+  //   dataUrl: string,
+  //   originalName?: string,
+  //   bumpCounters: boolean = true,
+  //   addToCapturedImages: boolean = true,
+  //   refreshCountsAfterSave: boolean = true
+  // ) {
+  //   // Log the current image being processed
+  //   console.log(`🖼️ [CameraPage2] Current image name is: ${originalName || 'Unknown'}`);
+  //   // mimic upload-image-page behaviour: preprocess, run inference, store
+  //   if (addToCapturedImages) {
+  //     this.capturedImages.unshift(dataUrl);
+  //   }
+  //   // bump counters early so spinner shows while processing unless caller already did so
+  //   if (bumpCounters) this.photosTaken += 1;
+  //   this.isProcessing = true;
+  //   let finalizationClaimed = false;
+  //   const claimFinalization = () => {
+  //     if (finalizationClaimed) return false;
+  //     finalizationClaimed = true;
+  //     return true;
+  //   };
+
+  //   const maxBytes = 900_000;
+
+  //   // Track whether inference was started so if timeout, we can choose the proper status message to store/show
+  //   let inferenceAttempted = false;
+    
+  //   // Retrieve the stored userID from storage
+  //   let userId: string | undefined = undefined;
+  //   try {
+  //     const storage = await (this.imageStorage as any)._storage;
+  //     if (storage) {
+  //       userId = await storage.get('userID');
+  //     }
+  //   } catch (e) {
+  //     console.warn('[CameraPage2] processDataUrl: Failed to retrieve userID from storage', e);
+  //   }
+
+  //   const sessionImgIndex = typeof (this.imageStorage as any).getNextOriginalImageNumber === 'function'
+  //     ? (this.imageStorage as any).getNextOriginalImageNumber(this.selectedSessionId || undefined)
+  //     : undefined;
+  //   const originalId = this.generateImageRecordId('original');
+    
+  //   //preprocess
+  //   const doWork = async () => {
+  //     let prediction: any = null;
+  //     try {
+  //       inferenceAttempted = true;
+  //       //converts the img dataURL into exact Float32 tensor the model expects
+  //       const tensor = await this.preprocessImage(dataUrl);
+  //       // guard inference with timeout to avoid device hangs
+  //       const inferenceTimeoutMs = 20_000; // (set timeout, to 20sinternal inference guard)
+  //       try {
+  //         inferenceAttempted = true;
+  //         prediction = await Promise.race([
+  //           this.crackDetectionService.runInference(tensor),
+  //           new Promise((_, rej) => setTimeout(() => rej(new Error('inference-timeout')), inferenceTimeoutMs))
+  //         ]);
+  //       } catch (infErr) {
+  //         console.warn('Inference error/timeout during upload processing', infErr);
+  //         prediction = null;
+  //       }
+  //     } catch (e) {
+  //       console.warn('Inference failed during upload processing', e);
+  //     }
+
+
+  //     // Prepare storage entry or build StoredImage entry
+  //     const safeOriginal = await this.shrinkDataUrlToBytes(dataUrl, maxBytes, 4000);
+  //     const timestamp = new Date().toISOString();
+  //     const generatedFilename = this.buildSessionFilename(!!prediction, timestamp, originalName, sessionImgIndex);
+  //     const entry: StoredImage = {
+  //       original: safeOriginal,
+  //       timestamp,
+  //       filename: generatedFilename,
+  //       fileImageName: originalName || undefined,
+  //       prediction: prediction || undefined,
+  //       hasPrediction: !!prediction,
+  //       statusMessage: prediction ? 'Prediction succeeded' : (inferenceAttempted ? 'Prediction failed' : 'No prediction'),
+  //       userId: userId,
+  //       sessionId: this.selectedSessionId || undefined,
+  //       original_id: originalId,
+  //       cropped_id: originalId
+  //     };
+
+  //     // If the model returned bounding boxes, create a "withBoxes" image, attach boxes,
+  //     // and persist cropped crack images for each detected box.
+  //     try {
+  //       if (prediction && Array.isArray(prediction.boxes) && prediction.boxes.length > 0) {
+  //         const rawBoxes = prediction.boxes;
+
+  //         const boxesToDraw = rawBoxes.map((b: any) => ({
+  //           x: b.x,
+  //           y: b.y,
+  //           w: b.w,
+  //           h: b.h
+  //         }));
+
+  //         const maskW = prediction.maskWidth || prediction.maskW || 128;
+  //         const maskH = prediction.maskHeight || prediction.maskH || 128;
+
+  //         const croppedCracks: any[] = [];
+
+  //         for (const box of boxesToDraw) {
+  //           const croppedNumber = croppedCracks.length + 1;
+  //           try {
+  //             const crop = await this.cropBoxFromImage(dataUrl, box, maskW, maskH);
+  //             const cropTensor = await this.preprocessImage(crop);
+  //             const cropPrediction = await this.crackDetectionService.runInference(cropTensor);
+
+  //             croppedCracks.push({
+  //               croppedNumber,
+  //               image: crop,
+  //               box,
+  //               type: cropPrediction?.type ?? 'unknown',
+  //               shape: cropPrediction?.shape ?? 'unknown',
+  //               severity: cropPrediction?.severity ?? 'unknown'
+  //             });
+  //           } catch (cropErr) {
+  //             console.warn('[CameraPage2] Failed processing one cropped crack, continuing', cropErr);
+  //           }
+  //         }
+
+  //         console.log('[CROPS] Total crops:', croppedCracks.length);
+
+  //        // try to create withBoxes image with drawn boxes based on the bouding box data
+  //         try {
+  //           const withBoxesDataUrl = await this.drawBoxesOnImage(dataUrl, boxesToDraw, maskW, maskH);
+  //           const safeWithBoxes = await this.shrinkDataUrlToBytes(withBoxesDataUrl, maxBytes, 4000);
+  //           (entry as any).withBoxes = safeWithBoxes;
+  //           (entry as any).boxes = boxesToDraw;
+  //           (entry as any).croppedCracks = croppedCracks;
+  //           (entry as any).detectionMessage = `Rendered ${boxesToDraw.length} detected crack box(es)`;
+  //           this.totalBoundingBoxesCreated += boxesToDraw.length;
+  //           console.log('CROPPED CRACKS', croppedCracks);
+  //         } catch (renderErr) {
+  //           console.warn('[CameraPage2] drawBoxesOnImage failed', renderErr);
+  //           (entry as any).withBoxes = safeOriginal;
+  //           (entry as any).boxes = [];
+  //           (entry as any).detectionMessage = 'Box rendering failed';
+  //         }
+  //       } else {
+  //         (entry as any).withBoxes = safeOriginal;
+  //         (entry as any).boxes = [];
+  //         (entry as any).detectionMessage = 'No boxes detected';
+  //       }
+  //     } catch (e) {
+  //       console.warn('[CameraPage2] Failed to create withBoxes image', e);
+  //       (entry as any).withBoxes = safeOriginal;
+  //       (entry as any).boxes = [];
+  //       (entry as any).detectionMessage = 'Box rendering failed';
+  //     }
+  //     //store image entry via image storage service, but only once per invocation
+  //     if (!claimFinalization()) {
+  //       console.warn('[CameraPage2] Skipping persist because processing was already finalized');
+  //       return entry;
+  //     }
+  //     await this.imageStorage.addImage(entry, this.selectedSessionId || undefined);
+  //     try {
+  //       //add to current session in use and set sessioIsPristine to false, then refresh displayed images
+  //       if (this.selectedSessionId && typeof (this.imageStorage.addImageToSession) === 'function') {
+  //         this.imageStorage.addImageToSession(this.selectedSessionId, entry.filename);
+  //         this.sessionIsPristine = false; // Mark session as no longer pristine
+  //       }
+  //     } catch (e) {
+  //       console.warn('[CameraPage2] Failed to add parent image to session', e);
+  //     }
+  //     if (Array.isArray((entry as any).croppedCracks) && (entry as any).croppedCracks.length > 0) {
+  //       const storedCroppedCracks = await this.persistCroppedCracksAsSessionImages((entry as any).croppedCracks, originalName || entry.fileImageName || entry.filename, entry.timestamp, userId, sessionImgIndex, originalId);
+  //       (entry as any).croppedCracks = storedCroppedCracks;
+  //       try {
+  //         if (typeof (this.imageStorage as any).setEntryForImage === 'function') {
+  //           (this.imageStorage as any).setEntryForImage(entry.filename, entry);
+  //         }
+  //       } catch (setErr) {
+  //         console.warn('[CameraPage2] Failed to update stored parent entry with cropped cracks', setErr);
+  //       }
+  //     }
+  //     // Debug: log the full entry after processing and storage
+  //     console.log('[CameraPage2] processDataUrl saved entry:', entry);
+  //     try {
+  //       await this.refreshDisplayedImages();
+  //     } catch (e) {
+  //       console.warn('[CameraPage2] Failed to refresh display', e);
+  //     }
+  //     // Count only true new uploads/captures as session additions.
+  //     if (bumpCounters) {
+  //       this.imagesUploadedThisSession += 1;
+  //     }
+  //     // update UI counters from authoritative storage
+  //     if (prediction) this.photosProcessed += 1;
+  //     if (refreshCountsAfterSave) {
+  //       await this.updatePhotoCounts();
+  //     }
+  //     await this.logCurrentSessionImageObjects();
+  //     return entry;
+  //   };
+
+  //   // Overall processing timeout: 10s, if the process did not finish in under 10s
+  //   const overallTimeoutMs = 10_000;
+  //   try {
+  //     await Promise.race([doWork(), new Promise((_, rej) => setTimeout(() => rej(new Error('processing-timeout')), overallTimeoutMs))]);
+  //   } catch (err: any) {
+  //     if (err && err.message === 'processing-timeout') {
+  //       console.warn('[CameraPage2] processDataUrl overall timeout');
+  //       // If we timed out, persist a fallback entry indicating failure/no-prediction
+  //       const safeOriginal = await this.shrinkDataUrlToBytes(dataUrl, maxBytes, 4000);
+  //       const timestamp = new Date().toISOString();
+  //       const generatedFilename = this.buildSessionFilename(false, timestamp, originalName, sessionImgIndex);
+  //       const entry: StoredImage = {
+  //         original: safeOriginal,
+  //         timestamp,
+  //         filename: generatedFilename,
+  //         fileImageName: originalName || undefined,
+  //         prediction: undefined,
+  //         hasPrediction: false,
+  //         statusMessage: inferenceAttempted ? 'Prediction failed' : 'No prediction',
+  //         userId: userId,
+  //         sessionId: this.selectedSessionId || undefined,
+  //         original_id: originalId,
+  //         cropped_id: originalId
+  //       };
+  //       try {
+  //         if (!claimFinalization()) {
+  //           console.warn('[CameraPage2] Skipping timeout fallback because processing was already finalized');
+  //           return;
+  //         }
+  //         await this.imageStorage.addImage(entry, this.selectedSessionId || undefined);
+  //         try {
+  //           if (this.selectedSessionId && typeof (this.imageStorage.addImageToSession) === 'function') {
+  //             this.imageStorage.addImageToSession(this.selectedSessionId, entry.filename);
+  //             this.sessionIsPristine = false; // Mark session as no longer pristine
+  //           }
+  //           await this.refreshDisplayedImages();
+  //         } catch (err) {
+  //           console.warn('[CameraPage2] Failed to add timeout fallback image to session', err);
+  //         }
+  //         // Increment upload counter for this session
+  //         this.imagesUploadedThisSession += 1;
+  //         // update UI counters from authoritative storage
+  //         await this.updatePhotoCounts();
+  //         await this.logCurrentSessionImageObjects();
+  //       } catch (e) {
+  //         console.warn('[CameraPage2] Failed to persist fallback entry after timeout', e);
+  //       }
+  //     } else {
+  //       console.warn('[CameraPage2] processDataUrl failed', err);
+  //     }
+  //   } finally {
+  //     this.isProcessing = false;
+  //     // Log cumulative bounding box count after processing
+  //     this.logBoundingBoxStats();
+  //   }
+  // }
+// async processDataUrl(
+//   dataUrl: string,
+//   originalName?: string,
+//   bumpCounters: boolean = true,
+//   addToCapturedImages: boolean = true,
+//   refreshCountsAfterSave: boolean = true
+// ) {
+//   // Log the current image being processed
+//   console.log(`🖼️ [CameraPage2] Current image name is: ${originalName || 'Unknown'}`);
+
+//   // Variable to store the backend upload response object inside this scope
+//   let backendUploadResult: UploadResponse | null = null;
+
+//   // --- NEW UPLOAD FLOW START ---
+//   try {
+//     // 1. Convert the base64 dataUrl into a Blob
+//     const response = await fetch(dataUrl);
+//     const blob = await response.blob();
+
+//     // 2. Create a File object so uploadImage() has access to a .name property
+//     const filename = originalName || `capture-${Date.now()}.png`;
+//     this.selectedFile = new File([blob], filename, { type: blob.type || 'image/png' });
+
+//     // 3. Trigger the upload, await it, and store the object
+//     console.log(`[CameraPage2] Triggering uploadImage for: ${filename}`);
+//     backendUploadResult = await this.uploadImage();
+    
+//     console.log('[CameraPage2] Successfully saved upload response object:', backendUploadResult);
+//   } catch (uploadSetupErr) {
+//     console.error('[CameraPage2] Failed to convert dataUrl and trigger upload:', uploadSetupErr);
+//   }
+//   // --- NEW UPLOAD FLOW END ---
+
+//   // mimic upload-image-page behaviour: preprocess, run inference, store
+//   if (addToCapturedImages) {
+//     this.capturedImages.unshift(dataUrl);
+//   }
+//   // bump counters early so spinner shows while processing unless caller already did so
+//   if (bumpCounters) this.photosTaken += 1;
+
+//   this.isProcessing = true;
+//   let finalizationClaimed = false;
+//   const claimFinalization = () => {
+//     if (finalizationClaimed) return false;
+//     finalizationClaimed = true;
+//     return true;
+//   };
+
+//   const maxBytes = 900_000;
+
+//   // Track whether inference was started so if timeout, we can choose the proper status message to store/show
+//   let inferenceAttempted = false;
+
+//   // Retrieve the stored userID from storage
+//   let userId: string | undefined = undefined;
+
+//   try {
+//     const storage = await (this.imageStorage as any)._storage;
+
+//     if (storage) {
+//       userId = await storage.get('userID');
+//     }
+//   } catch (e) {
+//     console.warn('[CameraPage2] processDataUrl: Failed to retrieve userID from storage', e);
+//   }
+
+//   const sessionImgIndex = typeof (this.imageStorage as any).getNextOriginalImageNumber === 'function'
+//     ? (this.imageStorage as any).getNextOriginalImageNumber(this.selectedSessionId || undefined)
+//     : undefined;
+//   const originalId = this.generateImageRecordId('original');
+
+//   //preprocess
+//   const doWork = async () => {
+//     let prediction: any = null;
+
+//     try {
+//       inferenceAttempted = true;
+
+//       //converts the img dataURL into exact Float32 tensor the model expects
+//       const tensor = await this.preprocessImage(dataUrl);
+
+//       // guard inference with timeout to avoid device hangs
+//       const inferenceTimeoutMs = 20_000;
+
+//       // (set timeout, to 20sinternal inference guard)
+//       try {
+//         inferenceAttempted = true;
+
+//         prediction = await Promise.race([
+//           this.crackDetectionService.runInference(tensor),
+//           new Promise((_, rej) => setTimeout(() => rej(new Error('inference-timeout')), inferenceTimeoutMs))
+//         ]);
+
+//       } catch (infErr) {
+//         console.warn('Inference error/timeout during upload processing', infErr);
+//         prediction = null;
+//       }
+//     } catch (e) {
+//       console.warn('Inference failed during upload processing', e);
+//     }
+
+
+//     // Prepare storage entry or build StoredImage entry
+//     const safeOriginal = await this.shrinkDataUrlToBytes(dataUrl, maxBytes, 4000);
+
+//     const timestamp = new Date().toISOString();
+//     const generatedFilename = this.buildSessionFilename(!!prediction, timestamp, originalName, sessionImgIndex);
+
+//     const entry: StoredImage = {
+//       original: safeOriginal,
+//       timestamp,
+//       filename: generatedFilename,
+//       fileImageName: originalName || undefined,
+//       prediction: prediction || undefined,
+//       hasPrediction: !!prediction,
+//       statusMessage: prediction ? 'Prediction succeeded' : (inferenceAttempted ? 'Prediction failed' : 'No prediction'),
+//       userId: userId,
+//       sessionId: this.selectedSessionId || undefined,
+//       original_id: originalId,
+//       cropped_id: originalId
+//     };
+
+//     // If the model returned bounding boxes, create a "withBoxes" image, attach boxes,
+//     // and persist cropped crack images for each detected box.
+
+//     try {
+//       if (prediction && Array.isArray(prediction.boxes) && prediction.boxes.length > 0) {
+//         const rawBoxes = prediction.boxes;
+
+//         const boxesToDraw = rawBoxes.map((b: any) => ({
+//           x: b.x,
+//           y: b.y,
+//           w: b.w,
+//           h: b.h
+//         }));
+
+//         const maskW = prediction.maskWidth || prediction.maskW || 128;
+//         const maskH = prediction.maskHeight || prediction.maskH || 128;
+
+//         const croppedCracks: any[] = [];
+
+//         for (const box of boxesToDraw) {
+//           const croppedNumber = croppedCracks.length + 1;
+
+//           try {
+//             const crop = await this.cropBoxFromImage(dataUrl, box, maskW, maskH);
+
+//             const cropTensor = await this.preprocessImage(crop);
+//             const cropPrediction = await this.crackDetectionService.runInference(cropTensor);
+
+//             croppedCracks.push({
+//               croppedNumber,
+//               image: crop,
+//               box,
+//               type: cropPrediction?.type ?? 'unknown',
+//               shape: cropPrediction?.shape ?? 'unknown',
+//               severity: cropPrediction?.severity ?? 'unknown'
+//             });
+
+//           } catch (cropErr) {
+//             console.warn('[CameraPage2] Failed processing one cropped crack, continuing', cropErr);
+//           }
+//         }
+
+//         console.log('[CROPS] Total crops:', croppedCracks.length);
+
+//         // try to create withBoxes image with drawn boxes based on the bouding box data
+//         try {
+//           const withBoxesDataUrl = await this.drawBoxesOnImage(dataUrl, boxesToDraw, maskW, maskH);
+
+//           const safeWithBoxes = await this.shrinkDataUrlToBytes(withBoxesDataUrl, maxBytes, 4000);
+//           (entry as any).withBoxes = safeWithBoxes;
+//           (entry as any).boxes = boxesToDraw;
+//           (entry as any).croppedCracks = croppedCracks;
+//           (entry as any).detectionMessage = `Rendered ${boxesToDraw.length} detected crack box(es)`;
+//           this.totalBoundingBoxesCreated += boxesToDraw.length;
+//           console.log('CROPPED CRACKS', croppedCracks);
+
+//         } catch (renderErr) {
+//           console.warn('[CameraPage2] drawBoxesOnImage failed', renderErr);
+
+//           (entry as any).withBoxes = safeOriginal;
+//           (entry as any).boxes = [];
+//           (entry as any).detectionMessage = 'Box rendering failed';
+
+//         }
+//       } else {
+//         (entry as any).withBoxes = safeOriginal;
+
+//         (entry as any).boxes = [];
+//         (entry as any).detectionMessage = 'No boxes detected';
+
+//       }
+//     } catch (e) {
+//       console.warn('[CameraPage2] Failed to create withBoxes image', e);
+
+//       (entry as any).withBoxes = safeOriginal;
+//       (entry as any).boxes = [];
+//       (entry as any).detectionMessage = 'Box rendering failed';
+
+//     }
+//     //store image entry via image storage service, but only once per invocation
+//     if (!claimFinalization()) {
+//       console.warn('[CameraPage2] Skipping persist because processing was already finalized');
+//       return entry;
+//     }
+//     await this.imageStorage.addImage(entry, this.selectedSessionId || undefined);
+
+//     try {
+//       //add to current session in use and set sessioIsPristine to false, then refresh displayed images
+//       if (this.selectedSessionId && typeof (this.imageStorage.addImageToSession) === 'function') {
+//         this.imageStorage.addImageToSession(this.selectedSessionId, entry.filename);
+
+//         this.sessionIsPristine = false; // Mark session as no longer pristine
+//       }
+//     } catch (e) {
+//       console.warn('[CameraPage2] Failed to add parent image to session', e);
+
+//     }
+//     if (Array.isArray((entry as any).croppedCracks) && (entry as any).croppedCracks.length > 0) {
+//       const storedCroppedCracks = await this.persistCroppedCracksAsSessionImages((entry as any).croppedCracks, originalName || entry.fileImageName || entry.filename, entry.timestamp, userId, sessionImgIndex, originalId);
+
+//       (entry as any).croppedCracks = storedCroppedCracks;
+//       try {
+//         if (typeof (this.imageStorage as any).setEntryForImage === 'function') {
+//           (this.imageStorage as any).setEntryForImage(entry.filename, entry);
+//         }
+//       } catch (setErr) {
+//         console.warn('[CameraPage2] Failed to update stored parent entry with cropped cracks', setErr);
+
+//       }
+//     }
+//     // Debug: log the full entry after processing and storage
+//     console.log('[CameraPage2] processDataUrl saved entry:', entry);
+
+//     try {
+//       await this.refreshDisplayedImages();
+//     } catch (e) {
+//       console.warn('[CameraPage2] Failed to refresh display', e);
+//     }
+//     // Count only true new uploads/captures as session additions.
+//     if (bumpCounters) {
+//       this.imagesUploadedThisSession += 1;
+//     }
+//     // update UI counters from authoritative storage
+//     if (prediction) this.photosProcessed += 1;
+
+//     if (refreshCountsAfterSave) {
+//       await this.updatePhotoCounts();
+//     }
+//     await this.logCurrentSessionImageObjects();
+
+//     return entry;
+//   };
+
+//   // Overall processing timeout: 10s, if the process did not finish in under 10s
+//   const overallTimeoutMs = 10_000;
+//   try {
+//     await Promise.race([doWork(), new Promise((_, rej) => setTimeout(() => rej(new Error('processing-timeout')), overallTimeoutMs))]);
+//   } catch (err: any) {
+//     if (err && err.message === 'processing-timeout') {
+//       console.warn('[CameraPage2] processDataUrl overall timeout');
+
+//       // If we timed out, persist a fallback entry indicating failure/no-prediction
+//       const safeOriginal = await this.shrinkDataUrlToBytes(dataUrl, maxBytes, 4000);
+//       const timestamp = new Date().toISOString();
+//       const generatedFilename = this.buildSessionFilename(false, timestamp, originalName, sessionImgIndex);
+//       const entry: StoredImage = {
+//         original: safeOriginal,
+//         timestamp,
+//         filename: generatedFilename,
+//         fileImageName: originalName || undefined,
+//         prediction: undefined,
+//         hasPrediction: false,
+//         statusMessage: inferenceAttempted ? 'Prediction failed' : 'No prediction',
+//         userId: userId,
+//         sessionId: this.selectedSessionId || undefined,
+//         original_id: originalId,
+//         cropped_id: originalId
+//       };
+//       try {
+//         if (!claimFinalization()) {
+//           console.warn('[CameraPage2] Skipping timeout fallback because processing was already finalized');
+//           return;
+//         }
+//         await this.imageStorage.addImage(entry, this.selectedSessionId || undefined);
+
+//         try {
+//           if (this.selectedSessionId && typeof (this.imageStorage.addImageToSession) === 'function') {
+//             this.imageStorage.addImageToSession(this.selectedSessionId, entry.filename);
+
+//             this.sessionIsPristine = false; // Mark session as no longer pristine
+//           }
+//           await this.refreshDisplayedImages();
+
+//         } catch (err) {
+//           console.warn('[CameraPage2] Failed to add timeout fallback image to session', err);
+//         }
+//         // Increment upload counter for this session
+//         this.imagesUploadedThisSession += 1;
+
+//         // update UI counters from authoritative storage
+//         await this.updatePhotoCounts();
+//         await this.logCurrentSessionImageObjects();
+
+//       } catch (e) {
+//         console.warn('[CameraPage2] Failed to persist fallback entry after timeout', e);
+
+//       }
+//     } else {
+//       console.warn('[CameraPage2] processDataUrl failed', err);
+//     }
+//   } finally {
+//     this.isProcessing = false;
+//     // Log cumulative bounding box count after processing
+//     this.logBoundingBoxStats();
+//   }
+// }
+
+
+  
+async processDataUrl(
+  dataUrl: string,
+  filename: string, // Standardized signature parameter name
+  bumpCounters: boolean = true,
+  addToCapturedImages: boolean = true,
+  refreshCountsAfterSave: boolean = true
+) {
+  // Log the current image being processed
+  console.log(`\ud83d\udcfc [CameraProcessor] Current image name is: ${filename}`);
+
+  // 1. CRITICAL FIX: Turn on processing immediately so the UI spinner displays
+  // for the entire duration (including backend upload + tensor calculations)
+  this.isProcessing = true;
+
+  // New UI side-effects: update preview panel and prepend to thumbnail array
+  this.imagePreview = dataUrl;
+  if (addToCapturedImages) {
+    this.capturedImages.unshift(dataUrl);
+  }
+
+  // Detect center thumbnails after UI updates
+  setTimeout(() => {
+    if (typeof this.detectCenterThumbnail === 'function') {
+      this.detectCenterThumbnail();
     }
-    // bump counters early so spinner shows while processing unless caller already did so
+  }, 60);
+
+  // Yield execution to the browser thread so the spinner can animate fluidly before heavy work
+  if (typeof this.sleep === 'function') {
+    await this.sleep(50);
+  } else {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  
+  try {
+    this.cdr.detectChanges();
+  } catch (e) {
+    /* ignore change detection spikes */
+  }
+
+  // Scope the backend result variable
+  let backendUploadResult: UploadResponse | null = null;
+
+  // 2. CRITICAL FIX: Wrap the rest of the function in a master try block to guarantee the finally block clears the spinner
+  try {
+    // --- BACKEND UPLOAD FLOW ---
+    try {
+      const response = await fetch(dataUrl);
+      const blob = await response.blob();
+      const generatedName = filename || `capture-${Date.now()}.png`;
+      
+      this.selectedFile = new File([blob], generatedName, { type: blob.type || 'image/png' });
+
+      console.log(`[CameraProcessor] Triggering uploadImage for backend server: ${generatedName}`);
+      backendUploadResult = await this.uploadImage();
+      console.log('[CameraProcessor] Successfully saved backend upload response:', backendUploadResult);
+    } catch (uploadSetupErr) {
+      console.error('[CameraProcessor] Failed to execute backend upload payload:', uploadSetupErr);
+    }
+
     if (bumpCounters) this.photosTaken += 1;
-    this.isProcessing = true;
+
     let finalizationClaimed = false;
     const claimFinalization = () => {
       if (finalizationClaimed) return false;
@@ -519,73 +1223,84 @@ export class CameraPage2Page implements AfterViewInit {
       return true;
     };
 
-    const maxBytes = 900_000;
-
-    // Track whether inference was started so if timeout, we can choose the proper status message to store/show
-    let inferenceAttempted = false;
-    
-    // Retrieve the stored userID from storage
+    let inferenceCalled = false;
     let userId: string | undefined = undefined;
+
+    // Authoritative check on User Identifiers
     try {
       const storage = await (this.imageStorage as any)._storage;
       if (storage) {
         userId = await storage.get('userID');
       }
     } catch (e) {
-      console.warn('[CameraPage2] processDataUrl: Failed to retrieve userID from storage', e);
+      console.warn('[CameraProcessor] Failed to retrieve userID from storage context', e);
     }
 
     const sessionImgIndex = typeof (this.imageStorage as any).getNextOriginalImageNumber === 'function'
       ? (this.imageStorage as any).getNextOriginalImageNumber(this.selectedSessionId || undefined)
       : undefined;
     const originalId = this.generateImageRecordId('original');
-    
-    //preprocess
+
+    // Execution Core Worker
     const doWork = async () => {
       let prediction: any = null;
+
       try {
-        inferenceAttempted = true;
-        //converts the img dataURL into exact Float32 tensor the model expects
+        inferenceCalled = true;
         const tensor = await this.preprocessImage(dataUrl);
-        // guard inference with timeout to avoid device hangs
-        const inferenceTimeoutMs = 20_000; // (set timeout, to 20sinternal inference guard)
+        
         try {
-          inferenceAttempted = true;
-          prediction = await Promise.race([
-            this.crackDetectionService.runInference(tensor),
-            new Promise((_, rej) => setTimeout(() => rej(new Error('inference-timeout')), inferenceTimeoutMs))
-          ]);
+          prediction = await this.crackDetectionService.runInference(tensor);
         } catch (infErr) {
-          console.warn('Inference error/timeout during upload processing', infErr);
-          prediction = null;
+          console.warn('Local client model inference timed out or faulted', infErr);
         }
-      } catch (e) {
-        console.warn('Inference failed during upload processing', e);
+      } catch (err) {
+        console.warn('Client-side preview preprocessing failed', err);
       }
-      // Prepare storage entry or build StoredImage entry
+
+      // --- CRITICAL FIX: LINK BACKEND RESULTS TO bounding_boxes ENGINE ---
+      // If local inference returned empty or missing results, inject the backend server's bounding boxes!
+      if (!prediction) {
+        prediction = { boxes: [] };
+      }
+      if (!prediction.boxes || prediction.boxes.length === 0) {
+        if (backendUploadResult && Array.isArray(backendUploadResult.bounding_boxes) && backendUploadResult.bounding_boxes.length > 0) {
+          console.log(`[CameraProcessor] Local model found 0 boxes. Feeding ${backendUploadResult.bounding_boxes.length} server boxes into drawing canvas engine.`);
+          prediction.boxes = backendUploadResult.bounding_boxes;
+        }
+      }
+
+      const maxBytes = 900_000;
       const safeOriginal = await this.shrinkDataUrlToBytes(dataUrl, maxBytes, 4000);
       const timestamp = new Date().toISOString();
-      const generatedFilename = this.buildSessionFilename(!!prediction, timestamp, originalName, sessionImgIndex);
+      const generatedFilename = this.buildSessionFilename(
+        !!(prediction.boxes && prediction.boxes.length > 0), 
+        timestamp, 
+        filename, 
+        sessionImgIndex
+      );
+
       const entry: StoredImage = {
         original: safeOriginal,
         timestamp,
         filename: generatedFilename,
-        fileImageName: originalName || undefined,
+        fileImageName: filename || undefined,
         prediction: prediction || undefined,
-        hasPrediction: !!prediction,
-        statusMessage: prediction ? 'Prediction succeeded' : (inferenceAttempted ? 'Prediction failed' : 'No prediction'),
+        hasPrediction: !!(prediction.boxes && prediction.boxes.length > 0),
+        statusMessage: (prediction.boxes && prediction.boxes.length > 0) ? 'Prediction succeeded' : (inferenceCalled ? 'Prediction failed' : 'No prediction'),
         userId: userId,
         sessionId: this.selectedSessionId || undefined,
         original_id: originalId,
         cropped_id: originalId
       };
 
-      // If the model returned bounding boxes, create a "withBoxes" image, attach boxes,
-      // and persist cropped crack images for each detected box.
+      // Canvas Rendering & Cropping Queue Loop
       try {
         if (prediction && Array.isArray(prediction.boxes) && prediction.boxes.length > 0) {
           const rawBoxes = prediction.boxes;
+          const rawBoxes2 = backendUploadResult?.bounding_boxes || []; 
 
+          console.log("raw Boxes 2 ", rawBoxes2);
           const boxesToDraw = rawBoxes.map((b: any) => ({
             x: b.x,
             y: b.y,
@@ -593,12 +1308,19 @@ export class CameraPage2Page implements AfterViewInit {
             h: b.h
           }));
 
+          const boxesToDraw2 = rawBoxes2.map((b: any) => ({
+            x: b.x,
+            y: b.y,
+            w: b.w,
+            h: b.h
+          }));
+
+
           const maskW = prediction.maskWidth || prediction.maskW || 128;
           const maskH = prediction.maskHeight || prediction.maskH || 128;
-
           const croppedCracks: any[] = [];
 
-          for (const box of boxesToDraw) {
+          for (const box of boxesToDraw2) {
             const croppedNumber = croppedCracks.length + 1;
             try {
               const crop = await this.cropBoxFromImage(dataUrl, box, maskW, maskH);
@@ -614,24 +1336,24 @@ export class CameraPage2Page implements AfterViewInit {
                 severity: cropPrediction?.severity ?? 'unknown'
               });
             } catch (cropErr) {
-              console.warn('[CameraPage2] Failed processing one cropped crack, continuing', cropErr);
+              console.warn('[CameraProcessor] Failed handling specific bounding box cropping frame', cropErr);
             }
           }
 
-          console.log('[CROPS] Total crops:', croppedCracks.length);
+          console.log('[CROPS] Total bounding boxes cropped:', croppedCracks.length);
 
-         // try to create withBoxes image with drawn boxes based on the bouding box data
+          // Render canvas overlays
           try {
-            const withBoxesDataUrl = await this.drawBoxesOnImage(dataUrl, boxesToDraw, maskW, maskH);
+            const withBoxesDataUrl = await this.drawBoxesOnImage(dataUrl, boxesToDraw2, maskW, maskH);
             const safeWithBoxes = await this.shrinkDataUrlToBytes(withBoxesDataUrl, maxBytes, 4000);
+            
             (entry as any).withBoxes = safeWithBoxes;
-            (entry as any).boxes = boxesToDraw;
+            (entry as any).boxes = boxesToDraw2;
             (entry as any).croppedCracks = croppedCracks;
-            (entry as any).detectionMessage = `Rendered ${boxesToDraw.length} detected crack box(es)`;
-            this.totalBoundingBoxesCreated += boxesToDraw.length;
-            console.log('CROPPED CRACKS', croppedCracks);
+            (entry as any).detectionMessage = `Rendered ${boxesToDraw2.length} detected crack box(es)`;
+            this.totalBoundingBoxesCreated += boxesToDraw2.length;
           } catch (renderErr) {
-            console.warn('[CameraPage2] drawBoxesOnImage failed', renderErr);
+            console.warn('[CameraProcessor] drawBoxesOnImage canvas drawing threw exception:', renderErr);
             (entry as any).withBoxes = safeOriginal;
             (entry as any).boxes = [];
             (entry as any).detectionMessage = 'Box rendering failed';
@@ -642,113 +1364,178 @@ export class CameraPage2Page implements AfterViewInit {
           (entry as any).detectionMessage = 'No boxes detected';
         }
       } catch (e) {
-        console.warn('[CameraPage2] Failed to create withBoxes image', e);
+        console.warn('[CameraProcessor] Context breakdown while handling canvas configurations', e);
         (entry as any).withBoxes = safeOriginal;
         (entry as any).boxes = [];
         (entry as any).detectionMessage = 'Box rendering failed';
       }
-      //store image entry via image storage service, but only once per invocation
+
       if (!claimFinalization()) {
-        console.warn('[CameraPage2] Skipping persist because processing was already finalized');
+        console.warn('[CameraProcessor] Skipping storage write because processing state is already completed');
         return entry;
       }
+
+      // Authoritative Local Session Storing
       await this.imageStorage.addImage(entry, this.selectedSessionId || undefined);
+
       try {
-        //add to current session in use and set sessioIsPristine to false, then refresh displayed images
         if (this.selectedSessionId && typeof (this.imageStorage.addImageToSession) === 'function') {
           this.imageStorage.addImageToSession(this.selectedSessionId, entry.filename);
-          this.sessionIsPristine = false; // Mark session as no longer pristine
+          this.sessionIsPristine = false;
         }
       } catch (e) {
-        console.warn('[CameraPage2] Failed to add parent image to session', e);
+        console.warn('[CameraProcessor] Failed linking image identifier to active session key', e);
       }
-      if (Array.isArray((entry as any).croppedCracks) && (entry as any).croppedCracks.length > 0) {
-        const storedCroppedCracks = await this.persistCroppedCracksAsSessionImages((entry as any).croppedCracks, originalName || entry.fileImageName || entry.filename, entry.timestamp, userId, sessionImgIndex, originalId);
+
+      // Harmonized sub-crack persistence strategy (supports old and new signatures)
+      if (typeof (this as any).processAndStoreCroppedCracks === 'function') {
+        await (this as any).processAndStoreCroppedCracks(entry, filename, userId, sessionImgIndex, originalId);
+      } else if (Array.isArray((entry as any).croppedCracks) && (entry as any).croppedCracks.length > 0) {
+        const storedCroppedCracks = await this.persistCroppedCracksAsSessionImages(
+          (entry as any).croppedCracks, 
+          filename, 
+          entry.timestamp, 
+          userId, 
+          sessionImgIndex, 
+          originalId
+        );
         (entry as any).croppedCracks = storedCroppedCracks;
         try {
           if (typeof (this.imageStorage as any).setEntryForImage === 'function') {
             (this.imageStorage as any).setEntryForImage(entry.filename, entry);
           }
         } catch (setErr) {
-          console.warn('[CameraPage2] Failed to update stored parent entry with cropped cracks', setErr);
+          console.warn('[CameraProcessor] Failed matching parent index to sub-crops object mapping', setErr);
         }
       }
-      // Debug: log the full entry after processing and storage
-      console.log('[CameraPage2] processDataUrl saved entry:', entry);
+
       try {
         await this.refreshDisplayedImages();
       } catch (e) {
-        console.warn('[CameraPage2] Failed to refresh display', e);
+        console.warn('[CameraProcessor] Layout refreshed failed', e);
       }
-      // Count only true new uploads/captures as session additions.
+
+      // Appending paths to scroll arrays from New Version
+      if (this.imagePaths) {
+        this.imagePaths.unshift({
+          original: entry.original,
+          withBoxes: (entry as any).withBoxes || entry.original,
+          fileName: entry.filename,
+          rawPrediction: entry.prediction,
+          original_id: (entry as any).original_id,
+          cropped_id: (entry as any).cropped_id,
+        });
+      }
+
+      // Sync data changes directly to Firestore if User ID is mapped
+      if (userId) {
+        try {
+          if (typeof this.imageStorage.saveImageToUser === 'function') {
+            await this.imageStorage.saveImageToUser(userId, entry);
+          }
+          if (this.selectedSessionId && typeof (this.imageStorage.getSession) === 'function' && typeof this.imageStorage.saveSessionToUser === 'function') {
+            const session = this.imageStorage.getSession(this.selectedSessionId);
+            if (session) await this.imageStorage.saveSessionToUser(userId, session);
+          }
+        } catch (e) {
+          console.warn('[CameraProcessor] Cloud storage transaction rejected', e);
+        }
+      }
+
       if (bumpCounters) {
         this.imagesUploadedThisSession += 1;
       }
-      // update UI counters from authoritative storage
-      if (prediction) this.photosProcessed += 1;
+      if (prediction && prediction.boxes && prediction.boxes.length > 0) {
+        this.photosProcessed += 1;
+      }
       if (refreshCountsAfterSave) {
         await this.updatePhotoCounts();
       }
+      
       await this.logCurrentSessionImageObjects();
+
+      // UI Frame alignment correction delay
+      setTimeout(() => {
+        if (typeof this.detectCenterThumbnail === 'function') {
+          this.detectCenterThumbnail();
+        }
+      }, 250);
+
       return entry;
     };
 
-    // Overall processing timeout: 10s, if the process did not finish in under 10s
-    const overallTimeoutMs = 10_000;
+    // Race Configuration setup
+    const overallTimeoutMs = 17_000;
     try {
-      await Promise.race([doWork(), new Promise((_, rej) => setTimeout(() => rej(new Error('processing-timeout')), overallTimeoutMs))]);
+      await Promise.race([
+        doWork(), 
+        new Promise((_, rej) => setTimeout(() => rej(new Error('processing-timeout')), overallTimeoutMs))
+      ]);
     } catch (err: any) {
       if (err && err.message === 'processing-timeout') {
-        console.warn('[CameraPage2] processDataUrl overall timeout');
-        // If we timed out, persist a fallback entry indicating failure/no-prediction
+        console.warn('[CameraProcessor] Pipeline race completed with an overall processing timeout status.');
+
+        const maxBytes = 900_000;
         const safeOriginal = await this.shrinkDataUrlToBytes(dataUrl, maxBytes, 4000);
         const timestamp = new Date().toISOString();
-        const generatedFilename = this.buildSessionFilename(false, timestamp, originalName, sessionImgIndex);
+        const fallbackFilename = this.buildSessionFilename(false, timestamp, filename, sessionImgIndex);
+        
         const entry: StoredImage = {
           original: safeOriginal,
           timestamp,
-          filename: generatedFilename,
-          fileImageName: originalName || undefined,
+          filename: fallbackFilename,
+          fileImageName: filename || undefined,
           prediction: undefined,
           hasPrediction: false,
-          statusMessage: inferenceAttempted ? 'Prediction failed' : 'No prediction',
+          statusMessage: inferenceCalled ? 'Prediction failed' : 'No prediction',
           userId: userId,
           sessionId: this.selectedSessionId || undefined,
           original_id: originalId,
           cropped_id: originalId
         };
+
         try {
-          if (!claimFinalization()) {
-            console.warn('[CameraPage2] Skipping timeout fallback because processing was already finalized');
-            return;
-          }
-          await this.imageStorage.addImage(entry, this.selectedSessionId || undefined);
-          try {
+          if (claimFinalization()) {
+            await this.imageStorage.addImage(entry, this.selectedSessionId || undefined);
             if (this.selectedSessionId && typeof (this.imageStorage.addImageToSession) === 'function') {
               this.imageStorage.addImageToSession(this.selectedSessionId, entry.filename);
-              this.sessionIsPristine = false; // Mark session as no longer pristine
+              this.sessionIsPristine = false;
             }
             await this.refreshDisplayedImages();
-          } catch (err) {
-            console.warn('[CameraPage2] Failed to add timeout fallback image to session', err);
+            
+            if (this.imagePaths) {
+              this.imagePaths.unshift({
+                original: entry.original,
+                withBoxes: entry.original,
+                fileName: entry.filename,
+                rawPrediction: entry.prediction,
+                original_id: entry.original_id,
+                cropped_id: entry.cropped_id,
+              });
+            }
+            this.imagesUploadedThisSession += 1;
+            await this.updatePhotoCounts();
           }
-          // Increment upload counter for this session
-          this.imagesUploadedThisSession += 1;
-          // update UI counters from authoritative storage
-          await this.updatePhotoCounts();
-          await this.logCurrentSessionImageObjects();
-        } catch (e) {
-          console.warn('[CameraPage2] Failed to persist fallback entry after timeout', e);
+        } catch (fallbackErr) {
+          console.warn('[CameraProcessor] Aborting database write operations during fallback handling', fallbackErr);
         }
       } else {
-        console.warn('[CameraPage2] processDataUrl failed', err);
+        console.warn('[CameraProcessor] processDataUrl encountered an runtime error:', err);
       }
-    } finally {
-      this.isProcessing = false;
-      // Log cumulative bounding box count after processing
+    }
+  } finally {
+    // 3. CRITICAL FIX: The master finally block ensures that regardless of failures, 
+    // timeouts, or cloud crashes, the loader indicator is always turned off safely!
+    this.isProcessing = false;
+
+    if (typeof this.logCurrentSessionStateAfterProcessDataUrl === 'function') {
+      await this.logCurrentSessionStateAfterProcessDataUrl();
+    }
+    if (typeof this.logBoundingBoxStats === 'function') {
       this.logBoundingBoxStats();
     }
   }
+}
 
   /** Print the current session's stored image objects after processing completes. */
   private async logCurrentSessionImageObjects() {
@@ -1563,21 +2350,7 @@ export class CameraPage2Page implements AfterViewInit {
       };
       this._overlayUpdateThumbs = updateThumbnails;
 
-      const reprocessSelectedOverlayImage = async () => {
-        const selectedImage = this.getSelectedOverlayImageData();
-        if (!selectedImage) {
-          console.warn('[CameraPage2] reprocessSelectedOverlayImage: no image selected');
-          alert('No image selected to reprocess');
-          return;
-        }
-
-        try {
-          await this.processDataUrl(selectedImage.dataUrl, selectedImage.originalName);
-        } catch (err) {
-          console.warn('[CameraPage2] reprocessSelectedOverlayImage failed', err);
-          alert('Failed to reprocess selected image. See console for details.');
-        }
-      };
+   
 
       // Prefer storedImages (persisted) when available so we can toggle between original/withBoxes
       //checks if there is stored images and if so create thumbnails for each stored image
@@ -1731,10 +2504,6 @@ export class CameraPage2Page implements AfterViewInit {
         cleanupOverlay();
       };
 
-      reprocessBtn.onclick = () => {
-        void reprocessSelectedOverlayImage();
-        cleanupOverlay();
-      };
 
       // make buttons visually fill available space like in bottom-top-row
       deleteBtn.style.flex = '1 1 auto';
@@ -2318,5 +3087,88 @@ export class CameraPage2Page implements AfterViewInit {
     return shortened || fullTitle; // Return original if nothing was removed
   }
 
+  // 1. Call Text Function
+  getFastApiMessage() {
+    this.http.get<{ message: string }>(`${this.baseUrl}/api/hello`).subscribe({
+      next: (response) => {
+        this.apiMessage = response.message;
+        this.apiStatus = response.message;
+        console.log("Api Message", this.apiMessage);
+        console.log('Root connection success:', response);
+        this.fastApiConnection = true;
+        console.log("Fast API Connection", this.fastApiConnection);
+      },
+      error: (err) => console.error('Error fetching message:', err)
+    });
+  }
+
+  onFileSelected(event: any) {
+  // Access the native target files array safely
+  const fileList: FileList = event.target.files;
+  
+  if (fileList && fileList.length > 0) {
+    this.selectedFile = fileList[0];
+    // Inspect this log in your device/emulator console
+    console.log('Selected file object:', this.selectedFile); 
+  } else {
+    this.selectedFile = null;
+  }
+}
+
+async uploadImage(): Promise<UploadResponse | null> {
+  // 1. Safety check: must return 'null' explicitly. A blank 'return;' returns 'void'
+  if (!this.selectedFile || !(this.selectedFile instanceof Blob)) {
+    console.error('Upload aborted: selectedFile is not a valid Blob/File object.', this.selectedFile);
+    return null; 
+  }
+
+  const formData = new FormData();
+  formData.append('file', this.selectedFile, this.selectedFile.name);
+
+  try {
+    // Converts the post Observable into a Promise
+    const response = await firstValueFrom(
+      this.http.post<UploadResponse>(`${this.baseUrl}/api/upload`, formData)
+    );
+
+    this.uploadedImageUrl = `${this.baseUrl}${response.rawImagePath}`;
+    this.boxes = response.bounding_boxes;
+
+    console.log("Success:", response.message);
+    
+    // 2. Return the object to resolve the Promise with data
+    return response; 
+
+  } catch (err) {
+    console.error('Error uploading image:', err);
+    // 3. Explicitly return null on failure
+    return null; 
+  }
+}
+
+/**
+ * Logs a snapshot of the current session state and queue status 
+ * immediately following a processDataUrl lifecycle finish.
+ */
+public async logCurrentSessionStateAfterProcessDataUrl(): Promise<void> {
+  console.log('📊 [CameraPage2] Post-Processing Session State Snapshot:');
+  console.log(`   • Active Session ID: ${this.selectedSessionId || 'N/A'}`);
+  console.log(`   • Session Status:    ${this.sessionIsPristine ? 'Pristine (Empty)' : 'Dirty (Modified)'}`);
+  console.log(`   • Photos Taken:      ${this.photosTaken}`);
+  console.log(`   • Photos Processed:  ${this.photosProcessed}`);
+  console.log(`   • Uploads This Sess: ${this.imagesUploadedThisSession}`);
+  console.log(`   • Total Boxes Drawn: ${this.totalBoundingBoxesCreated}`);
+  console.log(`   • Remaining Queue:   ${this.imageQueue.length} item(s)`);
+
+  // Log underlying database tracking states if storage is initialized
+  if (this.selectedSessionId && typeof (this.imageStorage as any).getSessionImages === 'function') {
+    try {
+      const currentSessionItems = await (this.imageStorage as any).getSessionImages(this.selectedSessionId);
+      console.log(`   • Authority Count:  ${currentSessionItems?.length || 0} records in storage`);
+    } catch (e) {
+      console.warn('[CameraPage2] Could not append authoritative storage logs', e);
+    }
+  }
+}
 
 }
