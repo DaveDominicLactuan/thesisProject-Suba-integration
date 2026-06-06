@@ -130,7 +130,8 @@ private isQueueProcessing: boolean = false;
 private apiUrl = 'https://your-vscode-forwarded-url.app.github.dev/';
 apiUrlWeb = 'http://127.0.0.1:8000/';
 apiUrlWeb2 = 'http://127.0.0.1:8000/helloWorld';
-private baseUrl = 'http://127.0.0.1:8000'; 
+// private baseUrl = 'http://127.0.0.1:8000'; 
+private baseUrl = 'https://16z6llmg-8000.asse.devtunnels.ms';
   uploadedImageUrl: string = '';
   selectedFile: File | null = null;
 
@@ -666,6 +667,7 @@ private async runQueueProcessor(): Promise<void> {
  
        try {
          inferenceCalled = true;
+         backendUploadResult = await this.uploadImage();
          const tensor = await this.preprocessImage(dataUrl);
          
          try {
@@ -715,18 +717,12 @@ private async runQueueProcessor(): Promise<void> {
  
        // Canvas Rendering & Cropping Queue Loop
        try {
-         if (prediction && Array.isArray(prediction.boxes) && prediction.boxes.length > 0) {
-           const rawBoxes = prediction.boxes;
-           const rawBoxes2 = backendUploadResult?.bounding_boxes || []; 
+         // We now rely solely on the backend results for drawing and cropping
+         const rawBoxes2 = backendUploadResult?.bounding_boxes || []; 
+         console.log("raw Boxes 2 ", rawBoxes2);
  
-           console.log("raw Boxes 2 ", rawBoxes2);
-           const boxesToDraw = rawBoxes.map((b: any) => ({
-             x: b.x,
-             y: b.y,
-             w: b.w,
-             h: b.h
-           }));
- 
+         if (rawBoxes2.length > 0) {
+           
            const boxesToDraw2 = rawBoxes2.map((b: any) => ({
              x: b.x,
              y: b.y,
@@ -734,9 +730,8 @@ private async runQueueProcessor(): Promise<void> {
              h: b.h
            }));
  
- 
-           const maskW = prediction.maskWidth || prediction.maskW || 128;
-           const maskH = prediction.maskHeight || prediction.maskH || 128;
+           const maskW = prediction?.maskWidth || prediction?.maskW || 128;
+           const maskH = prediction?.maskHeight || prediction?.maskH || 128;
            const croppedCracks: any[] = [];
  
            for (const box of boxesToDraw2) {
@@ -745,7 +740,7 @@ private async runQueueProcessor(): Promise<void> {
                const crop = await this.cropBoxFromImage(dataUrl, box, maskW, maskH);
                const cropTensor = await this.preprocessImage(crop);
                const cropPrediction = await this.crackDetectionService.runInference(cropTensor);
- 
+               
                croppedCracks.push({
                  croppedNumber,
                  image: crop,
@@ -763,6 +758,7 @@ private async runQueueProcessor(): Promise<void> {
  
            // Render canvas overlays
            try {
+             // Be sure your drawBoxesOnImage has the Promise fix we discussed earlier!
              const withBoxesDataUrl = await this.drawBoxesOnImage(dataUrl, boxesToDraw2, maskW, maskH);
              const safeWithBoxes = await this.shrinkDataUrlToBytes(withBoxesDataUrl, maxBytes, 4000);
              
@@ -771,6 +767,7 @@ private async runQueueProcessor(): Promise<void> {
              (entry as any).croppedCracks = croppedCracks;
              (entry as any).detectionMessage = `Rendered ${boxesToDraw2.length} detected crack box(es)`;
              this.totalBoundingBoxesCreated += boxesToDraw2.length;
+             
            } catch (renderErr) {
              console.warn('[CameraProcessor] drawBoxesOnImage canvas drawing threw exception:', renderErr);
              (entry as any).withBoxes = safeOriginal;
@@ -778,9 +775,10 @@ private async runQueueProcessor(): Promise<void> {
              (entry as any).detectionMessage = 'Box rendering failed';
            }
          } else {
+           // Fallback if rawBoxes2 is empty
            (entry as any).withBoxes = safeOriginal;
            (entry as any).boxes = [];
-           (entry as any).detectionMessage = 'No boxes detected';
+           (entry as any).detectionMessage = 'No boxes detected from server';
          }
        } catch (e) {
          console.warn('[CameraProcessor] Context breakdown while handling canvas configurations', e);
@@ -796,7 +794,7 @@ private async runQueueProcessor(): Promise<void> {
  
        // Authoritative Local Session Storing
        await this.imageStorage.addImage(entry, this.selectedSessionId || undefined);
- 
+       console.log("Session image added");
        try {
          if (this.selectedSessionId && typeof (this.imageStorage.addImageToSession) === 'function') {
            this.imageStorage.addImageToSession(this.selectedSessionId, entry.filename);
@@ -827,7 +825,7 @@ private async runQueueProcessor(): Promise<void> {
            console.warn('[CameraProcessor] Failed matching parent index to sub-crops object mapping', setErr);
          }
        }
- 
+       console.log("Refresh Displayed Images");
        try {
          await this.refreshDisplayedImages();
        } catch (e) {
@@ -872,7 +870,7 @@ private async runQueueProcessor(): Promise<void> {
        }
        
        await this.logCurrentSessionImageObjects();
- 
+       console.log("Try detect center thumbnail");
        // UI Frame alignment correction delay
        setTimeout(() => {
          if (typeof this.detectCenterThumbnail === 'function') {
@@ -883,8 +881,8 @@ private async runQueueProcessor(): Promise<void> {
        return entry;
      };
  
-     // Race Configuration setup
-     const overallTimeoutMs = 17_000;
+     // Increase this from 17_000 to something safe for heavy local inference
+     const overallTimeoutMs = 45_000;
      try {
        await Promise.race([
          doWork(), 
@@ -945,6 +943,9 @@ private async runQueueProcessor(): Promise<void> {
    } finally {
      // 3. CRITICAL FIX: The master finally block ensures that regardless of failures, 
      // timeouts, or cloud crashes, the loader indicator is always turned off safely!
+ 
+     console.log("processing finished");
+ 
      this.isProcessing = false;
  
      if (typeof this.logCurrentSessionStateAfterProcessDataUrl === 'function') {
@@ -2312,36 +2313,36 @@ private async runQueueProcessor(): Promise<void> {
 // }
 
 async uploadImage(): Promise<UploadResponse | null> {
-  // Safety check: ensure something is selected and it behaves like a Blob/File
+  // 1. Safety check: must return 'null' explicitly. A blank 'return;' returns 'void'
   if (!this.selectedFile || !(this.selectedFile instanceof Blob)) {
     console.error('Upload aborted: selectedFile is not a valid Blob/File object.', this.selectedFile);
-    return null;
+    return null; 
   }
 
   const formData = new FormData();
   formData.append('file', this.selectedFile, this.selectedFile.name);
 
   try {
-    // Convert the Angular HTTP Observable to a Promise using firstValueFrom
+    // Converts the post Observable into a Promise
     const response = await firstValueFrom(
       this.http.post<UploadResponse>(`${this.baseUrl}/api/upload`, formData)
     );
 
-    // Capture the paths and prefix them with your base URL
     this.uploadedImageUrl = `${this.baseUrl}${response.rawImagePath}`;
     this.boxes = response.bounding_boxes;
 
     console.log("Success:", response.message);
-    console.log("Found boxes:", this.boxes);
-
-    // Return the response object to whoever called this function
-    return response;
+    
+    // 2. Return the object to resolve the Promise with data
+    return response; 
 
   } catch (err) {
     console.error('Error uploading image:', err);
-    return null;
+    // 3. Explicitly return null on failure
+    return null; 
   }
 }
+
 
 public async logCurrentSessionStateAfterProcessDataUrl(): Promise<void> {
   console.log('📊 [CameraPage2] Post-Processing Session State Snapshot:');

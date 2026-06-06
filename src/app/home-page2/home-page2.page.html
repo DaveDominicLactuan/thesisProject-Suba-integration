@@ -63,6 +63,14 @@
     </div>
      <div class="menu-section">
         <div class="menu-header">Other</div>
+        <div class="red-circle" [ngClass]="{ 'green': apiStatus === 'success', 'red': apiStatus !== 'success' }"></div>
+
+       <li class="menu-item" (click)="getFastApiMessage()">
+  <img src="assets/ChatIconNew.png" alt="Chat" class="menu-item-icon" />
+  <span [ngClass]="{ 'green': apiStatus === 'success', 'red': apiStatus !== 'success' }">
+    {{ apiStatus }}
+  </span>      
+</li>
    
       <li class="menu-item" (click)="logout(); closeSidebar(); $event.stopPropagation()" data-action="logout">
         <img src="assets/newLoginIcon.png" alt="Chat" class="menu-item-icon" />
@@ -99,15 +107,16 @@
       </div>
       <ion-icon class="qa-chevron" name="chevron-forward-outline" aria-hidden="true"></ion-icon>
     </div>
+
+    <div class="red-circle" [ngClass]="{ 'green': apiStatus === 'success', 'red': apiStatus !== 'success' }"></div>
   </div>
 
   <div class="explore-section" aria-label="Explore options">
     <div class="explore-title">Explore</div>
     <div class="explore-grid">
-      <div class="explore-card"  (click)="gochatPage()">
+      <!-- <div class="explore-card"  (click)="gochatPage()">
         <div class="explore-badge" aria-hidden="true">{{ exploreBadgeCount }}</div>
         <div class="explore-icon" aria-hidden="true">
-          <!-- <img src="assets/updatedFiles.png" alt="Browser" /> -->
           <img src="assets/ChatIconNew.png" alt="Browser" />
         </div>
         <div class="explore-label">Chat</div>
@@ -117,9 +126,70 @@
           <img src="assets/updatedSession.png" alt="Camera" />
         </div>
         <div class="explore-label">Sessions</div>
+      </div> -->
+
+      <div class="explore-card2">
+       <ion-card-title>2. Upload & Display Image</ion-card-title>
+    <ion-content class="ion-padding">
+
+  <div class="image-preview-container ion-margin-bottom">
+    <ion-img *ngIf="previewImageUrl; else noImage" [src]="previewImageUrl"></ion-img>
+    <ng-template #noImage>
+      <div class="placeholder ion-text-center">
+        <ion-icon name="image-outline" size="large"></ion-icon>
+        <p>No image selected</p>
+      </div>
+    </ng-template>
+  </div>
+
+  <ion-button expand="block" (click)="captureImage()">
+    <ion-icon name="camera-outline" slot="start"></ion-icon>
+    Select/Capture Image
+  </ion-button>
+
+  <ion-button expand="block" color="success" class="ion-margin-top" 
+              [disabled]="!selectedNativePath || isUploading"
+              (click)="uploadToServer()">
+    <ion-icon *ngIf="!isUploading" name="cloud-upload-outline" slot="start"></ion-icon>
+    <ion-spinner *ngIf="isUploading" slot="start"></ion-spinner>
+    {{ isUploading ? 'Uploading...' : 'Confirm & Upload' }}
+  </ion-button>
+
+  <ion-card *ngIf="uploadResult" color="light" class="ion-margin-top">
+    <ion-card-header>
+      <ion-card-title>Server Response</ion-card-title>
+    </ion-card-header>
+    <ion-card-content>
+      <pre>{{ uploadResult | json }}</pre>
+    </ion-card-content>
+  </ion-card>
+
+</ion-content>
       </div>
 
-       <div class="explore-card">
+      <div class="explore-card2">
+       <ion-card-title>2. Upload & Display Image</ion-card-title>
+    <ion-content class="ion-padding">
+
+  <input type="file" 
+         #fileInput 
+         (change)="onFileSelected2($event)" 
+         accept="image/*" 
+         style="display: none;">
+
+  <ion-button expand="block" (click)="triggerFileInput()">
+    <ion-icon name="cloud-upload-outline" slot="start"></ion-icon>
+    Select & Upload Image
+  </ion-button>
+
+  <div *ngIf="previewUrl" class="ion-margin-top">
+    <img [src]="previewUrl" style="max-width: 100%; border-radius: 8px;">
+  </div>
+
+</ion-content>
+      </div>
+
+       <!-- <div class="explore-card">
        <div class="api-container" *ngIf="apiStatus">
     <h2>Server Status: <span [style.color]="apiStatus === 'success' ? 'green' : 'red'">{{ apiStatus }}</span></h2>
     <p>{{ apiMessage }}</p>
@@ -150,7 +220,10 @@
       </div>
 
     </ion-card-content>
-      </div>
+      </div> -->
+
+      
+
     </div>
   </div>
 

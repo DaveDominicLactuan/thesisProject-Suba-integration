@@ -1109,6 +1109,8 @@ export class ImageStorageService {
       withBoxesS3Key: image.withBoxesS3Key || null,
       storagePath: image.storagePath || null,
       storageUrl: image.storageUrl || null,
+      returnedBoudingBox: image.boxes || [],
+
     };
   }
 
@@ -1231,6 +1233,7 @@ export class ImageStorageService {
             originalS3Key: image.storagePath || null,
             originalS3Url: image.storageUrl || null,
             correctedByEngineer: !!session.correctedByEngineer,
+            returnedBoudingBox: preservedBoxes,
           } as StoredImage),
           createdBy,
           ReceivedBy: receiverId || currentUid,

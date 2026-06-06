@@ -11,6 +11,7 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { HttpClient } from '@angular/common/http';
 import { firstValueFrom } from 'rxjs';
+import { timeout } from 'rxjs/operators';
 // declare var ort: any;
 
 // ort.env.wasm.wasmPaths = 'assets/onnx/';
@@ -148,7 +149,8 @@ apiMessage: string = 'Loading...';
 private apiUrl = 'https://your-vscode-forwarded-url.app.github.dev/';
 apiUrlWeb = 'http://127.0.0.1:8000/';
 apiUrlWeb2 = 'http://127.0.0.1:8000/helloWorld';
-private baseUrl = 'http://127.0.0.1:8000'; 
+// private baseUrl = 'http://127.0.0.1:8000'; 
+private baseUrl = 'https://16z6llmg-8000.asse.devtunnels.ms';
   uploadedImageUrl: string = '';
   selectedFile: File | null = null;
 
@@ -364,47 +366,97 @@ private baseUrl = 'http://127.0.0.1:8000';
    * Capture current frame → preprocess → run inference → store entry.
    * Debounced via cooldown; updates session, counters, and lastPrediction.
    */
-  async takePicture() {
-  // Prevent spamming the shutter: if currently cooling down, ignore
-  if (this.isCooldown) {
-    console.log('[CameraPage2] takePicture blocked: cooldown active');
-    return;
-  }
+//   async takePicture() {
+//   // Prevent spamming the shutter: if currently cooling down, ignore
+//   if (this.isCooldown) {
+//     console.log('[CameraPage2] takePicture blocked: cooldown active');
+//     return;
+//   }
 
-  // When the level guide is active, only allow capture while the phone is level.
-  if (this.isLevelEnabled && !this.isPhoneLeveled) {
-    console.log('[CameraPage2] takePicture blocked: phone is not level');
-    return;
-  }
+//   // When the level guide is active, only allow capture while the phone is level.
+//   if (this.isLevelEnabled && !this.isPhoneLeveled) {
+//     console.log('[CameraPage2] takePicture blocked: phone is not level');
+//     return;
+//   }
 
-  // Start cooldown immediately and show a short visual flash
+//   // Start cooldown immediately and show a short visual flash
+//   this.isCooldown = true;
+//   this.showFlash = true;
+//   setTimeout(() => { this.showFlash = false; }, this.flashDurationMs);
+//   setTimeout(() => { this.isCooldown = false; }, this.cooldownMs);
+
+//   try {
+//     const video = this.videoRef.nativeElement;
+//     const canvas = this.canvasRef.nativeElement;
+//     const ctx = canvas.getContext('2d')!;
+//     canvas.width = video.videoWidth;
+//     canvas.height = video.videoHeight;
+//     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+//     const dataUrl = canvas.toDataURL('image/png');
+//     // Generate a descriptive filename for camera capture
+//     const cameraFilename = `Camera-${Date.now()}.jpg`;
+//     console.log(`📸 Captured image from camera: ${cameraFilename}`);
+
+//     // Delegate processing to the new sequential processQueue function
+//     this.processQueue(dataUrl, cameraFilename);
+//   } catch (err) {
+//     console.error('Failed to take picture:', err);
+//     alert('Failed to capture image. See console for details.');
+//   } finally {
+//     this.logBoundingBoxStats();
+//   }
+// }
+
+async takePicture() {
+  if (this.isCooldown) return;
+  if (this.isLevelEnabled && !this.isPhoneLeveled) return;
+
   this.isCooldown = true;
   this.showFlash = true;
   setTimeout(() => { this.showFlash = false; }, this.flashDurationMs);
   setTimeout(() => { this.isCooldown = false; }, this.cooldownMs);
 
   try {
-    const video = this.videoRef.nativeElement;
-    const canvas = this.canvasRef.nativeElement;
-    const ctx = canvas.getContext('2d')!;
+    const video = this.videoRef?.nativeElement;
+    if (!video) throw new Error("Video element not found");
+
+    // CRITICAL: Ensure dimensions are actually valid (Common mobile failure point)
+    if (video.videoWidth === 0 || video.videoHeight === 0) {
+      console.error("[Camera] Video stream not active: dimensions are zero.");
+      return; 
+    }
+
+    const canvas = this.canvasRef?.nativeElement;
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
+    const ctx = canvas.getContext('2d');
+    
+    if (!ctx) throw new Error("Canvas context not available");
+
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-    const dataUrl = canvas.toDataURL('image/png');
-    // Generate a descriptive filename for camera capture
-    const cameraFilename = `Camera-${Date.now()}.jpg`;
-    console.log(`📸 Captured image from camera: ${cameraFilename}`);
+    // Use Blob approach to avoid memory crashes on physical phones
+    canvas.toBlob((blob) => {
+      if (!blob) return;
 
-    // Delegate processing to the new sequential processQueue function
-    this.processQueue(dataUrl, cameraFilename);
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const dataUrl = reader.result as string;
+        const cameraFilename = `Camera-${Date.now()}.jpg`;
+        
+        console.log(`[Camera] Capture successful: ${cameraFilename}`);
+        // Send to queue
+        this.processQueue(dataUrl, cameraFilename);
+      };
+      reader.readAsDataURL(blob);
+    }, 'image/jpeg', 0.85);
+
   } catch (err) {
-    console.error('Failed to take picture:', err);
-    alert('Failed to capture image. See console for details.');
-  } finally {
-    this.logBoundingBoxStats();
+    console.error('[Camera] takePicture failed:', err);
   }
 }
+
   /**
  * Helper function to print the current state of the queue.
  * Triggered whenever an item is added or popped for processing.
@@ -421,6 +473,48 @@ private printQueueStatus(action: 'added' | 'sent_to_processing', item: QueueItem
  * Accepts a captured or selected image, appends it to the queue, 
  * and initiates processing if the queue processor is idle.
  */
+// async processQueue(dataUrl: string, filename: string): Promise<void> {
+//   const newItem: QueueItem = { dataUrl, filename };
+//   this.imageQueue.push(newItem);
+
+//   // Increment photosTaken immediately so UI spinners reflect the action instantly
+//   this.photosTaken += 1;
+
+//   // Print queue logs upon item addition
+//   this.printQueueStatus('added', newItem);
+
+//   // If the background processor isn't running, start it
+//   if (!this.isQueueProcessing) {
+//     await this.runQueueProcessor();
+//   }
+// }
+
+// /**
+//  * Sequentially shifts items out of the queue and processes them one by one.
+//  */
+// private async runQueueProcessor(): Promise<void> {
+//   if (this.imageQueue.length === 0) {
+//     this.isQueueProcessing = false;
+//     return;
+//   }
+
+//   this.isQueueProcessing = true;
+//   const nextItem = this.imageQueue.shift()!;
+
+//   // Print queue logs when an item is sent to processDataUrl
+//   this.printQueueStatus('sent_to_processing', nextItem);
+
+//   try {
+//     // Pass bumpCounters as false because we incremented photosTaken at the time of queueing
+//     await this.processDataUrl(nextItem.dataUrl, nextItem.filename, false);
+//   } catch (error) {
+//     console.error(`[Queue Error] Processing failed for ${nextItem.filename}:`, error);
+//   } finally {
+//     // Process the next image in line recursively
+//     await this.runQueueProcessor();
+//   }
+// }
+
 async processQueue(dataUrl: string, filename: string): Promise<void> {
   const newItem: QueueItem = { dataUrl, filename };
   this.imageQueue.push(newItem);
@@ -433,7 +527,9 @@ async processQueue(dataUrl: string, filename: string): Promise<void> {
 
   // If the background processor isn't running, start it
   if (!this.isQueueProcessing) {
-    await this.runQueueProcessor();
+    // Note: Do not 'await' this here, or the UI might freeze while waiting
+    // for the queue to finish. Let it run as a fire-and-forget background task.
+    this.runQueueProcessor();
   }
 }
 
@@ -441,26 +537,26 @@ async processQueue(dataUrl: string, filename: string): Promise<void> {
  * Sequentially shifts items out of the queue and processes them one by one.
  */
 private async runQueueProcessor(): Promise<void> {
-  if (this.imageQueue.length === 0) {
-    this.isQueueProcessing = false;
-    return;
-  }
-
+  // Lock the queue
   this.isQueueProcessing = true;
-  const nextItem = this.imageQueue.shift()!;
 
-  // Print queue logs when an item is sent to processDataUrl
-  this.printQueueStatus('sent_to_processing', nextItem);
+  // Use a while loop instead of recursion to prevent memory leaks/stack overflows
+  while (this.imageQueue.length > 0) {
+    const nextItem = this.imageQueue.shift()!;
 
-  try {
-    // Pass bumpCounters as false because we incremented photosTaken at the time of queueing
-    await this.processDataUrl(nextItem.dataUrl, nextItem.filename, false);
-  } catch (error) {
-    console.error(`[Queue Error] Processing failed for ${nextItem.filename}:`, error);
-  } finally {
-    // Process the next image in line recursively
-    await this.runQueueProcessor();
+    // Print queue logs when an item is sent to processDataUrl
+    this.printQueueStatus('sent_to_processing', nextItem);
+
+    try {
+      // Pass bumpCounters as false because we incremented photosTaken at the time of queueing
+      await this.processDataUrl(nextItem.dataUrl, nextItem.filename, false);
+    } catch (error) {
+      console.error(`[Queue Error] Processing failed for ${nextItem.filename}:`, error);
+    }
   }
+
+  // Once the queue is completely empty, unlock it
+  this.isQueueProcessing = false;
 }
 
   /** Create a new session for this camera visit and set it active */
@@ -1156,32 +1252,30 @@ private async runQueueProcessor(): Promise<void> {
   
 async processDataUrl(
   dataUrl: string,
-  filename: string, // Standardized signature parameter name
+  filename: string,
   bumpCounters: boolean = true,
   addToCapturedImages: boolean = true,
   refreshCountsAfterSave: boolean = true
 ) {
   // Log the current image being processed
   console.log(`\ud83d\udcfc [CameraProcessor] Current image name is: ${filename}`);
-
-  // 1. CRITICAL FIX: Turn on processing immediately so the UI spinner displays
-  // for the entire duration (including backend upload + tensor calculations)
+  
+  // 1. CRITICAL FIX: Turn on processing immediately
   this.isProcessing = true;
-
-  // New UI side-effects: update preview panel and prepend to thumbnail array
   this.imagePreview = dataUrl;
+  
   if (addToCapturedImages) {
     this.capturedImages.unshift(dataUrl);
   }
 
-  // Detect center thumbnails after UI updates
+  // Detect center thumbnails
   setTimeout(() => {
     if (typeof this.detectCenterThumbnail === 'function') {
       this.detectCenterThumbnail();
     }
   }, 60);
 
-  // Yield execution to the browser thread so the spinner can animate fluidly before heavy work
+  // Yield execution
   if (typeof this.sleep === 'function') {
     await this.sleep(50);
   } else {
@@ -1194,21 +1288,24 @@ async processDataUrl(
     /* ignore change detection spikes */
   }
 
-  // Scope the backend result variable
   let backendUploadResult: UploadResponse | null = null;
 
-  // 2. CRITICAL FIX: Wrap the rest of the function in a master try block to guarantee the finally block clears the spinner
+  // 2. Master try block to guarantee the finally block clears the spinner
   try {
     // --- BACKEND UPLOAD FLOW ---
     try {
       const response = await fetch(dataUrl);
       const blob = await response.blob();
       const generatedName = filename || `capture-${Date.now()}.png`;
-      
       this.selectedFile = new File([blob], generatedName, { type: blob.type || 'image/png' });
 
       console.log(`[CameraProcessor] Triggering uploadImage for backend server: ${generatedName}`);
-      backendUploadResult = await this.uploadImage();
+      if (this.selectedFile) {
+  backendUploadResult = await this.uploadImage(this.selectedFile);
+} else {
+  console.warn('[CameraProcessor] Cannot upload: selectedFile is null.');
+  // Handle the error appropriately, perhaps by setting a default or returning
+}
       console.log('[CameraProcessor] Successfully saved backend upload response:', backendUploadResult);
     } catch (uploadSetupErr) {
       console.error('[CameraProcessor] Failed to execute backend upload payload:', uploadSetupErr);
@@ -1244,9 +1341,14 @@ async processDataUrl(
     // Execution Core Worker
     const doWork = async () => {
       let prediction: any = null;
-
       try {
         inferenceCalled = true;
+        if (this.selectedFile) {
+  backendUploadResult = await this.uploadImage(this.selectedFile);
+} else {
+  console.warn('[CameraProcessor] Cannot upload: selectedFile is null.');
+  // Handle the error appropriately, perhaps by setting a default or returning
+}
         const tensor = await this.preprocessImage(dataUrl);
         
         try {
@@ -1259,7 +1361,6 @@ async processDataUrl(
       }
 
       // --- CRITICAL FIX: LINK BACKEND RESULTS TO bounding_boxes ENGINE ---
-      // If local inference returned empty or missing results, inject the backend server's bounding boxes!
       if (!prediction) {
         prediction = { boxes: [] };
       }
@@ -1287,7 +1388,8 @@ async processDataUrl(
         fileImageName: filename || undefined,
         prediction: prediction || undefined,
         hasPrediction: !!(prediction.boxes && prediction.boxes.length > 0),
-        statusMessage: (prediction.boxes && prediction.boxes.length > 0) ? 'Prediction succeeded' : (inferenceCalled ? 'Prediction failed' : 'No prediction'),
+        statusMessage: (prediction.boxes && prediction.boxes.length > 0) ?
+          'Prediction succeeded' : (inferenceCalled ? 'Prediction failed' : 'No prediction'),
         userId: userId,
         sessionId: this.selectedSessionId || undefined,
         original_id: originalId,
@@ -1297,25 +1399,13 @@ async processDataUrl(
       // Canvas Rendering & Cropping Queue Loop
       try {
         if (prediction && Array.isArray(prediction.boxes) && prediction.boxes.length > 0) {
-          const rawBoxes = prediction.boxes;
           const rawBoxes2 = backendUploadResult?.bounding_boxes || []; 
-
-          console.log("raw Boxes 2 ", rawBoxes2);
-          const boxesToDraw = rawBoxes.map((b: any) => ({
-            x: b.x,
-            y: b.y,
-            w: b.w,
-            h: b.h
-          }));
-
           const boxesToDraw2 = rawBoxes2.map((b: any) => ({
             x: b.x,
             y: b.y,
             w: b.w,
             h: b.h
           }));
-
-
           const maskW = prediction.maskWidth || prediction.maskW || 128;
           const maskH = prediction.maskHeight || prediction.maskH || 128;
           const croppedCracks: any[] = [];
@@ -1326,7 +1416,6 @@ async processDataUrl(
               const crop = await this.cropBoxFromImage(dataUrl, box, maskW, maskH);
               const cropTensor = await this.preprocessImage(crop);
               const cropPrediction = await this.crackDetectionService.runInference(cropTensor);
-
               croppedCracks.push({
                 croppedNumber,
                 image: crop,
@@ -1340,13 +1429,9 @@ async processDataUrl(
             }
           }
 
-          console.log('[CROPS] Total bounding boxes cropped:', croppedCracks.length);
-
-          // Render canvas overlays
           try {
             const withBoxesDataUrl = await this.drawBoxesOnImage(dataUrl, boxesToDraw2, maskW, maskH);
             const safeWithBoxes = await this.shrinkDataUrlToBytes(withBoxesDataUrl, maxBytes, 4000);
-            
             (entry as any).withBoxes = safeWithBoxes;
             (entry as any).boxes = boxesToDraw2;
             (entry as any).croppedCracks = croppedCracks;
@@ -1375,9 +1460,8 @@ async processDataUrl(
         return entry;
       }
 
-      // Authoritative Local Session Storing
       await this.imageStorage.addImage(entry, this.selectedSessionId || undefined);
-
+      
       try {
         if (this.selectedSessionId && typeof (this.imageStorage.addImageToSession) === 'function') {
           this.imageStorage.addImageToSession(this.selectedSessionId, entry.filename);
@@ -1387,7 +1471,6 @@ async processDataUrl(
         console.warn('[CameraProcessor] Failed linking image identifier to active session key', e);
       }
 
-      // Harmonized sub-crack persistence strategy (supports old and new signatures)
       if (typeof (this as any).processAndStoreCroppedCracks === 'function') {
         await (this as any).processAndStoreCroppedCracks(entry, filename, userId, sessionImgIndex, originalId);
       } else if (Array.isArray((entry as any).croppedCracks) && (entry as any).croppedCracks.length > 0) {
@@ -1409,13 +1492,8 @@ async processDataUrl(
         }
       }
 
-      try {
-        await this.refreshDisplayedImages();
-      } catch (e) {
-        console.warn('[CameraProcessor] Layout refreshed failed', e);
-      }
+      await this.refreshDisplayedImages();
 
-      // Appending paths to scroll arrays from New Version
       if (this.imagePaths) {
         this.imagePaths.unshift({
           original: entry.original,
@@ -1427,7 +1505,6 @@ async processDataUrl(
         });
       }
 
-      // Sync data changes directly to Firestore if User ID is mapped
       if (userId) {
         try {
           if (typeof this.imageStorage.saveImageToUser === 'function') {
@@ -1442,29 +1519,21 @@ async processDataUrl(
         }
       }
 
-      if (bumpCounters) {
-        this.imagesUploadedThisSession += 1;
-      }
-      if (prediction && prediction.boxes && prediction.boxes.length > 0) {
-        this.photosProcessed += 1;
-      }
-      if (refreshCountsAfterSave) {
-        await this.updatePhotoCounts();
-      }
+      if (bumpCounters) this.imagesUploadedThisSession += 1;
+      if (prediction && prediction.boxes && prediction.boxes.length > 0) this.photosProcessed += 1;
+      if (refreshCountsAfterSave) await this.updatePhotoCounts();
       
       await this.logCurrentSessionImageObjects();
-
-      // UI Frame alignment correction delay
+      
       setTimeout(() => {
         if (typeof this.detectCenterThumbnail === 'function') {
           this.detectCenterThumbnail();
         }
       }, 250);
-
       return entry;
     };
 
-    // Race Configuration setup
+    // Race Configuration
     const overallTimeoutMs = 17_000;
     try {
       await Promise.race([
@@ -1473,8 +1542,7 @@ async processDataUrl(
       ]);
     } catch (err: any) {
       if (err && err.message === 'processing-timeout') {
-        console.warn('[CameraProcessor] Pipeline race completed with an overall processing timeout status.');
-
+        // Fallback logic on timeout
         const maxBytes = 900_000;
         const safeOriginal = await this.shrinkDataUrlToBytes(dataUrl, maxBytes, 4000);
         const timestamp = new Date().toISOString();
@@ -1493,7 +1561,6 @@ async processDataUrl(
           original_id: originalId,
           cropped_id: originalId
         };
-
         try {
           if (claimFinalization()) {
             await this.imageStorage.addImage(entry, this.selectedSessionId || undefined);
@@ -1502,7 +1569,6 @@ async processDataUrl(
               this.sessionIsPristine = false;
             }
             await this.refreshDisplayedImages();
-            
             if (this.imagePaths) {
               this.imagePaths.unshift({
                 original: entry.original,
@@ -1519,15 +1585,10 @@ async processDataUrl(
         } catch (fallbackErr) {
           console.warn('[CameraProcessor] Aborting database write operations during fallback handling', fallbackErr);
         }
-      } else {
-        console.warn('[CameraProcessor] processDataUrl encountered an runtime error:', err);
       }
     }
   } finally {
-    // 3. CRITICAL FIX: The master finally block ensures that regardless of failures, 
-    // timeouts, or cloud crashes, the loader indicator is always turned off safely!
     this.isProcessing = false;
-
     if (typeof this.logCurrentSessionStateAfterProcessDataUrl === 'function') {
       await this.logCurrentSessionStateAfterProcessDataUrl();
     }
@@ -1845,31 +1906,28 @@ async processDataUrl(
    * Boxes are expected to be in mask coordinates; maskW/maskH indicate the mask resolution
    * so boxes can be scaled to the image natural size.
    */
-  async drawBoxesOnImage(Base64: string, boxes: BoundingBox[], maskW = 128, maskH = 128): Promise<string> {
-    //creates an img and canva/context to draw the image on the canvas
-    
+async drawBoxesOnImage(Base64: string, boxes: BoundingBox[], maskW = 128, maskH = 128): Promise<string> {
+  return new Promise((resolve, reject) => {
     const img = new Image();
-    img.src = Base64;
 
-    const canvas = document.createElement('canvas');
-    const ctx = canvas.getContext('2d')!;
-
-    return new Promise((resolve) => {
-      img.onload = () => {
-        //determine the size of the img and draw the img to the canvas
-        // Use actual image size so boxes are drawn in correct place
+    // 1. Setup handlers FIRST
+    img.onload = () => {
+      try {
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d')!;
+        
         const imgW = img.naturalWidth || img.width || 1280;
         const imgH = img.naturalHeight || img.height || 720;
         canvas.width = imgW;
         canvas.height = imgH;
         ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-                //configure styoke style and line width for boxes to draw
+        
         ctx.strokeStyle = 'red';
         ctx.lineWidth = Math.max(2, Math.round(Math.max(canvas.width, canvas.height) / 400));
-        //computes the scaling model mask coordinates to image pixel coordinates
+        
         const scaleX = maskW > 0 ? canvas.width / maskW : 1;
         const scaleY = maskH > 0 ? canvas.height / maskH : 1;
-        //draw each box on the canvas
+        
         boxes.forEach(box => {
           const x = Math.round(box.x * scaleX);
           const y = Math.round(box.y * scaleY);
@@ -1878,15 +1936,20 @@ async processDataUrl(
           ctx.strokeRect(x, y, w, h);
         });
 
-        console.log(`📦 Bounding boxes drawn: ${boxes.length} | 📊 Total cumulative boxes: ${this.totalBoundingBoxesCreated}`);
-
+        console.log(`📦 Bounding boxes drawn: ${boxes.length}`);
         resolve(canvas.toDataURL('image/jpeg'));
-      };
-      // in case image is already cached
-      if (img.complete && img.naturalWidth) img.onload!(null as any);
-    });
-  }
+      } catch (err) {
+        reject(err);
+      }
+    };
 
+    // 2. Add an onerror handler to prevent the code from hanging infinitely
+    img.onerror = (err) => reject(new Error('Failed to load base64 image into canvas'));
+
+    // 3. Assign src LAST
+    img.src = Base64; 
+  });
+}
 
   /**
    * Synchronize photosTaken/photosProcessed from the ImageStorageService
@@ -3114,35 +3177,61 @@ async processDataUrl(
     this.selectedFile = null;
   }
 }
+// 1. Pass the file directly as a parameter to avoid global state overlaps
+// async uploadImage(fileToUpload: File): Promise<UploadResponse | null> {
+  
+//   if (!fileToUpload || !(fileToUpload instanceof Blob)) {
+//     console.error('Upload aborted: provided file is not a valid Blob/File object.', fileToUpload);
+//     return null; 
+//   }
 
-async uploadImage(): Promise<UploadResponse | null> {
-  // 1. Safety check: must return 'null' explicitly. A blank 'return;' returns 'void'
-  if (!this.selectedFile || !(this.selectedFile instanceof Blob)) {
-    console.error('Upload aborted: selectedFile is not a valid Blob/File object.', this.selectedFile);
-    return null; 
-  }
+//   const formData = new FormData();
+//   formData.append('file', fileToUpload, fileToUpload.name);
+
+//   try {
+//     // 2. Wrap the request in RxJS timeout to prevent infinite hanging
+//     // You will need to import { timeout } from 'rxjs';
+//     const request$ = this.http.post<UploadResponse>(`${this.baseUrl}/api/upload`, formData).pipe(
+//       timeout(15_000) // 15 seconds max network wait time
+//     );
+
+//     const response = await firstValueFrom(request$);
+
+//     console.log("Backend Upload Success:", response.message);
+    
+//     // 3. Return the response, but DO NOT mutate class state (this.boxes) here.
+//     // Let processDataUrl handle the returned response to keep data synchronized.
+//     return response; 
+
+//   } catch (err: any) {
+//     // 4. Catch specific errors to help you debug FastAPI issues
+//     if (err.name === 'TimeoutError') {
+//       console.error('Upload failed: The request timed out. File might be too large or network too slow.');
+//     } else if (err.status === 413) {
+//       console.error('Upload failed: HTTP 413 Payload Too Large. FastAPI rejected the image size.');
+//     } else {
+//       console.error('Error uploading image:', err);
+//     }
+    
+//     return null; 
+//   }
+// }
+
+async uploadImage(fileToUpload: File): Promise<UploadResponse | null> {
+  if (!fileToUpload) return null;
 
   const formData = new FormData();
-  formData.append('file', this.selectedFile, this.selectedFile.name);
+  formData.append('file', fileToUpload, fileToUpload.name);
 
   try {
-    // Converts the post Observable into a Promise
+    // Add a timeout if your HTTP client supports it
     const response = await firstValueFrom(
       this.http.post<UploadResponse>(`${this.baseUrl}/api/upload`, formData)
     );
-
-    this.uploadedImageUrl = `${this.baseUrl}${response.rawImagePath}`;
-    this.boxes = response.bounding_boxes;
-
-    console.log("Success:", response.message);
-    
-    // 2. Return the object to resolve the Promise with data
-    return response; 
-
+    return response;
   } catch (err) {
-    console.error('Error uploading image:', err);
-    // 3. Explicitly return null on failure
-    return null; 
+    console.error('Upload failed:', err);
+    return null;
   }
 }
 

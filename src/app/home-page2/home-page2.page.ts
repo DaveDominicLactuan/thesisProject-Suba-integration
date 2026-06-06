@@ -1,4 +1,4 @@
-import { Component, OnInit, OnDestroy } from '@angular/core';
+import { Component, OnInit, OnDestroy, ViewChild, ElementRef } from '@angular/core';
 import { Router } from '@angular/router';
 import { FormBuilder, FormGroup, Validators } from '@angular/forms';
 import { AuthService } from '../services/auth.service';
@@ -14,6 +14,9 @@ import { UserPrefetchCacheService } from '../services/user-prefetch-cache.servic
 import { firstValueFrom } from 'rxjs';
 import { ChatService } from '../services/chat.service';
 import { HttpClient } from '@angular/common/http';
+import { catchError } from 'rxjs/operators';
+import { Photo } from '@capacitor/camera';
+import { FileUpload } from '../services/file-upload';
 
 interface OfficeLocationMarkerData {
   id: string;
@@ -64,12 +67,30 @@ export class HomePage2Page implements OnInit, OnDestroy {
 private apiUrl = 'https://your-vscode-forwarded-url.app.github.dev/';
 apiUrlWeb = 'http://127.0.0.1:8000/';
 apiUrlWeb2 = 'http://127.0.0.1:8000/helloWorld';
-private baseUrl = 'http://127.0.0.1:8000'; 
+private baseUrl2 = 'http://127.0.0.1:8000'; 
+private baseUrl = 'https://16z6llmg-8000.asse.devtunnels.ms'; 
   uploadedImageUrl: string = '';
   selectedFile: File | null = null;
+  @ViewChild('fileInput', { static: false }) fileInput!: ElementRef;
+
+  previewUrl: string | ArrayBuffer | null = null;
+  // selectedFile: File | null = null;
+  // baseUrl = 'http://localhost:8000';
+
+  // A web-friendly URI used for the [src] of <ion-img>
+  previewImageUrl: string | undefined;
+
+  // The native platform URI needed to read the raw data for upload
+  selectedNativePath: string | undefined;
+
+  // baseUrl = 'http://10.0.2.2:8000'; // Special URL for Android Emulator to host loopback
+  // If testing on a real device, use your machine's local IP (e.g., 'http://192.168.1.50:8000')
+
+  isUploading = false;
+  uploadResult: any;
 
   /** Inject auth, router, and image storage services for navigation and data. */
-  constructor(private http: HttpClient, private formBuilder: FormBuilder, private router: Router, private authService: AuthService, private navCtrl: NavController, private auth3: Auth3Service, private imageStorage: ImageStorageService, private platform: Platform, private firestore: Firestore, private userPrefetchCache: UserPrefetchCacheService, private chatService: ChatService) {
+  constructor(private fileUploadService: FileUpload, private http: HttpClient, private formBuilder: FormBuilder, private router: Router, private authService: AuthService, private navCtrl: NavController, private auth3: Auth3Service, private imageStorage: ImageStorageService, private platform: Platform, private firestore: Firestore, private userPrefetchCache: UserPrefetchCacheService, private chatService: ChatService) {
 
   }
 
@@ -89,18 +110,55 @@ testFastApi() {
   });
 }
 
-// 1. Call Text Function
-  getFastApiMessage() {
-    this.http.get<{ message: string }>(`${this.baseUrl}/api/hello`).subscribe({
+// getFastApiMessage() {
+//   this.http.get<{ message: string }>(`${this.baseUrl}/api/hello`)
+//     .pipe(
+//       catchError((firstError) => {
+//         console.warn(`Failed to connect to ${this.baseUrl}. Trying fallback url...`);
+        
+//         // If the first request fails, return the observable for the second request
+//         return this.http.get<{ message: string }>(`${this.baseUrl2}/api/hello`);
+//       })
+//     )
+//     .subscribe({
+//       next: (response) => {
+//         this.apiMessage = response.message;
+//         this.apiStatus = response.message;
+//         console.log("Api Message", this.apiMessage);
+//         console.log('Root connection success:', response);
+//       },
+//       error: (err) => {
+//         // This error block now only triggers if BOTH requests fail
+//         console.error('Error fetching message from both primary and fallback URLs:', err);
+//         this.apiStatus = 'Connection failed.';
+//       }
+//     });
+// }
+
+getFastApiMessage() {
+  this.http.get<{ message: string }>(`${this.baseUrl}/api/hello`)
+    .pipe(
+      catchError((firstError) => {
+        console.warn(`Failed to connect to ${this.baseUrl}. Trying fallback url...`);
+        
+        // If the first request fails, return the observable for the second request
+        return this.http.get<{ message: string }>(`${this.baseUrl2}/api/hello`);
+      })
+    )
+    .subscribe({
       next: (response) => {
         this.apiMessage = response.message;
         this.apiStatus = response.message;
         console.log("Api Message", this.apiMessage);
         console.log('Root connection success:', response);
       },
-      error: (err) => console.error('Error fetching message:', err)
+      error: (err) => {
+        // This error block now only triggers if BOTH requests fail
+        console.error('Error fetching message from both primary and fallback URLs:', err);
+        this.apiStatus = 'Connection failed.';
+      }
     });
-  }
+}
 
   onFileSelected(event: any) {
   // Access the native target files array safely
@@ -2111,4 +2169,123 @@ private persistUserProfileToStorage(): void {
     this.imageStorage.postSampleImageToFirestore();
 }
 
+async captureImage() {
+    try {
+      this.uploadResult = null; // Reset results
+      const photo: Photo = await this.fileUploadService.selectImage();
+
+      // Set preview for the user (immediate feedback)
+      this.previewImageUrl = photo.webPath;
+
+      // Store the native path for the eventual upload function
+      this.selectedNativePath = photo.path;
+      console.log('Native Path Captured:', this.selectedNativePath);
+
+    } catch (error) {
+      console.error('Error selecting image:', error);
+    }
+  }
+
+ 
+
+  // 1. User clicks the button, we trigger the hidden input
+  triggerFileInput() {
+    this.fileInput.nativeElement.click();
+  }
+
+  // 2. Browser fires this when a file is selected
+ onFileSelected2(event: Event) {
+  // 1. Explicitly cast event.target to an HTMLInputElement
+  const inputElement = event.target as HTMLInputElement;
+
+  // 2. Check if files exist and if the array is not empty
+  if (inputElement.files && inputElement.files.length > 0) {
+    const file = inputElement.files[0]; // Get the first selected file
+    
+    // Save to your class property
+    this.selectedFile = file;
+
+    // 3. Only attempt to read the file if it exists
+    const reader = new FileReader();
+    reader.onload = (e: any) => {
+        this.previewUrl = e.target.result;
+    };
+    reader.readAsDataURL(file);
+
+    // Optional: trigger upload automatically
+    this.uploadFile();
+  } else {
+    console.warn("No file selected or selection was cancelled.");
+  }
 }
+
+  // 3. Send to FastAPI
+  uploadFile() {
+    if (!this.selectedFile) return;
+
+    const formData = new FormData();
+    formData.append('file', this.selectedFile);
+
+    this.http.post(`${this.baseUrl}/api/upload2`, formData).subscribe({
+      next: (res) => console.log('Upload success:', res),
+      error: (err) => console.error('Upload failed:', err)
+    });
+  }
+
+  //  uploadToServer() {
+  //   if (!this.selectedNativePath) return;
+
+  //   this.isUploading = true;
+  //   const uploadUrl = `${this.baseUrl}/api/upload2`;
+
+  //   this.fileUploadService.uploadImage(this.selectedNativePath, uploadUrl).subscribe({
+  //     next: (response) => {
+  //       this.isUploading = false;
+  //       this.uploadResult = response;
+  //       console.log('Upload Success:', response);
+  //     },
+  //     error: (err) => {
+  //       this.isUploading = false;
+  //       this.uploadResult = { error: 'Upload failed', details: err };
+  //       console.error('Upload Error:', err);
+  //     }
+  //   });
+  // }
+
+  uploadToServer() {
+  // 1. Check if a web file has been selected instead of native path
+  if (!this.selectedFile) {
+    console.warn("No file selected to upload.");
+    return;
+  }
+
+  this.isUploading = true;
+  this.uploadResult = null; // Clear any previous results
+  
+  const uploadUrl = `${this.baseUrl}/api/upload2`;
+
+  // 2. Build the standard multipart/form-data payload
+  const formData = new FormData();
+  
+  // 'file' must exactly match your FastAPI parameter name: upload_image(file: UploadFile)
+  formData.append('file', this.selectedFile, this.selectedFile.name);
+
+  // 3. Make the HTTP POST request directly using Angular's HttpClient
+  this.http.post(uploadUrl, formData).subscribe({
+    next: (response) => {
+      this.isUploading = false;
+      this.uploadResult = response;
+      console.log('Upload Success:', response);
+    },
+    error: (err) => {
+      this.isUploading = false;
+      this.uploadResult = { error: 'Upload failed', details: err };
+      console.error('Upload Error:', err);
+    }
+  });
+}
+
+
+
+}
+
