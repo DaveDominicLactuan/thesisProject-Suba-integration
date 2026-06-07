@@ -12,6 +12,7 @@ import { FormsModule } from '@angular/forms';
 import { HttpClient } from '@angular/common/http';
 import { firstValueFrom } from 'rxjs';
 import { timeout } from 'rxjs/operators';
+import { Filesystem } from '@capacitor/filesystem';
 // declare var ort: any;
 
 // ort.env.wasm.wasmPaths = 'assets/onnx/';
@@ -471,6 +472,50 @@ private baseUrl = 'https://16z6llmg-8000.asse.devtunnels.ms';
 //   }
 // }
 
+// async takePicture() {
+//   if (this.isCooldown) return;
+//   if (this.isLevelEnabled && !this.isPhoneLeveled) return;
+
+//   this.isCooldown = true;
+//   this.showFlash = true;
+//   setTimeout(() => { this.showFlash = false; }, this.flashDurationMs);
+//   setTimeout(() => { this.isCooldown = false; }, this.cooldownMs);
+   
+//   console.log('[PIPELINE] takePicture: Starting camera capture...');
+
+//   try {
+//     const video = this.videoRef?.nativeElement;
+//     if (!video || video.videoWidth === 0) throw new Error("Video stream inactive");
+
+//     const canvas = this.canvasRef?.nativeElement;
+//     canvas.width = video.videoWidth;
+//     canvas.height = video.videoHeight;
+//     const ctx = canvas.getContext('2d');
+//     if (!ctx) throw new Error("Canvas context missing");
+
+//     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+//     console.log("Draw picture to canvas, attempting blob conversion...");
+
+//     // Call the retry helper
+//     const blob = await this.convertCanvasToBlobWithRetry(canvas, 3);
+//     console.log("Blob conversion successful, size:", blob.size);
+
+//     // Continue with the existing logic
+//     const reader = new FileReader();
+//     reader.onloadend = () => {
+//       const dataUrl = reader.result as string;
+//       const cameraFilename = `Camera-${Date.now()}.jpg`;
+//       console.log(`[Camera] Capture successful: ${cameraFilename}`);
+//       console.log(`[Camera] Blob size: ${blob.size} bytes`);
+//       this.processQueue(dataUrl, cameraFilename, blob);
+//     };
+//     reader.readAsDataURL(blob);
+
+//   } catch (err) {
+//     console.error('[Camera] takePicture failed:', err);
+//   }
+// }
+
 async takePicture() {
   if (this.isCooldown) return;
   if (this.isLevelEnabled && !this.isPhoneLeveled) return;
@@ -481,11 +526,9 @@ async takePicture() {
   setTimeout(() => { this.isCooldown = false; }, this.cooldownMs);
    
   console.log('[PIPELINE] takePicture: Starting camera capture...');
-
   try {
     const video = this.videoRef?.nativeElement;
     if (!video || video.videoWidth === 0) throw new Error("Video stream inactive");
-
     const canvas = this.canvasRef?.nativeElement;
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
@@ -493,20 +536,22 @@ async takePicture() {
     if (!ctx) throw new Error("Canvas context missing");
 
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-
-    // Call the retry helper
+    console.log("Draw picture to canvas, attempting blob conversion...");
+    
+    // 1. Retrieve the Blob using your working retry helper
     const blob = await this.convertCanvasToBlobWithRetry(canvas, 3);
-
-    // Continue with the existing logic
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      const dataUrl = reader.result as string;
-      const cameraFilename = `Camera-${Date.now()}.jpg`;
-      console.log(`[Camera] Capture successful: ${cameraFilename}`);
-      this.processQueue(dataUrl, cameraFilename, blob);
-    };
-    reader.readAsDataURL(blob);
-
+    console.log("Blob conversion successful, size:", blob.size);
+    
+    // 2. Extract DataURL synchronously directly from the active canvas buffer
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+    const cameraFilename = `Camera-${Date.now()}.jpg`;
+    
+    console.log(`[Camera] Capture successful: ${cameraFilename}`);
+    console.log(`[Camera] Blob size: ${blob.size} bytes`);
+    
+    // 3. Safely pass both objects directly to your processing queue
+    this.processQueue(dataUrl, cameraFilename, blob);
+    
   } catch (err) {
     console.error('[Camera] takePicture failed:', err);
   }
@@ -517,13 +562,16 @@ async takePicture() {
  */
 private async convertCanvasToBlobWithRetry(canvas: HTMLCanvasElement, maxRetries: number = 3): Promise<Blob> {
   let lastError;
+  console.log(`[Camera] Starting blob conversion with up to ${maxRetries} attempts...`);
   for (let i = 0; i < maxRetries; i++) {
     try {
       return await new Promise<Blob>((resolve, reject) => {
         canvas.toBlob((blob) => {
           if (blob) {
+            console.log(`[Camera] Blob conversion successful, size: ${blob.size} bytes`);
             resolve(blob);
           } else {
+            console.log(`[Camera] Blob conversion failed.`);
             reject(new Error("Canvas toBlob returned null"));
           }
         }, 'image/jpeg', 0.85);
@@ -670,48 +718,123 @@ private async runQueueProcessor(): Promise<void> {
    * Pick a photo from device gallery (Capacitor) and process it.
    * if successful, calls processDataUrl() which runs inference and stores results.
    */
- async pickImagesMobile() {
-  console.log('[PIPELINE] STEP 1: pickImagesMobile function triggered!'); // <--- ADD THIS
-  console.log('[PIPELINE] pickImagesMobile: Opening gallery...');
+//  async pickImagesMobile() {
+//   console.log('[PIPELINE] STEP 1: pickImagesMobile function triggered!'); // <--- ADD THIS
+//   console.log('[PIPELINE] pickImagesMobile: Opening gallery...');
+//   try {
+//     console.log('[PIPELINE] pickImagesMobile: Selection successful. Fetching Blob...');
+//     // 1. Get the image from the gallery
+//     const image = await Camera.getPhoto({
+//       quality: 90,
+//       allowEditing: false,
+//       resultType: CameraResultType.Uri, // Important: Use URI to get webPath
+//       source: CameraSource.Photos
+//     });
+
+//     console.log('[PIPELINE] STEP 1: pickImagesMobile function triggered!2'); // <--- ADD THIS
+
+//     if (!image.webPath) {
+//       console.warn("No webPath found for selected image.");
+//       return;
+//     }
+
+//     // 2. Fetch the actual Blob from the webPath
+//     const response = await fetch(image.webPath);
+//     const blob = await response.blob();
+
+//     // 3. Convert Blob to DataURL (for processDataUrl preview consistency)
+//     const reader = new FileReader();
+//     reader.onloadend = () => {
+//       const dataUrl = reader.result as string;
+//       const galleryFilename = `Gallery-${Date.now()}.jpg`;
+      
+//       console.log(`[Gallery] Image selected: ${galleryFilename}`);
+      
+//       console.log('[PIPELINE] pickImagesMobile: Blob ready. Calling processQueue.');
+//       // 4. Send Blob and DataUrl to queue
+//       this.processQueue(dataUrl, galleryFilename, blob);
+//     };
+//     reader.readAsDataURL(blob);
+
+//   } catch (error) {
+//     console.error('Error picking image from gallery:', error);
+//     console.error('[PIPELINE] pickImagesMobile: ERROR encountered:', error);
+//   }
+// }
+
+async pickImagesMobile() {
+  console.log('[PIPELINE] pickImagesMobile: Opening gallery for MULTI-SELECT...');
   try {
-    console.log('[PIPELINE] pickImagesMobile: Selection successful. Fetching Blob...');
-    // 1. Get the image from the gallery
-    const image = await Camera.getPhoto({
+    const imageGallery = await Camera.pickImages({
       quality: 90,
-      allowEditing: false,
-      resultType: CameraResultType.Uri, // Important: Use URI to get webPath
-      source: CameraSource.Photos
+      limit: 10
     });
+    
+    console.log(`[PIPELINE] pickImagesMobile: User selected ${imageGallery.photos.length} images.`);
 
-    console.log('[PIPELINE] STEP 1: pickImagesMobile function triggered!2'); // <--- ADD THIS
+    for (const photo of imageGallery.photos) {
+      // Wrap in try/catch so one corrupt image doesn't stop the whole batch
+      try {
+        // 1. Use the native absolute 'path' instead of 'webPath' to bypass the WebView deadlock
+        if (!photo.path) {
+          console.warn('[Gallery] Skipping image: No native path provided by Capacitor.');
+          continue;
+        }
 
-    if (!image.webPath) {
-      console.warn("No webPath found for selected image.");
-      return;
+        console.log(`[Gallery] Reading file natively: ${photo.path}`);
+
+        // 2. Read the file over the native bridge (bypasses HTTP completely)
+        const readFileResult = await Filesystem.readFile({
+          path: photo.path
+        });
+
+        // 3. Construct the Data URL from the native base64 string
+        const format = photo.format || 'jpeg';
+        const dataUrl = `data:image/${format};base64,${readFileResult.data}`;
+
+        // 4. Convert Data URL to Blob (fetch handles raw data URLs instantly without network calls)
+        const response = await fetch(dataUrl);
+        const blob = await response.blob();
+
+        const galleryFilename = `Gallery-${Date.now()}-${Math.random().toString(36).substring(2, 7)}.jpg`;
+        console.log(`[Gallery] Queueing image: ${galleryFilename}`);
+        
+        // 5. Send to your queue pipeline
+        this.processQueue(dataUrl, galleryFilename, blob);
+
+      } catch (innerErr) {
+        console.error(`[Gallery] Failed to process a selected image. Skipping to next.`, innerErr);
+      }
     }
 
-    // 2. Fetch the actual Blob from the webPath
-    const response = await fetch(image.webPath);
-    const blob = await response.blob();
-
-    // 3. Convert Blob to DataURL (for processDataUrl preview consistency)
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      const dataUrl = reader.result as string;
-      const galleryFilename = `Gallery-${Date.now()}.jpg`;
-      
-      console.log(`[Gallery] Image selected: ${galleryFilename}`);
-      
-      console.log('[PIPELINE] pickImagesMobile: Blob ready. Calling processQueue.');
-      // 4. Send Blob and DataUrl to queue
-      this.processQueue(dataUrl, galleryFilename, blob);
-    };
-    reader.readAsDataURL(blob);
-
   } catch (error) {
-    console.error('Error picking image from gallery:', error);
-    console.error('[PIPELINE] pickImagesMobile: ERROR encountered:', error);
+    // Capacitor throws here if the user just closes the gallery without selecting anything
+    console.error('Error picking images from gallery:', error);
   }
+}
+
+private fetchBlobSafely(url: string): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.responseType = 'blob';
+    
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve(xhr.response);
+      } else {
+        // Fallback for local files which sometimes return status 0 on success
+        if (xhr.status === 0 && xhr.response) {
+            resolve(xhr.response);
+        } else {
+            reject(new Error(`HTTP Error ${xhr.status} while fetching blob`));
+        }
+      }
+    };
+    
+    xhr.onerror = () => reject(new Error('Network error while fetching blob via XHR'));
+    xhr.open('GET', url);
+    xhr.send();
+  });
 }
   
 async processDataUrl(
@@ -759,27 +882,37 @@ async processDataUrl(
     // --- BACKEND UPLOAD FLOW ---
     try {
       // FIX: Use the passed blob. If it's missing (e.g. from gallery base64), fall back to fetching it.
-      let finalBlob = blob;
-      if (!finalBlob) {
-        const response = await fetch(dataUrl);
-        finalBlob = await response.blob();
-      }
+      // Ensure we absolutely have a valid Blob instance
+let finalBlob = blob;
+if (!finalBlob || !(finalBlob instanceof Blob)) {
+  const response = await fetch(dataUrl);
+  finalBlob = await response.blob();
+}
 
-      const generatedName = filename || `capture-${Date.now()}.jpg`;
-      this.selectedFile = new File([finalBlob], generatedName, { type: finalBlob.type || 'image/jpeg' });
+const generatedName = filename || `capture-${Date.now()}.jpg`;
 
-      console.log(`[CameraProcessor] Triggering uploadToServer for backend server: ${generatedName}`);
-      
-      if (this.selectedFile) {
-        // FIX: Trigger uploadToServer and store the FastAPI response value
-        console.log(`[PIPELINE] processDataUrl: Calling uploadToServer for ${filename}`);
-        backendUploadResult = await this.uploadToServer(this.selectedFile);
-        console.log(`[PIPELINE] processDataUrl: Upload result:`, backendUploadResult);
-      } else {
-        console.warn('[CameraProcessor] Cannot upload: selectedFile is null.');
-      }
+console.log(`[CameraProcessor] Triggering uploadToServer for backend server: ${generatedName}`);
+
+// 1. Check for finalBlob, NOT this.selectedFile
+if (finalBlob) {
+  console.log(`[PIPELINE] processDataUrl: Calling uploadToServer for ${generatedName}`);
+  // Pass the raw blob directly to our fixed uploadToServer function
+  backendUploadResult = await this.uploadToServer(finalBlob, generatedName);
+  console.log(`[PIPELINE] processDataUrl: Upload result:`, backendUploadResult);
+} else {
+  console.warn('[CameraProcessor] Cannot upload: finalBlob is null or missing.');
+}
 
       const croppedImages: any[] = [];
+
+      console.log("Backend Result check cropped boi:", backendUploadResult?.message);
+      console.log("Backend Result check bounding boxes:", backendUploadResult?.rawImagePath);
+      console.log("Backend Result check cropped ROI:", backendUploadResult?.processedImagePath);
+      console.log("Backend Result check cropped ROI object store:", backendUploadResult?.bounding_boxes);
+      // console.log("Backend Result check cropped ROI:", backendUploadResult?.cropped_roi_objectStore);
+      // console.log("Backend Result check cropped ROI object store:", backendUploadResult?.resizedImagePath);
+
+  
       
 
       
@@ -820,12 +953,7 @@ async processDataUrl(
       let prediction: any = null;
       try {
         inferenceCalled = true;
-        if (this.selectedFile) {
-  backendUploadResult = await this.uploadImage(this.selectedFile);
-} else {
-  console.warn('[CameraProcessor] Cannot upload: selectedFile is null.');
-  // Handle the error appropriately, perhaps by setting a default or returning
-}
+       
         const tensor = await this.preprocessImage(dataUrl);
         
         try {
@@ -920,26 +1048,40 @@ if (Array.isArray(backendCrops) && backendCrops.length > 0) {
   // 2. Fallback: Run local cropping only if backend crops are missing
   console.log("[CameraProcessor] No backend crops found, running local cropping.");
   
-  for (const box of boxesToDraw2) {
-    const croppedNumber = croppedCracks.length + 1;
-    try {
+  // 2. Fallback: Run local cropping only if backend crops are missing
+console.log("[CameraProcessor] No backend crops found, running local cropping.");
+
+for (const box of boxesToDraw2) {
+  const croppedNumber = croppedCracks.length + 1;
+  try {
+    // Wrap the operations in a localized function
+    const cropOperation = async () => {
       const crop = await this.cropBoxFromImage(dataUrl, box, maskW, maskH);
       const cropTensor = await this.preprocessImage(crop);
-      // const cropPrediction = await this.crackDetectionService.runInference(cropTensor);
-      const cropPrediction = null; // Skip local inference for crops to save time, or implement if desired  
-      
-      croppedCracks.push({
-        croppedNumber,
-        image: crop,
-        box,
-        type: 'unknown',
-        shape: 'unknown',
-        severity:'unknown'
-      });
-    } catch (cropErr) {
-      console.warn('[CameraProcessor] Failed handling specific bounding box cropping frame', cropErr);
-    }
+      return crop;
+    };
+
+    // GUARDRAIL: Give each crop a maximum of 2 seconds to complete
+    const cropTimeout = new Promise<never>((_, reject) => 
+      setTimeout(() => reject(new Error(`Crop ${croppedNumber} timed out.`)), 2000)
+    );
+
+    // Race the crop against the 2-second timeout
+    const cropResult = await Promise.race([cropOperation(), cropTimeout]);
+
+    croppedCracks.push({
+      croppedNumber,
+      image: cropResult,
+      box,
+      type: 'unknown',
+      shape: 'unknown',
+      severity:'unknown'
+    });
+  } catch (cropErr) {
+    // If one box fails or times out, it logs the error but safely continues to the next box!
+    console.warn(`[CameraProcessor] Failed handling bounding box ${croppedNumber}`, cropErr);
   }
+}
 }
 
 console.log("It worked line 905! Final croppedCracks:", croppedCracks);
@@ -1265,27 +1407,57 @@ console.log("It worked line 927! Final resizedImage:", resizedImage);
    * Produce Float32 tensor [1,3,128,128] normalized to [-1,1] from a dataUrl.
    * Used by both photo capture and upload flows prior to inference.
    */
+  // async preprocessImage(dataUrl: string): Promise<Float32Array> {
+  //   const img = new Image();
+  //   img.src = dataUrl;
+  //   await new Promise(resolve => (img.onload = resolve));
+
+  //   const canvas = document.createElement('canvas');
+  //   canvas.width = 128;
+  //   canvas.height = 128;
+  //   const ctx = canvas.getContext('2d')!;
+  //   ctx.drawImage(img, 0, 0, 128, 128);
+
+  //   const imageData = ctx.getImageData(0, 0, 128, 128);
+  //   const data = new Float32Array(1 * 3 * 128 * 128);
+
+  //   for (let i = 0; i < 128 * 128; i++) {
+  //     data[i] = (imageData.data[i * 4] / 255 - 0.5) / 0.5;           // R
+  //     data[i + 128 * 128] = (imageData.data[i * 4 + 1] / 255 - 0.5) / 0.5; // G
+  //     data[i + 2 * 128 * 128] = (imageData.data[i * 4 + 2] / 255 - 0.5) / 0.5; // B
+  //   }
+
+  //   return data;
+  // }
+
   async preprocessImage(dataUrl: string): Promise<Float32Array> {
-    const img = new Image();
-    img.src = dataUrl;
-    await new Promise(resolve => (img.onload = resolve));
+    return new Promise((resolve, reject) => { // ADDED REJECT
+      const img = new Image();
+      
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = 128;
+        canvas.height = 128;
+        const ctx = canvas.getContext('2d')!;
+        ctx.drawImage(img, 0, 0, 128, 128);
 
-    const canvas = document.createElement('canvas');
-    canvas.width = 128;
-    canvas.height = 128;
-    const ctx = canvas.getContext('2d')!;
-    ctx.drawImage(img, 0, 0, 128, 128);
+        const imageData = ctx.getImageData(0, 0, 128, 128);
+        const data = new Float32Array(1 * 3 * 128 * 128);
+        for (let i = 0; i < 128 * 128; i++) {
+          data[i] = (imageData.data[i * 4] / 255 - 0.5) / 0.5;
+          data[i + 128 * 128] = (imageData.data[i * 4 + 1] / 255 - 0.5) / 0.5;
+          data[i + 2 * 128 * 128] = (imageData.data[i * 4 + 2] / 255 - 0.5) / 0.5;
+        }
+        resolve(data);
+      };
 
-    const imageData = ctx.getImageData(0, 0, 128, 128);
-    const data = new Float32Array(1 * 3 * 128 * 128);
+      // GUARDRAIL: Reject promise on load failure
+      img.onerror = () => {
+        reject(new Error('Failed to load image for tensor preprocessing.'));
+      };
 
-    for (let i = 0; i < 128 * 128; i++) {
-      data[i] = (imageData.data[i * 4] / 255 - 0.5) / 0.5;           // R
-      data[i + 128 * 128] = (imageData.data[i * 4 + 1] / 255 - 0.5) / 0.5; // G
-      data[i + 2 * 128 * 128] = (imageData.data[i * 4 + 2] / 255 - 0.5) / 0.5; // B
-    }
-
-    return data;
+      img.src = dataUrl;
+    });
   }
 
   // Reduce data URL size to stay under Firestore document limits.
@@ -1477,23 +1649,88 @@ console.log("It worked line 927! Final resizedImage:", resizedImage);
     return storedCroppedCracks;
   }
 
+  // async cropBoxFromImage(
+  //   imageDataUrl: string,
+  //   box: BoundingBox,
+  //   maskW: number,
+  //   maskH: number
+  // ): Promise<string> {
+  //   const img = new Image();
+  //   img.src = imageDataUrl;
+
+  //   return new Promise(resolve => {
+  //     img.onload = () => {
+  //       const imgW = img.naturalWidth;
+  //       const imgH = img.naturalHeight;
+
+  //       const scaleX = imgW / maskW;
+  //       const scaleY = imgH / maskH;
+
+  //       const padding = 100;
+
+  //       let cropX = Math.round(box.x * scaleX);
+  //       let cropY = Math.round(box.y * scaleY);
+  //       let cropW = Math.round(box.w * scaleX);
+  //       let cropH = Math.round(box.h * scaleY);
+
+  //       // Add context around crack
+  //       cropX = Math.max(0, cropX - padding);
+  //       cropY = Math.max(0, cropY - padding);
+
+  //       cropW = Math.min(imgW - cropX, cropW + padding * 2);
+  //       cropH = Math.min(imgH - cropY, cropH + padding * 2);
+
+  //       // Keep a 4:3 aspect ratio
+  //       const targetRatio = 4 / 3;
+  //       const centerX = cropX + cropW / 2;
+  //       const centerY = cropY + cropH / 2;
+
+  //       if (cropH > cropW) {
+  //         cropW = cropH * targetRatio;
+  //       } else {
+  //         cropH = cropW / targetRatio;
+  //       }
+
+  //       cropX = Math.round(centerX - cropW / 2);
+  //       cropY = Math.round(centerY - cropH / 2);
+
+  //       cropX = Math.max(0, cropX);
+  //       cropY = Math.max(0, cropY);
+
+  //       if (cropX + cropW > imgW) {
+  //         cropW = imgW - cropX;
+  //       }
+
+  //       if (cropY + cropH > imgH) {
+  //         cropH = imgH - cropY;
+  //       }
+
+  //       const canvas = document.createElement('canvas');
+  //       canvas.width = cropW;
+  //       canvas.height = cropH;
+
+  //       const ctx = canvas.getContext('2d')!;
+  //       ctx.drawImage(img, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
+
+  //       resolve(canvas.toDataURL('image/jpeg'));
+  //     };
+  //   });
+  // }
+
   async cropBoxFromImage(
     imageDataUrl: string,
     box: BoundingBox,
     maskW: number,
     maskH: number
   ): Promise<string> {
-    const img = new Image();
-    img.src = imageDataUrl;
-
-    return new Promise(resolve => {
+    return new Promise((resolve, reject) => { // ADDED REJECT
+      const img = new Image();
+      
       img.onload = () => {
         const imgW = img.naturalWidth;
         const imgH = img.naturalHeight;
-
         const scaleX = imgW / maskW;
         const scaleY = imgH / maskH;
-
         const padding = 100;
 
         let cropX = Math.round(box.x * scaleX);
@@ -1501,14 +1738,11 @@ console.log("It worked line 927! Final resizedImage:", resizedImage);
         let cropW = Math.round(box.w * scaleX);
         let cropH = Math.round(box.h * scaleY);
 
-        // Add context around crack
         cropX = Math.max(0, cropX - padding);
         cropY = Math.max(0, cropY - padding);
-
         cropW = Math.min(imgW - cropX, cropW + padding * 2);
         cropH = Math.min(imgH - cropY, cropH + padding * 2);
 
-        // Keep a 4:3 aspect ratio
         const targetRatio = 4 / 3;
         const centerX = cropX + cropW / 2;
         const centerY = cropY + cropH / 2;
@@ -1521,14 +1755,12 @@ console.log("It worked line 927! Final resizedImage:", resizedImage);
 
         cropX = Math.round(centerX - cropW / 2);
         cropY = Math.round(centerY - cropH / 2);
-
         cropX = Math.max(0, cropX);
         cropY = Math.max(0, cropY);
 
         if (cropX + cropW > imgW) {
           cropW = imgW - cropX;
         }
-
         if (cropY + cropH > imgH) {
           cropH = imgH - cropY;
         }
@@ -1536,12 +1768,19 @@ console.log("It worked line 927! Final resizedImage:", resizedImage);
         const canvas = document.createElement('canvas');
         canvas.width = cropW;
         canvas.height = cropH;
-
         const ctx = canvas.getContext('2d')!;
         ctx.drawImage(img, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
 
         resolve(canvas.toDataURL('image/jpeg'));
       };
+
+      // GUARDRAIL: Prevent infinite hanging if image fails to parse
+      img.onerror = () => {
+        reject(new Error('Failed to load image into canvas for cropping.'));
+      };
+
+      // Best Practice: Always set src AFTER assigning onload/onerror
+      img.src = imageDataUrl; 
     });
   }
 
@@ -2872,34 +3111,68 @@ public async logCurrentSessionStateAfterProcessDataUrl(): Promise<void> {
 }
 
 // FIX: Converted uploadImage to uploadToServer to capture and send the value back
-async uploadToServer(fileToUpload: File | Blob, customName?: string): Promise<UploadResponse | null> {
+// async uploadToServer(fileToUpload: File | Blob, customName?: string): Promise<UploadResponse | null> {
+//   console.log('[PIPELINE] uploadToServer: Attempting HTTP request...');
+//   if (!fileToUpload) return null;
+
+//   const formData = new FormData();
+//   const filename = fileToUpload instanceof File ? fileToUpload.name : (customName || `upload-${Date.now()}.jpg`);
+//   formData.append('file', fileToUpload, filename);
+
+//   // Define the order of attempts
+//   const endpoints = [this.baseUrl, this.baseUrl2, this.baseUrl];
+
+//   // Loop through endpoints
+//   for (const url of endpoints) {
+//     try {
+//       console.log(`[Upload] Attempting to connect to: ${url}`);
+      
+//       const response = await firstValueFrom(
+//         this.http.post<UploadResponse>(`${url}/api/upload`, formData)
+//       );
+//       console.log(`[PIPELINE] uploadToServer: SUCCESS`);
+//       console.log(`[Upload] Success using ${url}`);
+//       console.log("Backend Response:", response);
+//       return response; // Exit the function once successful
+      
+//     } catch (err) {
+//       console.error('[PIPELINE] uploadToServer: FAILED to reach server. Error Details:', err);
+//       console.error(`[Upload] Failed attempt to ${url}. Trying next...`, err);
+//       // Continue to the next iteration in the loop
+//     }
+//   }
+
+//   console.error('[Upload] All endpoints failed.');
+//   return null;
+// }
+
+async uploadToServer(fileToUpload: Blob, customName: string): Promise<UploadResponse | null> {
   console.log('[PIPELINE] uploadToServer: Attempting HTTP request...');
-  if (!fileToUpload) return null;
+  
+  // Strict check: Prevent the request from even firing if it's not a true Blob
+  if (!fileToUpload || !(fileToUpload instanceof Blob)) {
+    console.error('[Upload] Aborting: fileToUpload is not a valid Blob.', fileToUpload);
+    return null;
+  }
 
   const formData = new FormData();
-  const filename = fileToUpload instanceof File ? fileToUpload.name : (customName || `upload-${Date.now()}.jpg`);
-  formData.append('file', fileToUpload, filename);
+  
+  // The 3rd parameter safely sets the filename for the backend without needing a File object
+  formData.append('file', fileToUpload, customName); 
 
-  // Define the order of attempts
   const endpoints = [this.baseUrl, this.baseUrl2, this.baseUrl];
 
-  // Loop through endpoints
   for (const url of endpoints) {
     try {
       console.log(`[Upload] Attempting to connect to: ${url}`);
-      
       const response = await firstValueFrom(
         this.http.post<UploadResponse>(`${url}/api/upload`, formData)
       );
       console.log(`[PIPELINE] uploadToServer: SUCCESS`);
-      console.log(`[Upload] Success using ${url}`);
-      console.log("Backend Response:", response);
-      return response; // Exit the function once successful
+      return response;
       
     } catch (err) {
-      console.error('[PIPELINE] uploadToServer: FAILED to reach server. Error Details:', err);
       console.error(`[Upload] Failed attempt to ${url}. Trying next...`, err);
-      // Continue to the next iteration in the loop
     }
   }
 
