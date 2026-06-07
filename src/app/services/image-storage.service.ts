@@ -1219,6 +1219,22 @@ export class ImageStorageService {
         // NOTE: Commented out base64 storage to save Firestore quota - using S3 references instead
         // const safeOriginal = await this.clampDataUrlToBytes(image.original, this.FIRESTORE_DOC_MAX_BYTES);
         // const safeWithBoxes = await this.clampDataUrlToBytes(image.withBoxes, this.FIRESTORE_DOC_MAX_BYTES);
+
+        //new
+
+        let imageType = 'unknown'; // Fallback value
+        if (image.filename) {
+          if (image.filename.includes('resized')) {
+            imageType = 'resized';
+          } else if (image.filename.includes('cropped')) {
+            imageType = 'cropped';
+          } else if (image.filename.includes('original')) {
+            imageType = 'original';
+          }
+        }
+
+
+
         const imageRef = doc(imagesCollection, image.filename);
         const imageWritePayload: any = {
           ...this.sanitizeStoredImageForFirestore({
@@ -1233,13 +1249,14 @@ export class ImageStorageService {
             originalS3Key: image.storagePath || null,
             originalS3Url: image.storageUrl || null,
             correctedByEngineer: !!session.correctedByEngineer,
-            returnedBoudingBox: preservedBoxes,
+            // returnedBoudingBox: preservedBoxes,
           } as StoredImage),
           createdBy,
           ReceivedBy: receiverId || currentUid,
           OriginUserId: currentUid,
           engineerCheckedSession: !!session.engineerCheckedSession,
           correctedByEngineer: !!session.correctedByEngineer,
+          type: imageType
         };
 
         console.group('[ImageStorageService] 🖼️ Session Image Object Being Saved');

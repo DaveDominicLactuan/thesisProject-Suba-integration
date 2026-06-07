@@ -16,14 +16,18 @@ export class FileUpload {
    * Prompts the user to select or capture an image.
    * Returns a promise containing webPath for preview and native path for upload.
    */
-  async selectImage(): Promise<Photo> {
-    return await Camera.getPhoto({
-      quality: 90,
-      allowEditing: false,
-      resultType: CameraResultType.Uri, // Essential for both preview and native path
-      source: CameraSource.Prompt // Asks user: Camera or Gallery
-    });
-  }
+  async selectImage(sourceType: 'CAMERA' | 'PHOTOS'): Promise<Photo> {
+  // Map your custom string to Capacitor's expected CameraSource
+  const source = sourceType === 'CAMERA' ? CameraSource.Camera : CameraSource.Photos;
+
+  return await Camera.getPhoto({
+    quality: 90,
+    allowEditing: false,
+    resultType: CameraResultType.Uri,
+    source: source // Forces either Camera or Photo Gallery directly
+  });
+}
+
 
   /**
    * Converts a native file URI (from @capacitor/camera) into a Blob

@@ -61,6 +61,7 @@ export class HomePage2Page implements OnInit, OnDestroy {
   isLocationAvailable: boolean = false;
   isLocationDataFetched: boolean = false;
   private locationCheckInterval: any = null;
+  capturedBlob: Blob | null = null;
   apiMessage: string = 'Loading...';
   apiStatus: string = '';
   boxes: { w: number; h: number; x: number; y: number }[] = [];
@@ -73,7 +74,7 @@ private baseUrl = 'https://16z6llmg-8000.asse.devtunnels.ms';
   selectedFile: File | null = null;
   @ViewChild('fileInput', { static: false }) fileInput!: ElementRef;
 
-  previewUrl: string | ArrayBuffer | null = null;
+  previewUrl: string | undefined = undefined;
   // selectedFile: File | null = null;
   // baseUrl = 'http://localhost:8000';
 
@@ -2169,22 +2170,34 @@ private persistUserProfileToStorage(): void {
     this.imageStorage.postSampleImageToFirestore();
 }
 
-async captureImage() {
-    try {
-      this.uploadResult = null; // Reset results
-      const photo: Photo = await this.fileUploadService.selectImage();
+async captureImage(sourceType: 'CAMERA' | 'PHOTOS') {
+  try {
+    this.uploadResult = null;
+    this.isUploading = false;
 
-      // Set preview for the user (immediate feedback)
-      this.previewImageUrl = photo.webPath;
-
-      // Store the native path for the eventual upload function
-      this.selectedNativePath = photo.path;
-      console.log('Native Path Captured:', this.selectedNativePath);
-
-    } catch (error) {
-      console.error('Error selecting image:', error);
+    const photo = await this.fileUploadService.selectImage(sourceType);
+    this.previewUrl = photo.webPath;
+    if (!photo.webPath) {
+      alert("Device Error: Native webPath missing.");
+      return;
     }
+    
+    // Convert the native image path cleanly into a secure data blob
+    const response = await fetch(photo.webPath);
+    this.capturedBlob = await response.blob();
+
+    // FIX: Convert the captured Blob into a File and assign it to selectedFile
+    this.selectedFile = new File([this.capturedBlob], `camera_capture_${Date.now()}.jpg`, {
+      type: this.capturedBlob.type || 'image/jpeg'
+    });
+
+    console.log('Image successfully saved as File:', this.selectedFile);
+
+  } catch (error: any) {
+    alert("Capture Pipeline Crashed: " + error.message);
+    console.error('Error capturing image:', error);
   }
+}
 
  
 

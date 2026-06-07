@@ -85,7 +85,7 @@ stats: AggregateStats = {
   totalCracks: 0,
   totalImages: 0,
 };
-galleryViewState: 'originalState' | 'croppedState' = 'originalState';
+galleryViewState: 'originalState' | 'croppedState' | 'resizedState' = 'originalState';
 activeOriginalIndex: number | null = null;
 showWithBoxes: boolean = false;
 engineerLookedSessionChecked: boolean = false;
@@ -720,19 +720,40 @@ private lastImageTitleDebugAt: number = 0;
     return queryless.replace(/\.[a-z0-9]+$/i, '');
   }
 
-  private parseImageGroup(filename: string): { index: number | null; isOriginal: boolean; isCropped: boolean } {
+  // private parseImageGroup(filename: string): { index: number | null; isOriginal: boolean; isCropped: boolean } {
+  //   const base = this.getFilenameBase(filename);
+  //   const croppedMatch = base.match(/img(\d+)cropped(\d+)?/);
+  //   if (croppedMatch) {
+  //     return { index: Number(croppedMatch[1]), isOriginal: false, isCropped: true };
+  //   }
+
+  //   const originalMatch = base.match(/img(\d+)original/);
+  //   if (originalMatch) {
+  //     return { index: Number(originalMatch[1]), isOriginal: true, isCropped: false };
+  //   }
+
+  //   return { index: null, isOriginal: false, isCropped: false };
+  // }
+
+  private parseImageGroup(filename: string): { index: number | null; isOriginal: boolean; isCropped: boolean; isResized: boolean } {
     const base = this.getFilenameBase(filename);
+    
     const croppedMatch = base.match(/img(\d+)cropped(\d+)?/);
     if (croppedMatch) {
-      return { index: Number(croppedMatch[1]), isOriginal: false, isCropped: true };
+      return { index: Number(croppedMatch[1]), isOriginal: false, isCropped: true, isResized: false };
+    }
+
+    const resizedMatch = base.match(/img(\d+)resized(\d+)?/);
+    if (resizedMatch) {
+      return { index: Number(resizedMatch[1]), isOriginal: false, isCropped: false, isResized: true };
     }
 
     const originalMatch = base.match(/img(\d+)original/);
     if (originalMatch) {
-      return { index: Number(originalMatch[1]), isOriginal: true, isCropped: false };
+      return { index: Number(originalMatch[1]), isOriginal: true, isCropped: false, isResized: false };
     }
 
-    return { index: null, isOriginal: false, isCropped: false };
+    return { index: null, isOriginal: false, isCropped: false, isResized: false };
   }
 
   private logGalleryState(context: string): void {
@@ -764,6 +785,14 @@ private lastImageTitleDebugAt: number = 0;
 
       this.galleryViewState = 'originalState';
       this.activeOriginalIndex = null;
+    } else if (this.galleryViewState === 'resizedState' && this.activeOriginalIndex !== null) {
+      const resized = this.imagePaths.filter((img) => {
+        const meta = this.parseImageGroup(this.getImageFilename(img));
+        return meta.isResized && meta.index === this.activeOriginalIndex;
+      });
+      if (resized.length > 0) {
+        return resized;
+      }
     }
 
     return originals;

@@ -114,59 +114,10 @@
   <div class="explore-section" aria-label="Explore options">
     <div class="explore-title">Explore</div>
     <div class="explore-grid">
-      <!-- <div class="explore-card"  (click)="gochatPage()">
-        <div class="explore-badge" aria-hidden="true">{{ exploreBadgeCount }}</div>
-        <div class="explore-icon" aria-hidden="true">
-          <img src="assets/ChatIconNew.png" alt="Browser" />
-        </div>
-        <div class="explore-label">Chat</div>
-      </div>
-      <div class="explore-card" (click)="goSessionPage()">
-        <div class="explore-icon" aria-hidden="true">
-          <img src="assets/updatedSession.png" alt="Camera" />
-        </div>
-        <div class="explore-label">Sessions</div>
-      </div> -->
+      
 
-      <div class="explore-card2">
-       <ion-card-title>2. Upload & Display Image</ion-card-title>
-    <ion-content class="ion-padding">
-
-  <div class="image-preview-container ion-margin-bottom">
-    <ion-img *ngIf="previewImageUrl; else noImage" [src]="previewImageUrl"></ion-img>
-    <ng-template #noImage>
-      <div class="placeholder ion-text-center">
-        <ion-icon name="image-outline" size="large"></ion-icon>
-        <p>No image selected</p>
-      </div>
-    </ng-template>
-  </div>
-
-  <ion-button expand="block" (click)="captureImage()">
-    <ion-icon name="camera-outline" slot="start"></ion-icon>
-    Select/Capture Image
-  </ion-button>
-
-  <ion-button expand="block" color="success" class="ion-margin-top" 
-              [disabled]="!selectedNativePath || isUploading"
-              (click)="uploadToServer()">
-    <ion-icon *ngIf="!isUploading" name="cloud-upload-outline" slot="start"></ion-icon>
-    <ion-spinner *ngIf="isUploading" slot="start"></ion-spinner>
-    {{ isUploading ? 'Uploading...' : 'Confirm & Upload' }}
-  </ion-button>
-
-  <ion-card *ngIf="uploadResult" color="light" class="ion-margin-top">
-    <ion-card-header>
-      <ion-card-title>Server Response</ion-card-title>
-    </ion-card-header>
-    <ion-card-content>
-      <pre>{{ uploadResult | json }}</pre>
-    </ion-card-content>
-  </ion-card>
-
-</ion-content>
-      </div>
-
+      
+      
       <div class="explore-card2">
        <ion-card-title>2. Upload & Display Image</ion-card-title>
     <ion-content class="ion-padding">
@@ -189,38 +140,29 @@
 </ion-content>
       </div>
 
-       <!-- <div class="explore-card">
-       <div class="api-container" *ngIf="apiStatus">
-    <h2>Server Status: <span [style.color]="apiStatus === 'success' ? 'green' : 'red'">{{ apiStatus }}</span></h2>
-    <p>{{ apiMessage }}</p>
-  </div>
+      <div class="explore-card2">
+       <ion-card-title>New Upload & Display Image</ion-card-title>
+    <ion-content class="ion-padding">
+<ion-button expand="block" color="primary" (click)="captureImage('CAMERA')">
+  <ion-icon name="camera-outline" slot="start"></ion-icon>
+  Take a Picture
+</ion-button>
 
-  <div *ngIf="!apiStatus">
-    <ion-spinner name="crescent"></ion-spinner>
-    <p>Connecting to backend...</p>
-  </div>
+<ion-button expand="block" color="secondary" class="ion-margin-top" (click)="captureImage('PHOTOS')">
+  <ion-icon name="images-outline" slot="start"></ion-icon>
+  Upload from Gallery
+</ion-button>
+
+<ion-button expand="block" color="success" class="ion-margin-top"
+            [disabled]="!selectedFile || isUploading"
+            (click)="uploadToServer()">
+  <ion-icon *ngIf="!isUploading" name="cloud-upload-outline" slot="start"></ion-icon>
+  <ion-spinner *ngIf="isUploading" slot="start"></ion-spinner>
+  Confirm & Upload
+</ion-button>
+
+</ion-content>
       </div>
-
-      
-
-      <div class="explore-card">
-       <ion-card-title>2. Upload & Display Image</ion-card-title>
-    <ion-card-content>
-      
-      <input type="file" (change)="onFileSelected($event)" accept="image/*" />
-      
-      <ion-button expand="block" color="success" class="ion-margin-top" 
-                  [disabled]="!selectedFile" (click)="uploadImage()">
-        Upload to Server
-      </ion-button>
-
-      <div *ngIf="uploadedImageUrl" class="ion-margin-top ion-text-center">
-        <p><strong>Uploaded Image:</strong></p>
-        <img [src]="uploadedImageUrl" alt="Uploaded Result" style="max-height: 250px; border-radius: 8px;" />
-      </div>
-
-    </ion-card-content>
-      </div> -->
 
       
 
@@ -232,50 +174,5 @@
   
 
 <ion-content id="main-content" class="home-page" (click)="closeSidebar()">
-  <!-- <div class="quick-actions" aria-label="Quick actions">
-    <div class="qa-card" (click)="goToCameraPage2()">
-      <div class="qa-icon qa-icon-tv" aria-hidden="true">
-        <ion-icon name="tv-outline"></ion-icon>
-      </div>
-      <div class="qa-text">
-        <div class="qa-title">Mirror Screen</div>
-        <div class="qa-subtitle">Project screen to PC / TV</div>
-      </div>
-      <ion-icon class="qa-chevron" name="chevron-forward-outline" aria-hidden="true"></ion-icon>
-    </div>
-
-    <div class="qa-card" (click)="goToUploadImage()">
-      <div class="qa-icon qa-icon-receiver" aria-hidden="true">
-        <ion-icon name="cloud-download-outline"></ion-icon>
-      </div>
-      <div class="qa-text">
-        <div class="qa-title">Screen Receiver</div>
-        <div class="qa-subtitle">Project screen from PC, Mac, and more</div>
-      </div>
-      <ion-icon class="qa-chevron" name="chevron-forward-outline" aria-hidden="true"></ion-icon>
-    </div>
-  </div> -->
-  <!-- <div class="quick-actions" aria-label="Quick actions">
-    <div class="qa-card" (click)="goToCameraPage2()">
-      <div class="qa-icon qa-icon-tv" aria-hidden="true">
-        <img src="assets/updatedCameraIcon.png" alt="Mirror Screen" />
-      </div>
-      <div class="qa-text">
-        <div class="qa-title">Mirror Screen</div>
-        <div class="qa-subtitle">Project screen to PC / TV</div>
-      </div>
-      <ion-icon class="qa-chevron" name="chevron-forward-outline" aria-hidden="true"></ion-icon>
-    </div>
-
-    <div class="qa-card" (click)="goToUploadImage()">
-      <div class="qa-icon qa-icon-receiver" aria-hidden="true">
-        <img src="assets/updatedUploadImageIcon.png" alt="Screen Receiver" />
-      </div>
-      <div class="qa-text">
-        <div class="qa-title">Screen Receiver</div>
-        <div class="qa-subtitle">Project screen from PC, Mac, and more</div>
-      </div>
-      <ion-icon class="qa-chevron" name="chevron-forward-outline" aria-hidden="true"></ion-icon>
-    </div>
-  </div> -->
+ 
 </ion-content>
