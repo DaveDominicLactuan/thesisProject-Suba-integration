@@ -153,8 +153,10 @@ apiMessage: string = 'Loading...';
 private apiUrl = 'https://your-vscode-forwarded-url.app.github.dev/';
 apiUrlWeb = 'http://127.0.0.1:8000/';
 apiUrlWeb2 = 'http://127.0.0.1:8000/helloWorld';
-private baseUrl2 = 'http://127.0.0.1:8000'; 
-private baseUrl = 'https://16z6llmg-8000.asse.devtunnels.ms';
+// private baseUrl2 = 'http://127.0.0.1:8000'; 
+// private baseUrl = 'https://16z6llmg-8000.asse.devtunnels.ms';
+private baseUrl2 = 'https://crack-api-repo.onrender.com'; 
+private baseUrl = 'https://crack-api-repo.onrender.com';
   uploadedImageUrl: string = '';
   selectedFile: File | null = null;
 
@@ -294,6 +296,11 @@ private baseUrl = 'https://16z6llmg-8000.asse.devtunnels.ms';
    * Honors optional route `sessionId` to reuse an existing session.
    */
   ngAfterViewInit() {
+
+    this.photosTaken = 0;
+    this.photosProcessed = 0;
+    this.imageQueue = [];
+
     this.platform.ready().then(() => this.initCamera());
     // Handle Android hardware back: prompt before discarding empty session
     
@@ -312,6 +319,8 @@ private baseUrl = 'https://16z6llmg-8000.asse.devtunnels.ms';
     try { this.routeSessionId = this.route.snapshot.queryParamMap.get('sessionId'); } catch (e) { this.routeSessionId = null; }
     //load local images from image storage service
     this.loadStoredImages()
+
+    
     //loads the sessions from image storage service
       .then(() => this.loadSessions())
       .then(async () => {
@@ -718,47 +727,56 @@ private async runQueueProcessor(): Promise<void> {
    * Pick a photo from device gallery (Capacitor) and process it.
    * if successful, calls processDataUrl() which runs inference and stores results.
    */
-//  async pickImagesMobile() {
-//   console.log('[PIPELINE] STEP 1: pickImagesMobile function triggered!'); // <--- ADD THIS
-//   console.log('[PIPELINE] pickImagesMobile: Opening gallery...');
+
+
+// async pickImagesMobile() {
+//   console.log('[PIPELINE] pickImagesMobile: Opening gallery for MULTI-SELECT...');
 //   try {
-//     console.log('[PIPELINE] pickImagesMobile: Selection successful. Fetching Blob...');
-//     // 1. Get the image from the gallery
-//     const image = await Camera.getPhoto({
+//     const imageGallery = await Camera.pickImages({
 //       quality: 90,
-//       allowEditing: false,
-//       resultType: CameraResultType.Uri, // Important: Use URI to get webPath
-//       source: CameraSource.Photos
+//       limit: 10
 //     });
+    
+//     console.log(`[PIPELINE] pickImagesMobile: User selected ${imageGallery.photos.length} images.`);
 
-//     console.log('[PIPELINE] STEP 1: pickImagesMobile function triggered!2'); // <--- ADD THIS
+//     for (const photo of imageGallery.photos) {
+//       // Wrap in try/catch so one corrupt image doesn't stop the whole batch
+//       try {
+//         // 1. Use the native absolute 'path' instead of 'webPath' to bypass the WebView deadlock
+//         if (!photo.path) {
+//           console.warn('[Gallery] Skipping image: No native path provided by Capacitor.');
+//           continue;
+//         }
 
-//     if (!image.webPath) {
-//       console.warn("No webPath found for selected image.");
-//       return;
+//         console.log(`[Gallery] Reading file natively: ${photo.path}`);
+
+//         // 2. Read the file over the native bridge (bypasses HTTP completely)
+//         const readFileResult = await Filesystem.readFile({
+//           path: photo.path
+//         });
+
+//         // 3. Construct the Data URL from the native base64 string
+//         const format = photo.format || 'jpeg';
+//         const dataUrl = `data:image/${format};base64,${readFileResult.data}`;
+
+//         // 4. Convert Data URL to Blob (fetch handles raw data URLs instantly without network calls)
+//         const response = await fetch(dataUrl);
+//         const blob = await response.blob();
+
+//         const galleryFilename = `Gallery-${Date.now()}-${Math.random().toString(36).substring(2, 7)}.jpg`;
+//         console.log(`[Gallery] Queueing image: ${galleryFilename}`);
+        
+//         // 5. Send to your queue pipeline
+//         this.processQueue(dataUrl, galleryFilename, blob);
+
+//       } catch (innerErr) {
+//         console.error(`[Gallery] Failed to process a selected image. Skipping to next.`, innerErr);
+//       }
 //     }
 
-//     // 2. Fetch the actual Blob from the webPath
-//     const response = await fetch(image.webPath);
-//     const blob = await response.blob();
-
-//     // 3. Convert Blob to DataURL (for processDataUrl preview consistency)
-//     const reader = new FileReader();
-//     reader.onloadend = () => {
-//       const dataUrl = reader.result as string;
-//       const galleryFilename = `Gallery-${Date.now()}.jpg`;
-      
-//       console.log(`[Gallery] Image selected: ${galleryFilename}`);
-      
-//       console.log('[PIPELINE] pickImagesMobile: Blob ready. Calling processQueue.');
-//       // 4. Send Blob and DataUrl to queue
-//       this.processQueue(dataUrl, galleryFilename, blob);
-//     };
-//     reader.readAsDataURL(blob);
-
 //   } catch (error) {
-//     console.error('Error picking image from gallery:', error);
-//     console.error('[PIPELINE] pickImagesMobile: ERROR encountered:', error);
+//     // Capacitor throws here if the user just closes the gallery without selecting anything
+//     console.error('Error picking images from gallery:', error);
 //   }
 // }
 
@@ -769,38 +787,67 @@ async pickImagesMobile() {
       quality: 90,
       limit: 10
     });
-    
     console.log(`[PIPELINE] pickImagesMobile: User selected ${imageGallery.photos.length} images.`);
 
     for (const photo of imageGallery.photos) {
-      // Wrap in try/catch so one corrupt image doesn't stop the whole batch
       try {
-        // 1. Use the native absolute 'path' instead of 'webPath' to bypass the WebView deadlock
-        if (!photo.path) {
-          console.warn('[Gallery] Skipping image: No native path provided by Capacitor.');
+        let finalDataUrl: string | null = null;
+        let finalBlob: Blob | null = null;
+
+        // ==========================================
+        // ATTEMPT 1: Your Original Native Pipeline
+        // ==========================================
+        if (photo.path) {
+          try {
+            console.log(`[Gallery] Reading file natively: ${photo.path}`);
+            const readFileResult = await Filesystem.readFile({ path: photo.path });
+            
+            const format = photo.format || 'jpeg';
+            finalDataUrl = `data:image/${format};base64,${readFileResult.data}`;
+
+            // Convert Data URL to Blob
+            const response = await fetch(finalDataUrl);
+            finalBlob = await response.blob();
+            
+            console.log('[Gallery] Native read successful.');
+          } catch (nativeErr) {
+            console.warn(`[Gallery] Native read failed, triggering fallback...`, nativeErr);
+            finalDataUrl = null; // Reset to trigger the fallback
+          }
+        }
+
+        // ==========================================
+        // ATTEMPT 2: Fallback to webPath (WebView)
+        // ==========================================
+        if (!finalDataUrl && photo.webPath) {
+          console.log(`[Gallery] Using webPath fallback: ${photo.webPath}`);
+          
+          // Fetch Blob directly from the virtual URL
+          const response = await fetch(photo.webPath);
+          finalBlob = await response.blob();
+
+          // Convert Blob back to DataUrl for preview/processing compatibility
+          finalDataUrl = await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onloadend = () => resolve(reader.result as string);
+            reader.onerror = reject;
+            reader.readAsDataURL(finalBlob!);
+          });
+        }
+
+        // ==========================================
+        // VALIDATE & SEND TO QUEUE
+        // ==========================================
+        if (!finalDataUrl || !finalBlob) {
+          console.warn('[Gallery] Skipping image: Both native path and webPath failed.');
           continue;
         }
 
-        console.log(`[Gallery] Reading file natively: ${photo.path}`);
-
-        // 2. Read the file over the native bridge (bypasses HTTP completely)
-        const readFileResult = await Filesystem.readFile({
-          path: photo.path
-        });
-
-        // 3. Construct the Data URL from the native base64 string
-        const format = photo.format || 'jpeg';
-        const dataUrl = `data:image/${format};base64,${readFileResult.data}`;
-
-        // 4. Convert Data URL to Blob (fetch handles raw data URLs instantly without network calls)
-        const response = await fetch(dataUrl);
-        const blob = await response.blob();
-
-        const galleryFilename = `Gallery-${Date.now()}-${Math.random().toString(36).substring(2, 7)}.jpg`;
-        console.log(`[Gallery] Queueing image: ${galleryFilename}`);
+        const ext = photo.format || 'jpg';
+        const galleryFilename = `Gallery-${Date.now()}-${Math.random().toString(36).substring(2, 7)}.${ext}`;
         
-        // 5. Send to your queue pipeline
-        this.processQueue(dataUrl, galleryFilename, blob);
+        console.log(`[Gallery] Queueing image: ${galleryFilename}`);
+        this.processQueue(finalDataUrl, galleryFilename, finalBlob);
 
       } catch (innerErr) {
         console.error(`[Gallery] Failed to process a selected image. Skipping to next.`, innerErr);
@@ -808,7 +855,7 @@ async pickImagesMobile() {
     }
 
   } catch (error) {
-    // Capacitor throws here if the user just closes the gallery without selecting anything
+    // Capacitor throws here if the user closes the gallery without selecting
     console.error('Error picking images from gallery:', error);
   }
 }
@@ -3146,33 +3193,73 @@ public async logCurrentSessionStateAfterProcessDataUrl(): Promise<void> {
 //   return null;
 // }
 
+// async uploadToServer(fileToUpload: Blob, customName: string): Promise<UploadResponse | null> {
+//   console.log('[PIPELINE] uploadToServer: Attempting HTTP request...');
+  
+//   // Strict check: Prevent the request from even firing if it's not a true Blob
+//   if (!fileToUpload || !(fileToUpload instanceof Blob)) {
+//     console.error('[Upload] Aborting: fileToUpload is not a valid Blob.', fileToUpload);
+//     return null;
+//   }
+
+//   const formData = new FormData();
+  
+//   // The 3rd parameter safely sets the filename for the backend without needing a File object
+//   formData.append('file', fileToUpload, customName); 
+
+//   const endpoints = [this.baseUrl, this.baseUrl2, this.baseUrl];
+
+//   for (const url of endpoints) {
+//     try {
+//       console.log(`[Upload] Attempting to connect to: ${url}`);
+//       const response = await firstValueFrom(
+//         this.http.post<UploadResponse>(`${url}/api/upload`, formData)
+//       );
+//       console.log(`[PIPELINE] uploadToServer: SUCCESS`);
+//       return response;
+      
+//     } catch (err) {
+//       console.error(`[Upload] Failed attempt to ${url}. Trying next...`, err);
+//     }
+//   }
+
+//   console.error('[Upload] All endpoints failed.');
+//   return null;
+// }
+
+// Don't forget to import timeout at the top of your file if you haven't!
+// import { timeout } from 'rxjs/operators';
+
 async uploadToServer(fileToUpload: Blob, customName: string): Promise<UploadResponse | null> {
   console.log('[PIPELINE] uploadToServer: Attempting HTTP request...');
   
-  // Strict check: Prevent the request from even firing if it's not a true Blob
   if (!fileToUpload || !(fileToUpload instanceof Blob)) {
     console.error('[Upload] Aborting: fileToUpload is not a valid Blob.', fileToUpload);
     return null;
   }
 
   const formData = new FormData();
+  formData.append('file', fileToUpload, customName);
   
-  // The 3rd parameter safely sets the filename for the backend without needing a File object
-  formData.append('file', fileToUpload, customName); 
-
   const endpoints = [this.baseUrl, this.baseUrl2, this.baseUrl];
 
   for (const url of endpoints) {
     try {
       console.log(`[Upload] Attempting to connect to: ${url}`);
-      const response = await firstValueFrom(
-        this.http.post<UploadResponse>(`${url}/api/upload`, formData)
+      
+      // ADDED: .pipe(timeout(15000)) forces the request to abort if it hangs for 15 seconds
+      const request$ = this.http.post<UploadResponse>(`${url}/api/upload`, formData).pipe(
+        timeout(15000) 
       );
+      
+      const response = await firstValueFrom(request$);
+      
       console.log(`[PIPELINE] uploadToServer: SUCCESS`);
       return response;
       
-    } catch (err) {
-      console.error(`[Upload] Failed attempt to ${url}. Trying next...`, err);
+    } catch (err: any) {
+      // Now, if it hangs, it will be caught here and safely move to the next endpoint
+      console.error(`[Upload] Failed attempt to ${url}. Reason:`, err?.name || err?.message);
     }
   }
 

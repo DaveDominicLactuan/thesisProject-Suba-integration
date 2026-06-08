@@ -68,8 +68,10 @@ export class HomePage2Page implements OnInit, OnDestroy {
 private apiUrl = 'https://your-vscode-forwarded-url.app.github.dev/';
 apiUrlWeb = 'http://127.0.0.1:8000/';
 apiUrlWeb2 = 'http://127.0.0.1:8000/helloWorld';
-private baseUrl2 = 'http://127.0.0.1:8000'; 
-private baseUrl = 'https://16z6llmg-8000.asse.devtunnels.ms'; 
+// private baseUrl2 = 'http://127.0.0.1:8000'; 
+// private baseUrl = 'https://16z6llmg-8000.asse.devtunnels.ms'; 
+private baseUrl2 = 'https://crack-api-repo.onrender.com'; 
+private baseUrl = 'https://crack-api-repo.onrender.com'; 
   uploadedImageUrl: string = '';
   selectedFile: File | null = null;
   @ViewChild('fileInput', { static: false }) fileInput!: ElementRef;
