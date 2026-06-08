@@ -377,7 +377,7 @@ private lastImageTitleDebugAt: number = 0;
     console.log('User ID:', info.userId || '(not loaded)');
     console.log('Session ID:', info.sessionId || '(no session selected)');
     console.log('Current Session:', this.sessions.length > 0 ? this.sessions[0] : 'None');
-    console.log('Session images for selected session:', this.imagePaths && this.imagePaths.length > 0 ? this.imagePaths : '(no images loaded)');
+    // console.log('Session images for selected session:', this.imagePaths && this.imagePaths.length > 0 ? this.imagePaths : '(no images loaded)');
     console.groupEnd();
 
     return info;
@@ -513,13 +513,13 @@ private lastImageTitleDebugAt: number = 0;
       return left.groupKey.localeCompare(right.groupKey);
     });
 
-    console.group('[FeedbackPage] Grouped session images');
-    groups.forEach((group) => {
-      console.group(`${group.groupKey}`);
-      console.log('Ordered filenames:', group.images.map((img) => img.filename || img.fileName || img.original || img.withBoxes || '(unnamed)'));
-      console.log('Representative:', group.representative.filename || group.representative.fileName || group.representative.original || group.representative.withBoxes || '(unnamed)');
-      console.groupEnd();
-    });
+    // console.group('[FeedbackPage] Grouped session images');
+    // groups.forEach((group) => {
+    //   console.group(`${group.groupKey}`);
+    //   console.log('Ordered filenames:', group.images.map((img) => img.filename || img.fileName || img.original || img.withBoxes || '(unnamed)'));
+    //   console.log('Representative:', group.representative.filename || group.representative.fileName || group.representative.original || group.representative.withBoxes || '(unnamed)');
+    //   console.groupEnd();
+    // });
     console.groupEnd();
 
     return groups;
@@ -1148,21 +1148,21 @@ private lastImageTitleDebugAt: number = 0;
           console.log('Session Object:', currentSession);
           console.log('Session Name:', currentSession.name);
           console.log('Session Notes:', currentSession.notes || '(none)');
-          console.log('Engineer Checked:', currentSession.engineerCheckedSession || false);
-          console.log('Image Keys in Session:', currentSession.imageKeys || []);
+          // console.log('Engineer Checked:', currentSession.engineerCheckedSession || false);
+          // console.log('Image Keys in Session:', currentSession.imageKeys || []);
         }
         console.log(`Total images loaded for session: ${this.imagePaths.length}`);
         console.log('Session Image Objects:', this.imagePaths);
-        console.table(this.imagePaths.map((img: DisplayImage) => ({
-          filename: img.filename,
-          hasOriginal: !!img.original,
-          hasWithBoxes: !!img.withBoxes,
-          predictionType: img.rawPrediction?.type || 'N/A',
-          predictionShape: img.rawPrediction?.shape || 'N/A',
-          predictionSeverity: img.rawPrediction?.severity || 'N/A',
-          hasS3Key: !!(img.originalS3Key || img.originalS3Url),
-          boxCount: img.boxes?.length || 0
-        })));
+        // console.table(this.imagePaths.map((img: DisplayImage) => ({
+        //   filename: img.filename,
+        //   hasOriginal: !!img.original,
+        //   hasWithBoxes: !!img.withBoxes,
+        //   predictionType: img.rawPrediction?.type || 'N/A',
+        //   predictionShape: img.rawPrediction?.shape || 'N/A',
+        //   predictionSeverity: img.rawPrediction?.severity || 'N/A',
+        //   hasS3Key: !!(img.originalS3Key || img.originalS3Url),
+        //   boxCount: img.boxes?.length || 0
+        // })));
         console.groupEnd();
       }
 
@@ -1767,7 +1767,7 @@ detectCenterImage() {
     }
 
     //Log summary count
-    console.log(`[FeedbackPage] debugLogStoredImages - found ${imgs.length} images`);
+    // console.log(`[FeedbackPage] debugLogStoredImages - found ${imgs.length} images`);
 
     //Map stored images to readable rows (extract prediction/status and derive display strings) 
     const rows = imgs.map((img: any) => {
@@ -1803,9 +1803,9 @@ detectCenterImage() {
     });
     
     //Print table and detailed grouped logs for debugging
-    console.table(rows);
+    // console.table(rows);
     console.group('[FeedbackPage] storedImages detail');
-    rows.forEach(r => console.log(r.filename || '(unnamed)', r));
+    // rows.forEach(r => console.log(r.filename || '(unnamed)', r));
     console.groupEnd();
   }
 
@@ -3106,11 +3106,15 @@ addEntry() {
 
           console.log(`[FeedbackPage] Processing ${sessionImages.length} image(s) for S3 upload in session ${savedSessionId}`);
 
-          // Upload all images to S3 for the session
+         // Upload all images to S3 for the session
           if (savedSessionId && sessionImages.length > 0) {
             try {
-              const progressPerImage = 70 / Math.max(sessionImages.length, 1); // Distribute 70% across images
+              const progressPerImage = 70 / Math.max(sessionImages.length, 1);
+              // Distribute 70% across images
               let currentProgress = 25;
+              
+              // Define total images to display in the progress text
+              const totalSessionImageObjects = sessionImages.length;
 
               for (let imgIndex = 0; imgIndex < sessionImages.length; imgIndex++) {
                 const imgEntry = this.normalizePredictionFields(sessionImages[imgIndex]);
@@ -3119,14 +3123,20 @@ addEntry() {
                 imgEntry.correctedByEngineer = correctionState.checked;
                 imgEntry.correctedByEngineerValue = correctionState.value;
                 
-                console.log(`[FeedbackPage] Uploading image ${imgIndex + 1}/${sessionImages.length}: ${imgKey}`);
+                // Define currently uploading image number
+                const uploadedtotalSessionImageObjects = imgIndex + 1;
+                
+                console.log(`[FeedbackPage] Uploading image ${uploadedtotalSessionImageObjects}/${totalSessionImageObjects}: ${imgKey}`);
                 
                 currentProgress += 5;
-                updateProgress(currentProgress, `Saving Session: ${Math.min(currentProgress, 85)}%`);
+                updateProgress(
+                  currentProgress, 
+                  `Saving Session: ${Math.min(Math.round(currentProgress), 85)}% (${uploadedtotalSessionImageObjects}/${totalSessionImageObjects})`
+                );
 
                 // Capture the original dataURL so we can generate withBoxes even after uploading
                 const originalDataForBoxes = imgEntry.original;
-
+                
                 // Upload original image
                 if (typeof svc.uploadSessionImageOriginal === 'function' && imgEntry.original) {
                   try {
@@ -3136,21 +3146,25 @@ addEntry() {
                       imgEntry.storageUrl = originalS3Result.url;
                       imgEntry.originalS3Key = originalS3Result.s3Key;
                       imgEntry.originalS3Url = originalS3Result.url;
-                      console.log(`âœ… Original image ${imgIndex + 1} uploaded to S3 with key:`, originalS3Result?.s3Key);
+                      console.log(`✅ Original image ${uploadedtotalSessionImageObjects} uploaded to S3 with key:`, originalS3Result?.s3Key);
                     }
                   } catch (error) {
-                    console.warn(`[FeedbackPage] Failed to upload original image ${imgIndex + 1} to S3:`, error);
+                    console.warn(`[FeedbackPage] Failed to upload original image ${uploadedtotalSessionImageObjects} to S3:`, error);
                   }
                 }
 
                 currentProgress += progressPerImage * 0.5;
-                updateProgress(Math.min(currentProgress, 85), `Saving Session: ${Math.min(currentProgress, 85)}%`);
+                updateProgress(
+                  Math.min(currentProgress, 85), 
+                  `Saving Session: ${Math.min(Math.round(currentProgress), 85)}% (${uploadedtotalSessionImageObjects}/${totalSessionImageObjects})`
+                );
 
                 // Generate withBoxes image (if boxes exist) and upload it to S3 so PDF/navigation can access it.
                 try {
                     if (Array.isArray(imgEntry.boxes) && imgEntry.boxes.length > 0) {
                     // If withBoxes is not present create it using the captured original data (originalDataForBoxes)
                     if (!imgEntry.withBoxes && originalDataForBoxes) {
+                
                       try {
                         const boxed = await this.createWithBoxesDataUrl(originalDataForBoxes, imgEntry.boxes || []);
                         if (boxed) {
@@ -3167,7 +3181,7 @@ addEntry() {
                         const withBoxesResult = await svc.uploadSessionImageWithBoxes(imgEntry.withBoxes, savedSessionId, imgEntry.filename || imgKey);
                         if (withBoxesResult) {
                           // keep imgEntry.withBoxes as the dataURL so the UI still shows the processed image locally
-                          console.log(`âœ… WithBoxes uploaded for ${imgKey}:`, withBoxesResult.s3Key);
+                          console.log(`✅ WithBoxes uploaded for ${imgKey}:`, withBoxesResult.s3Key);
                         }
                       } catch (err) {
                         console.warn('[FeedbackPage] uploadSessionImageWithBoxes failed for', imgKey, err);
@@ -3177,18 +3191,21 @@ addEntry() {
 
                   // Persist the updated image entry (now with S3 refs) into the service
                   if (typeof svc.setEntryForImage === 'function') {
-                    svc.setEntryForImage(imgKey, imgEntry);
-                    console.log(`[FeedbackPage] Updated image entry persisted for image ${imgIndex + 1}: ${imgKey}`);
+                     svc.setEntryForImage(imgKey, imgEntry);
+                     console.log(`[FeedbackPage] Updated image entry persisted for image ${uploadedtotalSessionImageObjects}: ${imgKey}`);
                   }
                 } catch (e) {
                   console.warn('[FeedbackPage] Error while processing withBoxes for upload', e);
                 }
 
                 currentProgress += progressPerImage * 0.5;
-                updateProgress(Math.min(currentProgress, 85), `Saving Session: ${Math.min(currentProgress, 85)}%`);
+                updateProgress(
+                  Math.min(currentProgress, 85), 
+                  `Saving Session: ${Math.min(Math.round(currentProgress), 85)}% (${uploadedtotalSessionImageObjects}/${totalSessionImageObjects})`
+                );
               }
 
-              updateProgress(85, 'Saving Session: 85%');
+              updateProgress(85, `Saving Session: 85% (${totalSessionImageObjects}/${totalSessionImageObjects})`);
             } catch (err) {
               console.warn('[FeedbackPage] Error during S3 upload batch:', err);
               updateProgress(85, 'Saving Session: 85%');

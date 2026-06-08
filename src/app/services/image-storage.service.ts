@@ -634,7 +634,7 @@ export class ImageStorageService {
               fileImageName: firestoreImage.fileImageName,
               storagePath: firestoreImage.storagePath,
               storageUrl: firestoreImage.storageUrl,
-              croppedCracks: firestoreImage.croppedCracks || [],
+              // croppedCracks: firestoreImage.croppedCracks || [],
               // ✅ FIX: Also retrieve the explicit S3 key fields that were saved to Firestore
               originalS3Key: firestoreImage.originalS3Key || firestoreImage.storagePath || null,
               originalS3Url: firestoreImage.originalS3Url || firestoreImage.storageUrl || null
@@ -649,9 +649,9 @@ export class ImageStorageService {
               localImage.originalS3Url = firestoreImage.originalS3Url;
             }
             // withBoxes S3/storage helper fields intentionally omitted
-            if (!localImage.croppedCracks && firestoreImage.croppedCracks) {
-              localImage.croppedCracks = firestoreImage.croppedCracks;
-            }
+            // if (!localImage.croppedCracks && firestoreImage.croppedCracks) {
+            //   localImage.croppedCracks = firestoreImage.croppedCracks;
+            // }
             if (!localImage.multiPredictions && firestoreImage.multiPredictions) {
               localImage.multiPredictions = firestoreImage.multiPredictions;
             }
@@ -953,7 +953,7 @@ export class ImageStorageService {
       this._currentImage$.next(this._currentImage);
     }
 
-    console.log(`📤 Image saved: ${image.filename}. Total stored images: ${this.images.length}`);
+    // console.log(`📤 Image saved: ${image.filename}. Total stored images: ${this.images.length}`);
   }
 
   /** Persist sessions to storage */
@@ -1094,16 +1094,16 @@ export class ImageStorageService {
       sessionId: image.sessionId || null,
       original_id: fallbackOriginalId,
       cropped_id: fallbackCroppedId,
-      hasPrediction: image.hasPrediction || false,
+      // hasPrediction: image.hasPrediction || false,
       statusMessage: image.statusMessage || '',
       detectionMessage: image.detectionMessage || '',
-      prediction: image.prediction || null,
-      multiPredictions: image.multiPredictions || [],
-      correctedPrediction: image.correctedPrediction || null,
-      engineerCheckedSession: !!image.engineerCheckedSession,
-      correctedByEngineer: !!image.correctedByEngineer,
+      // prediction: image.prediction || null,
+      // multiPredictions: image.multiPredictions || [],
+      // correctedPrediction: image.correctedPrediction || null,
+      // engineerCheckedSession: !!image.engineerCheckedSession,
+      // correctedByEngineer: !!image.correctedByEngineer,
       boxes: image.boxes || [],
-      croppedCracks: this.sanitizeCroppedCracksForFirestore(image.croppedCracks),
+      // croppedCracks: this.sanitizeCroppedCracksForFirestore(image.croppedCracks),
       originalS3Key: image.originalS3Key || image.storagePath || null,
       originalS3Url: image.originalS3Url || image.storageUrl || null,
       withBoxesS3Key: image.withBoxesS3Key || null,

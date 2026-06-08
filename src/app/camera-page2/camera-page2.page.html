@@ -111,7 +111,8 @@
           <svg *ngIf="photosProcessed < photosTaken" class="rect-spinner" width="70" height="40">
             <rect x="2" y="2" width="66" height="36" rx="12" ry="12" class="rect-spinner-path" />
           </svg>
-          <div class="center-value-rect">{{ photosProcessed }}/{{ photosTaken }}</div>
+          <div class="center-value-rect">{{ photosTaken }}/{{ photosProcessed }}</div>
+          <div class="blue-circle" [ngClass]="{ 'green': fastApiConnection, 'red': !fastApiConnection}"></div>
           <div class="red-circle" [ngClass]="{ 'green': photosProcessed === photosTaken, 'red': photosProcessed < photosTaken }"></div>
         </div>
         <!-- <div class="action-label">Images Processed</div> -->
@@ -125,7 +126,14 @@
         [disabled]="isCooldown || (isLevelEnabled && !isPhoneLeveled)"
       ></button>
 
-       <div class="red-circle" [ngClass]="{ 'green': fastApiConnection, 'red': !fastApiConnection }"></div>
+       <div class="green-circle" [ngClass]="{ 
+  'grey': apiStatus === 1, 
+  'orange': apiStatus === 2,
+  'yellow': apiStatus === 3,
+  'green': apiStatus === 4
+}"></div>
+
+<!-- <div class="red-circle" [ngClass]="{ 'green': fastApiConnection, 'red': !fastApiConnection}"></div> -->
 
       
 

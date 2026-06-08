@@ -70,6 +70,7 @@ export class CameraPage2Page implements AfterViewInit {
   public imagePaths: any[] = [];
   isProcessing: boolean = true;
   fastApiConnection: boolean = false;
+  apiStatusMessage: string = '';
   photosTaken = 0;
   private _photosProcessed = 0;
   // public transient flag used to show a short glow when a photo finishes processing
@@ -148,7 +149,7 @@ private imageQueue: QueueItem[] = [];
 private isQueueProcessing: boolean = false;
 
 apiMessage: string = 'Loading...';
-  apiStatus: string = '';
+  apiStatus: number = 1;
   boxes: { w: number; h: number; x: number; y: number }[] = [];
 private apiUrl = 'https://your-vscode-forwarded-url.app.github.dev/';
 apiUrlWeb = 'http://127.0.0.1:8000/';
@@ -674,6 +675,8 @@ private async runQueueProcessor(): Promise<void> {
         await this.loadSessions();
         await this.refreshDisplayedImages();
         // ensure counts reflect the newly created/selected session
+        this.photosProcessed = 0;
+        console.log("Photos Taken", this.photosTaken, "Photos Processed", this.photosProcessed);
         try { await this.updatePhotoCounts(); } catch (e) { /* ignore */ }
       }
     } catch (e) {
@@ -944,7 +947,11 @@ console.log(`[CameraProcessor] Triggering uploadToServer for backend server: ${g
 if (finalBlob) {
   console.log(`[PIPELINE] processDataUrl: Calling uploadToServer for ${generatedName}`);
   // Pass the raw blob directly to our fixed uploadToServer function
+  this.apiStatus = 1;
+  console.log(`Api status`, this.apiStatus);
   backendUploadResult = await this.uploadToServer(finalBlob, generatedName);
+  this.apiStatus = 4; // Green
+   console.log(`Api status`, this.apiStatus);
   console.log(`[PIPELINE] processDataUrl: Upload result:`, backendUploadResult);
 } else {
   console.warn('[CameraProcessor] Cannot upload: finalBlob is null or missing.');
@@ -1019,6 +1026,7 @@ if (finalBlob) {
       if (!prediction.boxes || prediction.boxes.length === 0) {
         if (backendUploadResult && Array.isArray(backendUploadResult.bounding_boxes) && backendUploadResult.bounding_boxes.length > 0) {
           console.log(`[CameraProcessor] Local model found 0 boxes. Feeding ${backendUploadResult.bounding_boxes.length} server boxes into drawing canvas engine.`);
+          this.photosTaken += backendUploadResult.bounding_boxes.length;
           prediction.boxes = backendUploadResult.bounding_boxes;
         }
       }
@@ -1256,6 +1264,8 @@ console.log("It worked line 927! Final resizedImage:", resizedImage);
 
       if (bumpCounters) this.imagesUploadedThisSession += 1;
       if (prediction && prediction.boxes && prediction.boxes.length > 0) this.photosProcessed += 1;
+      console.log("Photos Taken", this.photosTaken, "Photos Processed", this.photosProcessed);
+      console.log("Photos Taken", this.photosTaken, "Photos Processed", this.photosProcessed);
       if (refreshCountsAfterSave) await this.updatePhotoCounts();
       
       await this.logCurrentSessionImageObjects();
@@ -1315,6 +1325,7 @@ console.log("It worked line 927! Final resizedImage:", resizedImage);
               });
             }
             this.imagesUploadedThisSession += 1;
+            console.log("Photos Taken", this.photosTaken, "Photos Processed", this.photosProcessed);
             await this.updatePhotoCounts();
           }
         } catch (fallbackErr) {
@@ -1349,105 +1360,105 @@ console.log("It worked line 927! Final resizedImage:", resizedImage);
     }
   }
 
-  private async persistResizedImagesAsSessionImages(
-    resizedImages: Array<any>,
-    originalFilename: string,
-    timestamp: string,
-    userId?: string,
-    imgIndex?: number,
-    parentOriginalId?: string
-  ): Promise<any[]> {
-    const storedResizedImages: any[] = [];
-    const service: any = this.imageStorage as any;
-    const sessionId = this.selectedSessionId || undefined;
+  // private async persistResizedImagesAsSessionImages(
+  //   resizedImages: Array<any>,
+  //   originalFilename: string,
+  //   timestamp: string,
+  //   userId?: string,
+  //   imgIndex?: number,
+  //   parentOriginalId?: string
+  // ): Promise<any[]> {
+  //   const storedResizedImages: any[] = [];
+  //   const service: any = this.imageStorage as any;
+  //   const sessionId = this.selectedSessionId || undefined;
 
-    for (let index = 0; index < resizedImages.length; index++) {
-      const resizeObj = resizedImages[index];
-      const resizeNumber = index + 1;
-      const baseName = String(originalFilename || `session-${timestamp}`);
+  //   for (let index = 0; index < resizedImages.length; index++) {
+  //     const resizeObj = resizedImages[index];
+  //     const resizeNumber = index + 1;
+  //     const baseName = String(originalFilename || `session-${timestamp}`);
 
-      let generatedFilename = typeof service?.generateSessionFilename === 'function'
-        ? service.generateSessionFilename({
-            sessionId,
-            filename: originalFilename,
-            originalFilename,
-            designatedPart: 'resized',
-            croppedNumber: resizeNumber, 
-            imageType: 'resized',
-            imgIndex,
-            timestamp,
-          })
-        : this.generateFilename();
+  //     let generatedFilename = typeof service?.generateSessionFilename === 'function'
+  //       ? service.generateSessionFilename({
+  //           sessionId,
+  //           filename: originalFilename,
+  //           originalFilename,
+  //           designatedPart: 'resized',
+  //           croppedNumber: resizeNumber, 
+  //           imageType: 'resized',
+  //           imgIndex,
+  //           timestamp,
+  //         })
+  //       : this.generateFilename();
 
-      // Ensure we extract the base64 URL correctly whether passed as an object or direct string
-      const imageDataUrl = typeof resizeObj === 'object' && resizeObj.image ? resizeObj.image : resizeObj;
-      const safeResize = await this.shrinkDataUrlToBytes(imageDataUrl, 900_000, 4000);
+  //     // Ensure we extract the base64 URL correctly whether passed as an object or direct string
+  //     const imageDataUrl = typeof resizeObj === 'object' && resizeObj.image ? resizeObj.image : resizeObj;
+  //     const safeResize = await this.shrinkDataUrlToBytes(imageDataUrl, 900_000, 4000);
 
-      // Create the entry. Type asserted as 'any' to dynamically assign the requested 'Type' property
-      const resizeEntry: any = {
-        original: safeResize,
-        timestamp,
-        filename: generatedFilename,
-        fileImageName: `${baseName.replace(/\.[^.]+$/, '')}-resize-${resizeNumber}`,
-        hasPrediction: false,
-        statusMessage: `Stored resized image ${resizeNumber}`,
-        detectionMessage: `Stored resized image ${resizeNumber}`,
-        boxes: [],
-        userId,
-        sessionId,
-        original_id: parentOriginalId || undefined,
-        cropped_id: this.generateImageRecordId('resized'),
-        resized_id: this.generateImageRecordId('resized'),
-        Type: 'Resized' // New field added explicitly
-      };
+  //     // Create the entry. Type asserted as 'any' to dynamically assign the requested 'Type' property
+  //     const resizeEntry: any = {
+  //       original: safeResize,
+  //       timestamp,
+  //       filename: generatedFilename,
+  //       fileImageName: `${baseName.replace(/\.[^.]+$/, '')}-resize-${resizeNumber}`,
+  //       hasPrediction: false,
+  //       statusMessage: `Stored resized image ${resizeNumber}`,
+  //       detectionMessage: `Stored resized image ${resizeNumber}`,
+  //       boxes: [],
+  //       userId,
+  //       sessionId,
+  //       original_id: parentOriginalId || undefined,
+  //       cropped_id: this.generateImageRecordId('resized'),
+  //       resized_id: this.generateImageRecordId('resized'),
+  //       Type: 'Resized' // New field added explicitly
+  //     };
 
-      let addedOk = false;
-      try {
-        await this.imageStorage.addImage(resizeEntry as StoredImage, sessionId);
-        addedOk = true;
-      } catch (addErr) {
-        console.warn('[CameraPage2] Failed to add resized image to storage', addErr);
-      }
+  //     let addedOk = false;
+  //     try {
+  //       await this.imageStorage.addImage(resizeEntry as StoredImage, sessionId);
+  //       addedOk = true;
+  //     } catch (addErr) {
+  //       console.warn('[CameraPage2] Failed to add resized image to storage', addErr);
+  //     }
 
-      if (addedOk) {
-        try {
-          if (sessionId && typeof (this.imageStorage as any).addImageToSession === 'function') {
-            (this.imageStorage as any).addImageToSession(sessionId, resizeEntry.filename);
-          }
-        } catch (sessErr) {
-          console.warn('[CameraPage2] Failed to add resized image to session', sessErr);
-        }
+  //     if (addedOk) {
+  //       try {
+  //         if (sessionId && typeof (this.imageStorage as any).addImageToSession === 'function') {
+  //           (this.imageStorage as any).addImageToSession(sessionId, resizeEntry.filename);
+  //         }
+  //       } catch (sessErr) {
+  //         console.warn('[CameraPage2] Failed to add resized image to session', sessErr);
+  //       }
 
-        if (userId) {
-          try {
-            await this.imageStorage.saveImageToUser(userId, resizeEntry as StoredImage);
-          } catch (saveErr) {
-            console.warn('[CameraPage2] Failed to save resized image to user storage', saveErr);
-          }
-        }
+  //       if (userId) {
+  //         try {
+  //           await this.imageStorage.saveImageToUser(userId, resizeEntry as StoredImage);
+  //         } catch (saveErr) {
+  //           console.warn('[CameraPage2] Failed to save resized image to user storage', saveErr);
+  //         }
+  //       }
 
-        storedResizedImages.push({
-          ...(typeof resizeObj === 'object' ? resizeObj : { image: resizeObj }),
-          filename: resizeEntry.filename,
-          original_id: resizeEntry.original_id,
-          cropped_id: resizeEntry.cropped_id,
-          sessionImage: resizeEntry,
-        });
-      } else {
-        storedResizedImages.push({
-          ...(typeof resizeObj === 'object' ? resizeObj : { image: resizeObj }),
-          filename: generatedFilename,
-          original_id: parentOriginalId || undefined,
-          cropped_id: this.generateImageRecordId('resized'),
-          resized_id: this.generateImageRecordId('resized'),
-          sessionImage: null,
-          error: true,
-        });
-      }
-    }
+  //       storedResizedImages.push({
+  //         ...(typeof resizeObj === 'object' ? resizeObj : { image: resizeObj }),
+  //         filename: resizeEntry.filename,
+  //         original_id: resizeEntry.original_id,
+  //         cropped_id: resizeEntry.cropped_id,
+  //         sessionImage: resizeEntry,
+  //       });
+  //     } else {
+  //       storedResizedImages.push({
+  //         ...(typeof resizeObj === 'object' ? resizeObj : { image: resizeObj }),
+  //         filename: generatedFilename,
+  //         original_id: parentOriginalId || undefined,
+  //         cropped_id: this.generateImageRecordId('resized'),
+  //         resized_id: this.generateImageRecordId('resized'),
+  //         sessionImage: null,
+  //         error: true,
+  //       });
+  //     }
+  //   }
 
-    return storedResizedImages;
-  }
+  //   return storedResizedImages;
+  // }
 
     /** Resize + normalize image to [1,3,128,128] Float32Array */
   /**
@@ -1599,6 +1610,103 @@ console.log("It worked line 927! Final resizedImage:", resizedImage);
     return fallbackName || this.generateFilename();
   }
 
+  // private async persistCroppedCracksAsSessionImages(
+  //   croppedCracks: Array<{ croppedNumber?: number; image: string; box: BoundingBox; type: string; shape: string; severity: string; }>,
+  //   originalFilename: string,
+  //   timestamp: string,
+  //   userId?: string,
+  //   imgIndex?: number,
+  //   parentOriginalId?: string
+  // ): Promise<any[]> {
+  //   const storedCroppedCracks: any[] = [];
+  //   const service: any = this.imageStorage as any;
+  //   const sessionId = this.selectedSessionId || undefined;
+
+  //   for (let index = 0; index < croppedCracks.length; index++) {
+  //     const crop = croppedCracks[index];
+  //     const croppedNumber = typeof crop.croppedNumber === 'number' ? crop.croppedNumber : index + 1;
+  //     const baseName = String(originalFilename || `session-${timestamp}`);
+  //     let generatedFilename = typeof service?.generateSessionFilename === 'function'
+  //       ? service.generateSessionFilename({
+  //           sessionId,
+  //           filename: originalFilename,
+  //           originalFilename,
+  //           designatedPart: 'cropped',
+  //           croppedNumber,
+  //           imageType: 'cropped',
+  //           imgIndex,
+  //           timestamp,
+  //         })
+  //       : this.generateFilename();
+
+  //     const safeCrop = await this.shrinkDataUrlToBytes(crop.image, 900_000, 4000);
+  //     const cropEntry: StoredImage = {
+  //       original: safeCrop,
+  //       timestamp,
+  //       filename: generatedFilename,
+  //       fileImageName: `${baseName.replace(/\.[^.]+$/, '')}-crop-${croppedNumber}`,
+  //       // prediction: {
+  //       //   type: crop.type,
+  //       //   shape: crop.shape,
+  //       //   severity: crop.severity,
+  //       // },
+  //       // hasPrediction: true,
+  //       // statusMessage: `Prediction succeeded - Cropped crack ${croppedNumber} prediction stored`,
+  //       // detectionMessage: `Stored cropped crack ${croppedNumber}`,
+  //       boxes: [],
+  //       userId,
+  //       sessionId,
+  //       original_id: parentOriginalId || undefined,
+  //       cropped_id: this.generateImageRecordId('cropped'),
+  //     };
+
+  //     let addedOk = false;
+  //     try {
+  //       await this.imageStorage.addImage(cropEntry, sessionId);
+  //       addedOk = true;
+  //     } catch (addErr) {
+  //       console.warn('[CameraPage2] Failed to add cropped crack image to storage', addErr);
+  //     }
+
+  //     if (addedOk) {
+  //       try {
+  //         if (sessionId && typeof (this.imageStorage as any).addImageToSession === 'function') {
+  //           (this.imageStorage as any).addImageToSession(sessionId, cropEntry.filename);
+  //         }
+  //       } catch (sessErr) {
+  //         console.warn('[CameraPage2] Failed to add cropped image to session', sessErr);
+  //       }
+
+  //       if (userId) {
+  //         try {
+  //           await this.imageStorage.saveImageToUser(userId, cropEntry);
+  //         } catch (saveErr) {
+  //           console.warn('[CameraPage2] Failed to save cropped crack to user storage', saveErr);
+  //         }
+  //       }
+
+  //       storedCroppedCracks.push({
+  //         ...crop,
+  //         filename: cropEntry.filename,
+  //         original_id: cropEntry.original_id,
+  //         cropped_id: cropEntry.cropped_id,
+  //         sessionImage: cropEntry,
+  //       });
+  //     } else {
+  //       storedCroppedCracks.push({
+  //         ...crop,
+  //         filename: generatedFilename,
+  //         original_id: parentOriginalId || undefined,
+  //         cropped_id: this.generateImageRecordId('cropped'),
+  //         sessionImage: null,
+  //         error: true,
+  //       });
+  //     }
+  //   }
+
+  //   return storedCroppedCracks;
+  // }
+
   private async persistCroppedCracksAsSessionImages(
     croppedCracks: Array<{ croppedNumber?: number; image: string; box: BoundingBox; type: string; shape: string; severity: string; }>,
     originalFilename: string,
@@ -1615,6 +1723,7 @@ console.log("It worked line 927! Final resizedImage:", resizedImage);
       const crop = croppedCracks[index];
       const croppedNumber = typeof crop.croppedNumber === 'number' ? crop.croppedNumber : index + 1;
       const baseName = String(originalFilename || `session-${timestamp}`);
+
       let generatedFilename = typeof service?.generateSessionFilename === 'function'
         ? service.generateSessionFilename({
             sessionId,
@@ -1634,14 +1743,6 @@ console.log("It worked line 927! Final resizedImage:", resizedImage);
         timestamp,
         filename: generatedFilename,
         fileImageName: `${baseName.replace(/\.[^.]+$/, '')}-crop-${croppedNumber}`,
-        prediction: {
-          type: crop.type,
-          shape: crop.shape,
-          severity: crop.severity,
-        },
-        hasPrediction: true,
-        statusMessage: `Prediction succeeded - Cropped crack ${croppedNumber} prediction stored`,
-        detectionMessage: `Stored cropped crack ${croppedNumber}`,
         boxes: [],
         userId,
         sessionId,
@@ -1674,6 +1775,13 @@ console.log("It worked line 927! Final resizedImage:", resizedImage);
           }
         }
 
+        // ---> ADDED: Increment counters for the cropped image
+        // this.photosTaken += 1;
+         this.photosProcessed +=1;
+         console.log("Photos Taken", this.photosTaken, "Photos Processed", this.photosProcessed);
+        // Optional: If you also want these to count as "processed" to balance your UI countdown spinner
+        // this.photosProcessed += 1; 
+
         storedCroppedCracks.push({
           ...crop,
           filename: cropEntry.filename,
@@ -1694,6 +1802,112 @@ console.log("It worked line 927! Final resizedImage:", resizedImage);
     }
 
     return storedCroppedCracks;
+  }
+
+  private async persistResizedImagesAsSessionImages(
+    resizedImages: Array<any>,
+    originalFilename: string,
+    timestamp: string,
+    userId?: string,
+    imgIndex?: number,
+    parentOriginalId?: string
+  ): Promise<any[]> {
+    const storedResizedImages: any[] = [];
+    const service: any = this.imageStorage as any;
+    const sessionId = this.selectedSessionId || undefined;
+
+    for (let index = 0; index < resizedImages.length; index++) {
+      const resizeObj = resizedImages[index];
+      const resizeNumber = index + 1;
+      const baseName = String(originalFilename || `session-${timestamp}`);
+
+      let generatedFilename = typeof service?.generateSessionFilename === 'function'
+        ? service.generateSessionFilename({
+            sessionId,
+            filename: originalFilename,
+            originalFilename,
+            designatedPart: 'resized',
+            croppedNumber: resizeNumber, 
+            imageType: 'resized',
+            imgIndex,
+            timestamp,
+          })
+        : this.generateFilename();
+
+      const imageDataUrl = typeof resizeObj === 'object' && resizeObj.image ? resizeObj.image : resizeObj;
+      const safeResize = await this.shrinkDataUrlToBytes(imageDataUrl, 900_000, 4000);
+
+      const resizeEntry: any = {
+        original: safeResize,
+        timestamp,
+        filename: generatedFilename,
+        fileImageName: `${baseName.replace(/\.[^.]+$/, '')}-resize-${resizeNumber}`,
+        hasPrediction: false,
+        statusMessage: `Stored resized image ${resizeNumber}`,
+        detectionMessage: `Stored resized image ${resizeNumber}`,
+        boxes: [],
+        userId,
+        sessionId,
+        original_id: parentOriginalId || undefined,
+        cropped_id: this.generateImageRecordId('resized'),
+        resized_id: this.generateImageRecordId('resized'),
+        Type: 'Resized' 
+      };
+
+      let addedOk = false;
+      try {
+        await this.imageStorage.addImage(resizeEntry as StoredImage, sessionId);
+        addedOk = true;
+      } catch (addErr) {
+        console.warn('[CameraPage2] Failed to add resized image to storage', addErr);
+      }
+
+      if (addedOk) {
+        try {
+          if (sessionId && typeof (this.imageStorage as any).addImageToSession === 'function') {
+            (this.imageStorage as any).addImageToSession(sessionId, resizeEntry.filename);
+          }
+        } catch (sessErr) {
+          console.warn('[CameraPage2] Failed to add resized image to session', sessErr);
+        }
+
+        if (userId) {
+          try {
+            await this.imageStorage.saveImageToUser(userId, resizeEntry as StoredImage);
+          } catch (saveErr) {
+            console.warn('[CameraPage2] Failed to save resized image to user storage', saveErr);
+          }
+        }
+
+        // ---> ADDED: Increment counters for the resized image
+        // this.photosTaken += 1;
+        this.photosProcessed +=1;
+        console.log("Photos Taken", this.photosTaken, "Photos Processed", this.photosProcessed);
+        
+        // Optional: If you also want these to count as "processed" to balance your UI countdown spinner
+        // this.photosProcessed += 1; 
+
+        storedResizedImages.push({
+          ...(typeof resizeObj === 'object' ? resizeObj : { image: resizeObj }),
+          filename: resizeEntry.filename,
+          original_id: resizeEntry.original_id,
+          cropped_id: resizeEntry.cropped_id,
+          sessionImage: resizeEntry,
+        });
+      } else {
+        storedResizedImages.push({
+          ...(typeof resizeObj === 'object' ? resizeObj : { image: resizeObj }),
+          filename: generatedFilename,
+          original_id: parentOriginalId || undefined,
+          cropped_id: this.generateImageRecordId('resized'),
+          resized_id: this.generateImageRecordId('resized'),
+          sessionImage: null,
+          error: true,
+        });
+      }
+    }
+
+    return storedResizedImages;
   }
 
   // async cropBoxFromImage(
@@ -1965,7 +2179,7 @@ async drawBoxesOnImage(Base64: string, boxes: BoundingBox[], maskW = 128, maskH 
           }
 
           // Update counts and stored images
-          this.photosProcessed = processed;
+          // this.photosProcessed = processed;
           this.photosTaken = imgs.length;
           this.storedImages = imgs;
         }
@@ -3052,7 +3266,7 @@ async drawBoxesOnImage(Base64: string, boxes: BoundingBox[], maskW = 128, maskH 
     this.http.get<{ message: string }>(`${this.baseUrl}/api/hello`).subscribe({
       next: (response) => {
         this.apiMessage = response.message;
-        this.apiStatus = response.message;
+        this.apiStatus = 4; // Green
         console.log("Api Message", this.apiMessage);
         console.log('Root connection success:', response);
         this.fastApiConnection = true;
@@ -3232,6 +3446,8 @@ public async logCurrentSessionStateAfterProcessDataUrl(): Promise<void> {
 
 async uploadToServer(fileToUpload: Blob, customName: string): Promise<UploadResponse | null> {
   console.log('[PIPELINE] uploadToServer: Attempting HTTP request...');
+  this.apiStatus = 2; // Orange
+   console.log(`Api status`, this.apiStatus);
   
   if (!fileToUpload || !(fileToUpload instanceof Blob)) {
     console.error('[Upload] Aborting: fileToUpload is not a valid Blob.', fileToUpload);
@@ -3251,6 +3467,8 @@ async uploadToServer(fileToUpload: Blob, customName: string): Promise<UploadResp
       const request$ = this.http.post<UploadResponse>(`${url}/api/upload`, formData).pipe(
         timeout(15000) 
       );
+      this.apiStatus = 3; // Yellow
+       console.log(`Api status`, this.apiStatus);
       
       const response = await firstValueFrom(request$);
       

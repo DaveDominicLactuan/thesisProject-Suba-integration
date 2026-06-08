@@ -118,7 +118,7 @@
 
       
       
-      <div class="explore-card2">
+      <!-- <div class="explore-card2">
        <ion-card-title>2. Upload & Display Image</ion-card-title>
     <ion-content class="ion-padding">
 
@@ -138,9 +138,9 @@
   </div>
 
 </ion-content>
-      </div>
+      </div> -->
 
-      <div class="explore-card2">
+      <!-- <div class="explore-card2">
        <ion-card-title>New Upload & Display Image</ion-card-title>
     <ion-content class="ion-padding">
 <ion-button expand="block" color="primary" (click)="captureImage('CAMERA')">
@@ -162,7 +162,35 @@
 </ion-button>
 
 </ion-content>
-      </div>
+      </div> -->
+
+       <!-- <div class="explore-card2">
+       <ion-card-title>2. Upload & Display Image</ion-card-title>
+    <ion-content class="ion-padding">
+
+  <div class="image-container" style="position: relative; display: inline-block;">
+  
+  <img [src]="baseUrl + crackData?.rawImagePath" *ngIf="crackData">
+
+  <svg *ngIf="crackData" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none;">
+    <path *ngFor="let contour of crackData.crack_data.contours" 
+          [attr.d]="contour.path" 
+          stroke="red" 
+          fill="none" 
+          stroke-width="2" />
+  </svg>
+
+  <div *ngFor="let box of crackData?.crack_data?.bounding_boxes" 
+       [style.left.%]="box.x" 
+       [style.top.%]="box.y" 
+       [style.width.%]="box.width" 
+       [style.height.%]="box.height"
+       style="position: absolute; border: 2px solid green; pointer-events: none;">
+  </div>
+</div>
+</ion-content>
+      </div> -->
+
 
       
 

@@ -25,6 +25,30 @@ interface OfficeLocationMarkerData {
   payload: Record<string, unknown>;
 }
 
+export interface CrackResponse {
+  status: string;
+  file_id: string;
+  rawImagePath: string;
+  processedImagePath: string;
+  crack_data: {
+    bounding_boxes: {
+      id: number;
+      x: number;
+      y: number;
+      width: number;
+      height: number;
+      avgWidth: string;
+      maxWidth: string;
+      crackLength: string;
+      orientation: string;
+    }[];
+    contours: {
+      id: string;
+      path: string;
+    }[];
+  };
+}
+
 @Component({
   selector: 'app-home-page2',
   templateUrl: './home-page2.page.html',
@@ -71,9 +95,44 @@ apiUrlWeb2 = 'http://127.0.0.1:8000/helloWorld';
 // private baseUrl2 = 'http://127.0.0.1:8000'; 
 // private baseUrl = 'https://16z6llmg-8000.asse.devtunnels.ms'; 
 private baseUrl2 = 'https://crack-api-repo.onrender.com'; 
-private baseUrl = 'https://crack-api-repo.onrender.com'; 
+baseUrl = 'https://crack-api-repo.onrender.com'; 
   uploadedImageUrl: string = '';
   selectedFile: File | null = null;
+  // Add these to your class properties
+public crackData: CrackResponse | null = null;
+public isUploading: boolean = false;
+
+uploadToServer() {
+  if (!this.selectedFile) {
+    console.warn("No file selected to upload.");
+    return;
+  }
+
+  this.isUploading = true;
+  this.crackData = null; // Clear previous results
+  
+  // NOTE: Ensure this matches the route defined in your FastAPI code (@app.post("/api/upload"))
+  const uploadUrl = `${this.baseUrl}/api/upload`; 
+
+  const formData = new FormData();
+  formData.append('file', this.selectedFile, this.selectedFile.name);
+
+  this.http.post<CrackResponse>(uploadUrl, formData).subscribe({
+    next: (response) => {
+      this.isUploading = false;
+      this.crackData = response; // Store the full structured response
+      
+      console.log('Upload Success:', response);
+      console.log('Detected Cracks:', response.crack_data.bounding_boxes.length);
+    },
+    error: (err) => {
+      this.isUploading = false;
+      console.error('Upload Error:', err);
+    }
+  });
+}
+
+
   @ViewChild('fileInput', { static: false }) fileInput!: ElementRef;
 
   previewUrl: string | undefined = undefined;
@@ -89,7 +148,7 @@ private baseUrl = 'https://crack-api-repo.onrender.com';
   // baseUrl = 'http://10.0.2.2:8000'; // Special URL for Android Emulator to host loopback
   // If testing on a real device, use your machine's local IP (e.g., 'http://192.168.1.50:8000')
 
-  isUploading = false;
+  // isUploading = false;
   uploadResult: any;
 
   /** Inject auth, router, and image storage services for navigation and data. */
@@ -292,11 +351,11 @@ private async loadUserProfileForLoggedInUser(uid: string): Promise<void> {
     this.refreshCacheWarmStatus(uid);
 
     // Step 4: Fetch office location markers
-    try {
-      await this.fetchOfficeLocationMarkerData();
-    } catch (err) {
-      console.error('[HomePage2.loadUserProfileForLoggedInUser] Failed to fetch office markers:', err);
-    }
+    // try {
+    //   await this.fetchOfficeLocationMarkerData();
+    // } catch (err) {
+    //   console.error('[HomePage2.loadUserProfileForLoggedInUser] Failed to fetch office markers:', err);
+    // }
 
     // Step 5: Start background sync
     this.startUserSyncInBackground(uid, true);
@@ -400,11 +459,11 @@ private async loadUserProfileWithAuthWait(): Promise<void> {
     this.refreshCacheWarmStatus(resolvedUserId);
 
     // Fetch office location markers
-    try {
-      await this.fetchOfficeLocationMarkerData();
-    } catch (err) {
-      console.error('[HomePage2.loadUserProfileWithAuthWait] Failed to fetch office markers:', err);
-    }
+    // try {
+    //   await this.fetchOfficeLocationMarkerData();
+    // } catch (err) {
+    //   console.error('[HomePage2.loadUserProfileWithAuthWait] Failed to fetch office markers:', err);
+    // }
 
     // Start background sync
     this.startUserSyncInBackground(resolvedUserId, true);
@@ -984,6 +1043,7 @@ private persistUserProfileToStorage(): void {
         HomePage2Page.userSyncTasks.delete(userId);
       });
 
+
     HomePage2Page.userSyncTasks.set(userId, task);
   }
 
@@ -1075,18 +1135,18 @@ private persistUserProfileToStorage(): void {
       const firebaseSessions = await this.auth3.getUserSessions(userId);
       console.log('[HomePage2.syncUserDataFromFirestore] Fetched', firebaseSessions.length, 'sessions from Firestore');
       console.log('[HomePage2.syncUserDataFromFirestore] Raw Firestore sessions:', firebaseSessions);
-      try {
-        console.log('[HomePage2.syncUserDataFromFirestore] Raw Firestore sessions JSON:', JSON.stringify(firebaseSessions, null, 2));
-      } catch (jsonErr) {
-        console.warn('[HomePage2.syncUserDataFromFirestore] Failed to stringify sessions:', jsonErr);
-      }
+      // try {
+      //   console.log('[HomePage2.syncUserDataFromFirestore] Raw Firestore sessions JSON:', JSON.stringify(firebaseSessions, null, 2));
+      // } catch (jsonErr) {
+      //   console.warn('[HomePage2.syncUserDataFromFirestore] Failed to stringify sessions:', jsonErr);
+      // }
 
       // Fetch user images from Firestore
       const firestoreImages = await this.auth3.getUserImages(userId);
-      console.log('[HomePage2.syncUserDataFromFirestore] Fetched', firestoreImages.length, 'images from Firestore');
-      console.log('[HomePage2.syncUserDataFromFirestore] Raw Firestore images:', firestoreImages);
+      // console.log('[HomePage2.syncUserDataFromFirestore] Fetched', firestoreImages.length, 'images from Firestore');
+      // console.log('[HomePage2.syncUserDataFromFirestore] Raw Firestore images:', firestoreImages);
       try {
-        console.log('[HomePage2.syncUserDataFromFirestore] Raw Firestore images JSON:', JSON.stringify(firestoreImages, null, 2));
+        // console.log('[HomePage2.syncUserDataFromFirestore] Raw Firestore images JSON:', JSON.stringify(firestoreImages, null, 2));
       } catch (jsonErr) {
         console.warn('[HomePage2.syncUserDataFromFirestore] Failed to stringify images:', jsonErr);
       }
@@ -1138,26 +1198,26 @@ private persistUserProfileToStorage(): void {
           withBoxesStoragePath: fsImage.withBoxesStoragePath || undefined,
           withBoxesStorageUrl: fsImage.withBoxesStorageUrl || undefined
         };
-        console.log('[HomePage2.syncUserDataFromFirestore] Mapped image object:', {
-          filename: storedImage.filename,
-          originalPreview: storedImage.original ? `${String(storedImage.original).slice(0, 40)}...` : '',
-          withBoxesPreview: storedImage.withBoxes ? `${String(storedImage.withBoxes).slice(0, 40)}...` : '',
-          boxesCount: Array.isArray(storedImage.boxes) ? storedImage.boxes.length : 0,
-          faceDetected: storedImage.faceDetected,
-          timestamp: storedImage.timestamp,
-          s3References: {
-            hasStoragePath: !!storedImage.storagePath,
-            hasWithBoxesStoragePath: !!storedImage.withBoxesStoragePath
-          }
-        });
+        // console.log('[HomePage2.syncUserDataFromFirestore] Mapped image object:', {
+        //   filename: storedImage.filename,
+        //   originalPreview: storedImage.original ? `${String(storedImage.original).slice(0, 40)}...` : '',
+        //   withBoxesPreview: storedImage.withBoxes ? `${String(storedImage.withBoxes).slice(0, 40)}...` : '',
+        //   boxesCount: Array.isArray(storedImage.boxes) ? storedImage.boxes.length : 0,
+        //   faceDetected: storedImage.faceDetected,
+        //   timestamp: storedImage.timestamp,
+        //   s3References: {
+        //     hasStoragePath: !!storedImage.storagePath,
+        //     hasWithBoxesStoragePath: !!storedImage.withBoxesStoragePath
+        //   }
+        // });
 
         // Check/store image in local storage while skipping duplicates
         const added = await this.imageStorage.addImageIfNotExists(storedImage as any, storedImage.sessionId);
         if (added) {
           imagesAdded += 1;
-          console.log('[HomePage2.syncUserDataFromFirestore] Added image to local storage:', storedImage.filename || 'unnamed');
+          // console.log('[HomePage2.syncUserDataFromFirestore] Added image to local storage:', storedImage.filename || 'unnamed');
         } else {
-          console.log('[HomePage2.syncUserDataFromFirestore] Image already exists locally:', storedImage.filename || 'unnamed');
+          // console.log('[HomePage2.syncUserDataFromFirestore] Image already exists locally:', storedImage.filename || 'unnamed');
         }
       }
 
@@ -2267,38 +2327,38 @@ async captureImage(sourceType: 'CAMERA' | 'PHOTOS') {
   //   });
   // }
 
-  uploadToServer() {
-  // 1. Check if a web file has been selected instead of native path
-  if (!this.selectedFile) {
-    console.warn("No file selected to upload.");
-    return;
-  }
+//   uploadToServer() {
+//   // 1. Check if a web file has been selected instead of native path
+//   if (!this.selectedFile) {
+//     console.warn("No file selected to upload.");
+//     return;
+//   }
 
-  this.isUploading = true;
-  this.uploadResult = null; // Clear any previous results
+//   this.isUploading = true;
+//   this.uploadResult = null; // Clear any previous results
   
-  const uploadUrl = `${this.baseUrl}/api/upload2`;
+//   const uploadUrl = `${this.baseUrl}/api/upload2`;
 
-  // 2. Build the standard multipart/form-data payload
-  const formData = new FormData();
+//   // 2. Build the standard multipart/form-data payload
+//   const formData = new FormData();
   
-  // 'file' must exactly match your FastAPI parameter name: upload_image(file: UploadFile)
-  formData.append('file', this.selectedFile, this.selectedFile.name);
+//   // 'file' must exactly match your FastAPI parameter name: upload_image(file: UploadFile)
+//   formData.append('file', this.selectedFile, this.selectedFile.name);
 
-  // 3. Make the HTTP POST request directly using Angular's HttpClient
-  this.http.post(uploadUrl, formData).subscribe({
-    next: (response) => {
-      this.isUploading = false;
-      this.uploadResult = response;
-      console.log('Upload Success:', response);
-    },
-    error: (err) => {
-      this.isUploading = false;
-      this.uploadResult = { error: 'Upload failed', details: err };
-      console.error('Upload Error:', err);
-    }
-  });
-}
+//   // 3. Make the HTTP POST request directly using Angular's HttpClient
+//   this.http.post(uploadUrl, formData).subscribe({
+//     next: (response) => {
+//       this.isUploading = false;
+//       this.uploadResult = response;
+//       console.log('Upload Success:', response);
+//     },
+//     error: (err) => {
+//       this.isUploading = false;
+//       this.uploadResult = { error: 'Upload failed', details: err };
+//       console.error('Upload Error:', err);
+//     }
+//   });
+// }
 
 
 

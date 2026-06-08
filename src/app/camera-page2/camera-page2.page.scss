@@ -568,6 +568,96 @@ position: absolute;
   }
 }
 
+.blue-circle {
+  position: absolute;
+  top: -5px;
+  left: -5px;
+  background: red;
+  color: white;
+  font-weight: bold;
+  font-size: 10px;
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2;
+  box-shadow: none;
+  animation: none;
+
+  &.green {
+    background: rgb(9, 188, 18);
+  }
+
+  &.red {
+    background: red;
+  }
+}
+
+/* Base circle styles */
+.circle {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  display: inline-block;
+  border: 1px solid #ccc; /* Helps you see the white circle */
+
+  &.white {
+    background: rgb(142, 142, 142);
+  }
+
+  &.orange {
+    background: rgb(255, 128, 17);
+  }
+
+   &.yellow {
+    background: rgb(255, 251, 0);
+  }
+
+  &.green {
+    background: rgb(30, 255, 0);
+  }
+
+}
+
+/* Color modifiers */
+.white { background-color: white; }
+.orange { background-color: orange; }
+.yellow { background-color: yellow; }
+.green { background-color: green; }
+
+/* Base circle styles */
+.green-circle {
+  // width: 20px;
+  // height: 20px;
+  // border-radius: 50%;
+  // display: inline-block;
+  // border: 1px solid #ccc; /* Helps you see the white circle */
+  position: absolute;
+  top: -5px;
+  right: 0px;
+  background: red;
+  color: white;
+  font-weight: bold;
+  font-size: 10px;
+  width: 25px;
+  height: 25px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2;
+  box-shadow: none;
+  animation: none;
+}
+
+/* Color modifiers */
+.white { background-color: white; }
+.orange { background-color: orange; }
+.yellow { background-color: yellow; }
+.green { background-color: green; }
+
 @keyframes spin {
   0% { transform: rotate(0deg); }
   100% { transform: rotate(360deg); }
