@@ -10,6 +10,7 @@ interface DisplayImage {
   withBoxes: string;
   filename?: string;
   fileName?: string;
+  userFriendlyname?: string;
   original_id?: string;
   cropped_id?: string;
   detectionMessage?: string;
@@ -121,6 +122,7 @@ private lastImageTitleDebugAt: number = 0;
   @ViewChild('zoomImageElement', { static: false }) zoomImageElement?: ElementRef;
   // Session support
   sessions: any[] = [];
+  storedImages: StoredImage[] = [];
   selectedSessionId?: string | null = null;
  
     name: string = '';
@@ -451,7 +453,7 @@ private lastImageTitleDebugAt: number = 0;
   private getImageVariantRank(filename: string): number {
     const base = this.getFilenameBase(filename);
     if (base.includes('original')) return 0;
-    const croppedMatch = base.match(/cropped(\d+)?/i);
+    const croppedMatch = base.match(/cropped(\d+)?/i) || base.match(/resized(\d+)?/i);
     if (croppedMatch) {
       return croppedMatch[1] ? Number(croppedMatch[1]) : 1;
     }
@@ -738,7 +740,7 @@ private lastImageTitleDebugAt: number = 0;
   private parseImageGroup(filename: string): { index: number | null; isOriginal: boolean; isCropped: boolean; isResized: boolean } {
     const base = this.getFilenameBase(filename);
     
-    const croppedMatch = base.match(/img(\d+)cropped(\d+)?/);
+    const croppedMatch = base.match(/img(\d+)cropped(\d+)?/) || base.match(/img(\d+)resized(\d+)?/);
     if (croppedMatch) {
       return { index: Number(croppedMatch[1]), isOriginal: false, isCropped: true, isResized: false };
     }
@@ -884,7 +886,7 @@ private lastImageTitleDebugAt: number = 0;
       return;
     }
     this.formDataMap[key] = this.formDataMap[key] ?? {
-      title: img.filename ?? this.selectedImageTitle,
+      title: img.userFriendlyname ?? this.selectedImageTitle,
       dropdown1: this.dropdown1,
       dropdown2: this.dropdown2,
       dropdown3: this.dropdown3,
@@ -2589,7 +2591,8 @@ addEntry() {
       }
 
       // mark entry as saved session and persist to service
-      await this.uploadPendingCroppedCracks(entry);
+      // await this.uploadPendingCroppedCracks(entry);
+      
       entry = this.normalizePredictionFields(entry);
       entry.statusMessage = entry.statusMessage ?? 'Saved as session';
       entry.engineerCheckedSession = this.userRole?.toLowerCase() === 'engineer' && this.engineerLookedSessionChecked;
@@ -2650,6 +2653,10 @@ addEntry() {
       alert('Failed to save session. See console for details.');
     }
   }
+
+  get originalStoredImages(): any[] {
+  return this.storedImages ? this.storedImages.filter((img: any) => img.type === 'original') : [];
+}
 
 
   /** Show an overlay to name and save the session or cancel */
@@ -2713,18 +2720,18 @@ addEntry() {
 
       //Title for inactive state
       const title = document.createElement('div');
-      title.innerText = hasExistingSessionName
-        ? 'Save changes and updated selected session'
-        : 'Save current session with a';
+      title.innerText = 'Save current session';
       title.style.fontWeight = '700';
       title.style.marginBottom = '4px';
       title.style.fontSize = '16px';
+      title.style.color = 'black';
 
       const promptMessage = document.createElement('div');
       promptMessage.innerText = 'Are you sure of the information on the images';
       promptMessage.style.marginBottom = '10px';
       promptMessage.style.fontSize = '14px';
       promptMessage.style.lineHeight = '1.4';
+      title.style.color = 'black';
 
       const correctionRow = document.createElement('label');
       correctionRow.style.display = 'flex';
@@ -2747,8 +2754,8 @@ addEntry() {
         correctionText.innerText = correctionState.value;
       });
 
-      correctionRow.appendChild(correctionCheckbox);
-      correctionRow.appendChild(correctionText);
+      // correctionRow.appendChild(correctionCheckbox);
+      // correctionRow.appendChild(correctionText);
 
       // const titleSubtext = document.createElement('div');
       // titleSubtext.innerText = hasExistingSessionName ? 'selected session name' : 'session name';
@@ -2785,7 +2792,7 @@ addEntry() {
       cancelBtn.style.fontWeight = '600';
 
       const saveBtn = document.createElement('button');
-  saveBtn.innerText = hasExistingSessionName ? 'Update' : 'Save';
+  saveBtn.innerText = 'Save';
       saveBtn.style.padding = '8px 16px';
       saveBtn.style.width = '120px';
       saveBtn.style.height = '40px';
@@ -3061,6 +3068,14 @@ addEntry() {
           // **ONLINE MODE**: Proceed with S3 uploads and Firestore save
           updateProgress(20, 'Saving Session: 20%');
 
+          // Upload any pending cropped cracks ONLY after the user clicks save
+          try {
+            updateProgress(22, 'Uploading cropped images...');
+            await this.uploadPendingCroppedCracks(entry);
+          } catch (uploadErr) {
+            console.warn('[FeedbackPage] Failed to upload pending cropped cracks during save:', uploadErr);
+          }
+ 
           // Get all images in the session to upload to S3
           let sessionImages: StoredImage[] = [];
               if (savedSessionId && typeof svc.getAllImages === 'function') {
@@ -3205,7 +3220,7 @@ addEntry() {
                 );
               }
 
-              updateProgress(85, `Saving Session: 85% (${totalSessionImageObjects}/${totalSessionImageObjects})`);
+              updateProgress(85, `Saving Session: 85% (${this.originalStoredImages}/${this.originalStoredImages})`);
             } catch (err) {
               console.warn('[FeedbackPage] Error during S3 upload batch:', err);
               updateProgress(85, 'Saving Session: 85%');
@@ -3324,7 +3339,127 @@ addEntry() {
               savedSessionId,
               imageCount: sessionImages?.length || 0,
             });
-            await this.showFirestoreSavePrompt('Save successful');
+
+            // --- START AI ANALYSIS INTEGRATION ---
+            try {
+              // Update the UI progress bar so the user knows what is happening
+              updateProgress(95, 'Analyzing session with AI...');
+
+              const analyzePayload = {
+  sessionId: savedSessionId,
+  // 1. Filter: Only keep images where filename includes 'original'
+  // 2. Map: Transform the filtered images into the payload format
+  originals: sessionImages
+    .filter((img: any) => img.filename && img.filename.includes('original'))
+    .map((img: any) => ({
+      id: img.original_id || img.filename || 'unknown_id',
+      url: img.originalS3Url || img.storageUrl || '', 
+      resized_variants: [] 
+    }))
+};
+
+console.log('[FeedbackPage] Sending payload to AI:', analyzePayload);
+
+// --- START SPINNER OVERLAY ---
+// 1. Inject CSS for the spinner animation (if it doesn't exist yet)
+if (!document.getElementById('ai-spinner-style')) {
+  const style = document.createElement('style');
+  style.id = 'ai-spinner-style';
+  style.innerHTML = `
+    @keyframes spinAI {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+  `;
+  document.head.appendChild(style);
+}
+
+// 2. Create the full-screen spinner overlay
+const spinnerOverlay = document.createElement('div');
+spinnerOverlay.style.position = 'fixed';
+spinnerOverlay.style.left = '0';
+spinnerOverlay.style.top = '0';
+spinnerOverlay.style.width = '100%';
+spinnerOverlay.style.height = '100%';
+spinnerOverlay.style.background = 'rgba(0, 0, 0, 0.7)';
+spinnerOverlay.style.display = 'flex';
+spinnerOverlay.style.flexDirection = 'column';
+spinnerOverlay.style.alignItems = 'center';
+spinnerOverlay.style.justifyContent = 'center';
+spinnerOverlay.style.zIndex = '10000'; // Ensure it sits on top of everything
+
+// 3. Create the circular spinner element
+const spinner = document.createElement('div');
+spinner.style.border = '4px solid rgba(255, 255, 255, 0.3)';
+spinner.style.borderTop = '4px solid #ff512f'; // Matches your gradient theme
+spinner.style.borderRadius = '50%';
+spinner.style.width = '50px';
+spinner.style.height = '50px';
+spinner.style.animation = 'spinAI 1s linear infinite';
+
+// 4. Create the loading text
+const spinnerText = document.createElement('div');
+spinnerText.innerText = 'AI Analysis in progress...\nThis may take a moment.';
+spinnerText.style.color = '#fff';
+spinnerText.style.marginTop = '16px';
+spinnerText.style.textAlign = 'center';
+spinnerText.style.fontWeight = '600';
+spinnerText.style.lineHeight = '1.4';
+spinnerText.style.whiteSpace = 'pre-wrap';
+
+spinnerOverlay.appendChild(spinner);
+spinnerOverlay.appendChild(spinnerText);
+document.body.appendChild(spinnerOverlay);
+// --- END SPINNER OVERLAY ---
+
+let finalMessage = '✅ Save successful!\n\n🧠 AI Analysis Summary:\n';
+
+try {
+  // 2. Call your ApiService
+  const analysisResponse: any = await this.api.analyzeSession(analyzePayload).toPromise();
+  
+  console.log('[FeedbackPage] AI Analysis Response:', analysisResponse);
+
+  // 3. Format the response into a readable string for the prompt
+  if (analysisResponse && analysisResponse.originals) {
+    const total = analysisResponse.originals.length;
+    const processed = analysisResponse.originals.filter((o: any) => o.is_processed).length;
+    finalMessage += `Successfully processed ${processed} of ${total} images.\n\n`;
+    
+    // Loop through and extract the crack data bounding boxes count for each image
+    analysisResponse.originals.forEach((orig: any) => {
+       const crackCount = orig.crack_data?.bounding_boxes?.length || 0;
+       const idShort = orig.id.length > 15 ? orig.id.substring(0,15) + '...' : orig.id;
+       finalMessage += `• ${idShort}: Found ${crackCount} cracks.\n`;
+    });
+  } else {
+    finalMessage += 'Session processed successfully by AI.';
+  }
+
+} catch (apiError) {
+  console.error('[FeedbackPage] AI Analysis failed:', apiError);
+  finalMessage = '✅ Save successful!\n\n⚠️ AI Analysis timed out or is running in the background.';
+} finally {
+  // 4. MUST remove the spinner overlay before showing the next prompt
+  try {
+    if (document.body.contains(spinnerOverlay)) {
+      document.body.removeChild(spinnerOverlay);
+    }
+  } catch (e) {
+    console.warn('Could not remove spinner overlay', e);
+  }
+}
+
+// 5. Pass the customized message to your prompt
+await this.showFirestoreSavePrompt(finalMessage);
+
+            } catch (apiError) {
+              console.error('[FeedbackPage] AI Analysis failed:', apiError);
+              // Fallback gracefully so the user is not stuck if the API times out
+              await this.showFirestoreSavePrompt('✅ Save successful!\n\n⚠️ AI Analysis is running in the background or timed out.');
+            }
+            // --- END AI ANALYSIS INTEGRATION ---
+
           } else if (sessionImages && sessionImages.some((img: StoredImage) => img.storagePath)) {
             alert('Save successful');
           } else {
@@ -3345,7 +3480,7 @@ addEntry() {
       btnRow.appendChild(saveBtn);
 
       box.appendChild(title);
-      box.appendChild(promptMessage);
+      // box.appendChild(promptMessage);
       box.appendChild(correctionRow);
       // box.appendChild(titleSubtext);
       box.appendChild(input);
@@ -3506,10 +3641,16 @@ addEntry() {
       box.style.maxWidth = '500px';
       box.style.boxShadow = '0 6px 30px rgba(0,0,0,0.3)';
 
+      // const body = document.createElement('div');
+      // body.innerText = message || 'Save successful';
+      // body.style.marginBottom = '16px';
+      // body.style.wordBreak = 'break-word';
       const body = document.createElement('div');
       body.innerText = message || 'Save successful';
       body.style.marginBottom = '16px';
       body.style.wordBreak = 'break-word';
+      body.style.whiteSpace = 'pre-wrap'; // <-- ADD THIS LINE
+      body.style.lineHeight = '1.5';      // <-- Optional: makes the list easier to read
 
       const closeBtn = document.createElement('button');
       closeBtn.innerText = 'Close';

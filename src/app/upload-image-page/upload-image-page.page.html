@@ -29,17 +29,24 @@
 <!-- Thumbnail section (outside control-bar, above) -->
 <!-- Top spinner overlay (shows when isProcessing is true) -->
 <div *ngIf="isProcessing" class="top-spinner-overlay">
-  <div class="spinner-container-rect large-spinner">
+  <!-- <div class="spinner-container-rect large-spinner">
     <svg class="rect-spinner" width="345" height="635">
       <rect x="10" y="10" width="325" height="615" rx="60" ry="60" class="rect-spinner-path" />
     </svg>
-  </div>
+  </div> -->
 </div>
-<div *ngIf="imagePaths.length === 0 && capturedImages.length === 0" class="thumbnail-placeholder"></div>
+<!-- <div *ngIf="imagePaths.length === 0 && capturedImages.length === 0" class="thumbnail-placeholder"></div>
 <div *ngIf="imagePaths.length > 0" class="thumbnail-scroll2" #thumbScroll (scroll)="onThumbnailScroll($event)" [ngClass]="getThumbClasses(imagePaths.length)">
   <img *ngFor="let img of imagePaths; let i = index" [src]="(showWithBoxes && img.withBoxes) ? img.withBoxes : img.original" [attr.data-overlay-key]="getImageSelectionKey(img, i)" class="thumbnail2" [style.border]="selectedImageKey===getImageSelectionKey(img, i) ? '3px solid #f09819' : 'none'" (click)="$event.stopPropagation(); onStoredThumbClick(img)" />
 </div>
 <div *ngIf="imagePaths.length === 0 && capturedImages.length > 0" class="thumbnail-scroll2" #thumbScroll (scroll)="onThumbnailScroll($event)" [ngClass]="getThumbClasses(capturedImages.length)">
+  <img *ngFor="let img of capturedImages; let i = index" [src]="img" [attr.data-overlay-key]="getImageSelectionKey({ original: img, withBoxes: img, fileName: '' }, i)" class="thumbnail2" [style.border]="selectedImageKey===getImageSelectionKey({ original: img, withBoxes: img, fileName: '' }, i) ? '3px solid #f09819' : 'none'" (click)="$event.stopPropagation(); onStoredThumbClick({ original: img, withBoxes: img, fileName: '' })" />
+</div> -->
+<div *ngIf="originalStoredImages.length === 0 && capturedImages.length === 0" class="thumbnail-placeholder"></div>
+<div *ngIf="originalStoredImages.length > 0" class="thumbnail-scroll2" #thumbScroll (scroll)="onThumbnailScroll($event)" [ngClass]="getThumbClasses(originalStoredImages.length)">
+  <img *ngFor="let img of originalStoredImages; let i = index" [src]="(showWithBoxes && img.withBoxes) ? img.withBoxes : img.original" [attr.data-overlay-key]="getImageSelectionKey(img, i)" class="thumbnail2" [style.border]="selectedImageKey===getImageSelectionKey(img, i) ? '3px solid #f09819' : 'none'" (click)="$event.stopPropagation(); onStoredThumbClick(img)" />
+</div>
+<div *ngIf="originalStoredImages.length === 0 && capturedImages.length > 0" class="thumbnail-scroll2" #thumbScroll (scroll)="onThumbnailScroll($event)" [ngClass]="getThumbClasses(capturedImages.length)">
   <img *ngFor="let img of capturedImages; let i = index" [src]="img" [attr.data-overlay-key]="getImageSelectionKey({ original: img, withBoxes: img, fileName: '' }, i)" class="thumbnail2" [style.border]="selectedImageKey===getImageSelectionKey({ original: img, withBoxes: img, fileName: '' }, i) ? '3px solid #f09819' : 'none'" (click)="$event.stopPropagation(); onStoredThumbClick({ original: img, withBoxes: img, fileName: '' })" />
 </div>
 
@@ -51,7 +58,14 @@
           <svg *ngIf="isProcessing" class="rect-spinner" width="70" height="40">
             <rect x="2" y="2" width="66" height="36" rx="12" ry="12" class="rect-spinner-path" />
           </svg>
-          <div class="center-value-rect">{{ photosProcessed }}/{{ photosTaken }}</div>
+          <div class="center-value-rect">{{ photosTaken }}/{{ photosProcessed }}</div>
+          <div class="green-circle" [ngClass]="{ 
+  'white': apiStatus === 1, 
+  'orange': apiStatus === 2,
+  'yellow': apiStatus === 3,
+  'green': apiStatus === 4,
+  'lightgreen': apiStatus === 0,
+}"></div>
           <div class="red-circle" [ngClass]="{ 'green': photosProcessed === photosTaken, 'red': photosProcessed < photosTaken }"></div>
         </div>
       </div>
@@ -83,7 +97,7 @@
           <div class="red-circle" [ngClass]="{ 'green': photosProcessed === photosTaken, 'red': photosProcessed < photosTaken }"></div>
         </div>
       </div> -->
-      <div class="red-circle" [ngClass]="{ 'green': fastApiConnection, 'red': !fastApiConnection }"></div>
+      <!-- <div class="red-circle" [ngClass]="{ 'green': fastApiConnection, 'red': !fastApiConnection }"></div> -->
 
       <!-- Upload and Finish blocks (now siblings of the spinner block for even spacing) -->
       <!-- <div class="func-action" (click)="reprocessSelectedImage()">

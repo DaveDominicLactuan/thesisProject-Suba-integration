@@ -149,15 +149,17 @@ private imageQueue: QueueItem[] = [];
 private isQueueProcessing: boolean = false;
 
 apiMessage: string = 'Loading...';
-  apiStatus: number = 1;
+  apiStatus: number = 0;
   boxes: { w: number; h: number; x: number; y: number }[] = [];
 private apiUrl = 'https://your-vscode-forwarded-url.app.github.dev/';
 apiUrlWeb = 'http://127.0.0.1:8000/';
 apiUrlWeb2 = 'http://127.0.0.1:8000/helloWorld';
 // private baseUrl2 = 'http://127.0.0.1:8000'; 
 // private baseUrl = 'https://16z6llmg-8000.asse.devtunnels.ms';
-private baseUrl2 = 'https://crack-api-repo.onrender.com'; 
-private baseUrl = 'https://crack-api-repo.onrender.com';
+// private baseUrl2 = 'https://crack-api-repo.onrender.com'; 
+// private baseUrl = 'https://crack-api-repo.onrender.com';
+private baseUrl2 = 'https://your-render-url.onrender.com/process-all'; 
+baseUrl = 'https://your-render-url.onrender.com/process-all';
   uploadedImageUrl: string = '';
   selectedFile: File | null = null;
 
@@ -313,6 +315,7 @@ private baseUrl = 'https://crack-api-repo.onrender.com';
       console.warn('[CameraPage2] failed to register hardware back handler', e);
     }
     this.getFastApiMessage();
+    this.apiStatus = 1;
 
     
     // initialize page: load images, sessions and create a new session for this visit
@@ -951,6 +954,7 @@ if (finalBlob) {
   console.log(`Api status`, this.apiStatus);
   backendUploadResult = await this.uploadToServer(finalBlob, generatedName);
   this.apiStatus = 4; // Green
+  // this.photosProcessed += 1;
    console.log(`Api status`, this.apiStatus);
   console.log(`[PIPELINE] processDataUrl: Upload result:`, backendUploadResult);
 } else {
@@ -1026,7 +1030,7 @@ if (finalBlob) {
       if (!prediction.boxes || prediction.boxes.length === 0) {
         if (backendUploadResult && Array.isArray(backendUploadResult.bounding_boxes) && backendUploadResult.bounding_boxes.length > 0) {
           console.log(`[CameraProcessor] Local model found 0 boxes. Feeding ${backendUploadResult.bounding_boxes.length} server boxes into drawing canvas engine.`);
-          this.photosTaken += backendUploadResult.bounding_boxes.length;
+          // this.photosTaken += backendUploadResult.bounding_boxes.length;
           prediction.boxes = backendUploadResult.bounding_boxes;
         }
       }
@@ -1040,11 +1044,13 @@ if (finalBlob) {
         filename, 
         sessionImgIndex
       );
+      const userFriendlyname = this.generateUserFriendlyFilename(); 
 
       const entry: StoredImage = {
         original: safeOriginal,
         timestamp,
         filename: generatedFilename,
+        userFriendlyname: userFriendlyname,
         fileImageName: filename || undefined,
         prediction: prediction || undefined,
         hasPrediction: !!(prediction.boxes && prediction.boxes.length > 0),
@@ -1073,7 +1079,7 @@ if (finalBlob) {
           let resizedImage: any[] = [];
 
 // 1. Check if the backend provided pre-processed crops
-const backendCrops = (backendUploadResult as any)?.backendUploadResult?.cropped_roi_objectStore;
+const backendCrops = (backendUploadResult as any)?.cropped_roi_objectStore;
 // With this:
 const backendResize = (backendUploadResult as any)?.resizedImagePath;
 
@@ -1098,13 +1104,20 @@ if (backendResize && typeof backendResize === 'string' && !backendResize.startsW
 
 if (Array.isArray(backendCrops) && backendCrops.length > 0) {
   console.log("[CameraProcessor] Using server-provided crops:", backendCrops);
-  croppedCracks = backendCrops;
+  
+  // FIX: Map the backend's 'image_data' and 'box_id' keys to the expected 'image' and 'croppedNumber' keys
+  croppedCracks = backendCrops.map((crop: any, index: number) => ({
+    croppedNumber: crop.box_id !== undefined ? crop.box_id : index + 1,
+    image: crop.image_data || crop.image, // Securely grabs the base64 string
+    box: crop.box || boxesToDraw2[index] || null,
+    type: crop.type || 'unknown',
+    shape: crop.shape || 'unknown',
+    severity: crop.severity || 'unknown'
+  }));
 } else {
   // 2. Fallback: Run local cropping only if backend crops are missing
   console.log("[CameraProcessor] No backend crops found, running local cropping.");
-  
-  // 2. Fallback: Run local cropping only if backend crops are missing
-console.log("[CameraProcessor] No backend crops found, running local cropping.");
+
 
 for (const box of boxesToDraw2) {
   const croppedNumber = croppedCracks.length + 1;
@@ -1172,6 +1185,7 @@ console.log("It worked line 927! Final resizedImage:", resizedImage);
       }
 
       console.log("Line 957");
+      this.photosProcessed += 1;
 
       if (!claimFinalization()) {
         console.warn('[CameraProcessor] Skipping storage write because processing state is already completed');
@@ -1194,6 +1208,7 @@ console.log("It worked line 927! Final resizedImage:", resizedImage);
       if (typeof (this as any).processAndStoreCroppedCracks === 'function') {
         await (this as any).processAndStoreCroppedCracks(entry, filename, userId, sessionImgIndex, originalId);
       } else if (Array.isArray((entry as any).croppedCracks) && (entry as any).croppedCracks.length > 0) {
+        console.log("Cropped Crack Image Data 1197", (entry as any).croppedCracks);
         const storedCroppedCracks = await this.persistCroppedCracksAsSessionImages(
           (entry as any).croppedCracks, 
           filename, 
@@ -1217,6 +1232,7 @@ console.log("It worked line 927! Final resizedImage:", resizedImage);
       if (typeof (this as any).processAndStoreResizedImages === 'function') {
         await (this as any).processAndStoreResizedImages(entry, filename, userId, sessionImgIndex, originalId);
       } else if (Array.isArray((entry as any).resizedImage) && (entry as any).resizedImage.length > 0) {
+        console.log("Resized Image Data 1208", (entry as any).resizedImage);
         const storedResizedImages = await this.persistResizedImagesAsSessionImages(
           (entry as any).resizedImage, 
           filename, 
@@ -1263,7 +1279,7 @@ console.log("It worked line 927! Final resizedImage:", resizedImage);
       }
 
       if (bumpCounters) this.imagesUploadedThisSession += 1;
-      if (prediction && prediction.boxes && prediction.boxes.length > 0) this.photosProcessed += 1;
+      if (prediction && prediction.boxes && prediction.boxes.length > 0)
       console.log("Photos Taken", this.photosTaken, "Photos Processed", this.photosProcessed);
       console.log("Photos Taken", this.photosTaken, "Photos Processed", this.photosProcessed);
       if (refreshCountsAfterSave) await this.updatePhotoCounts();
@@ -1292,11 +1308,13 @@ console.log("It worked line 927! Final resizedImage:", resizedImage);
         const safeOriginal = await this.shrinkDataUrlToBytes(dataUrl, maxBytes, 4000);
         const timestamp = new Date().toISOString();
         const fallbackFilename = this.buildSessionFilename(false, timestamp, filename, sessionImgIndex);
+        const userFriendlyname = this.generateUserFriendlyFilename();
         
         const entry: StoredImage = {
           original: safeOriginal,
           timestamp,
           filename: fallbackFilename,
+          userFriendlyname: userFriendlyname,
           fileImageName: filename || undefined,
           prediction: undefined,
           hasPrediction: false,
@@ -1582,6 +1600,24 @@ console.log("It worked line 927! Final resizedImage:", resizedImage);
     return dataUrl;
   }
 
+  /**
+ * Generates a user-friendly filename based on the number of original images taken.
+ * Example outputs: 'image(1).jpg', 'image(2).jpg', etc.
+ */
+generateUserFriendlyFilename(): string {
+  // 1. Get the current count of original images. 
+  // Safely falls back to filtering storedImages if the getter doesn't exist yet.
+  const currentOriginalCount = (this as any).originalStoredImages 
+    ? (this as any).originalStoredImages.length 
+    : (this.storedImages ? this.storedImages.filter((img: any) => img.type === 'original').length : 0);
+
+  // 2. Add + 1 so the very first photo taken is labeled image(1) instead of image(0)
+  const nextImageNumber = currentOriginalCount + 1;
+
+  // 3. Return the formatted filename with the file extension
+  return `image(${nextImageNumber}).jpg`;
+}
+
     // allow passing an explicit index (useful when deriving name from storage)
   /**
    * Generate a short filename like P{index}{HH}{MM}.jpg for new entries.
@@ -1707,8 +1743,108 @@ console.log("It worked line 927! Final resizedImage:", resizedImage);
   //   return storedCroppedCracks;
   // }
 
+  // private async persistCroppedCracksAsSessionImages(
+  //   croppedCracks: Array<{ croppedNumber?: number; image: string; box: BoundingBox; type: string; shape: string; severity: string; }>,
+  //   originalFilename: string,
+  //   timestamp: string,
+  //   userId?: string,
+  //   imgIndex?: number,
+  //   parentOriginalId?: string
+  // ): Promise<any[]> {
+  //   const storedCroppedCracks: any[] = [];
+  //   const service: any = this.imageStorage as any;
+  //   const sessionId = this.selectedSessionId || undefined;
+
+  //   for (let index = 0; index < croppedCracks.length; index++) {
+  //     const crop = croppedCracks[index];
+  //     const croppedNumber = typeof crop.croppedNumber === 'number' ? crop.croppedNumber : index + 1;
+  //     const baseName = String(originalFilename || `session-${timestamp}`);
+
+  //     let generatedFilename = typeof service?.generateSessionFilename === 'function'
+  //       ? service.generateSessionFilename({
+  //           sessionId,
+  //           filename: originalFilename,
+  //           originalFilename,
+  //           designatedPart: 'cropped',
+  //           croppedNumber,
+  //           imageType: 'cropped',
+  //           imgIndex,
+  //           timestamp,
+  //         })
+  //       : this.generateFilename();
+
+  //       console.log("Image_data 1740", crop.image);
+
+  //     const safeCrop = await this.shrinkDataUrlToBytes(crop.image, 900_000, 4000);
+  //     console.log("Image_data 1740", safeCrop);
+  //     const cropEntry: StoredImage = {
+  //       original: safeCrop,
+  //       timestamp,
+  //       filename: generatedFilename,
+  //       fileImageName: `${baseName.replace(/\.[^.]+$/, '')}-crop-${croppedNumber}`,
+  //       boxes: [],
+  //       userId,
+  //       sessionId,
+  //       original_id: parentOriginalId || undefined,
+  //       cropped_id: this.generateImageRecordId('cropped'),
+  //     };
+
+  //     let addedOk = false;
+  //     try {
+  //       await this.imageStorage.addImage(cropEntry, sessionId);
+  //       addedOk = true;
+  //     } catch (addErr) {
+  //       console.warn('[CameraPage2] Failed to add cropped crack image to storage', addErr);
+  //     }
+
+  //     if (addedOk) {
+  //       try {
+  //         if (sessionId && typeof (this.imageStorage as any).addImageToSession === 'function') {
+  //           (this.imageStorage as any).addImageToSession(sessionId, cropEntry.filename);
+  //         }
+  //       } catch (sessErr) {
+  //         console.warn('[CameraPage2] Failed to add cropped image to session', sessErr);
+  //       }
+
+  //       if (userId) {
+  //         try {
+  //           await this.imageStorage.saveImageToUser(userId, cropEntry);
+  //         } catch (saveErr) {
+  //           console.warn('[CameraPage2] Failed to save cropped crack to user storage', saveErr);
+  //         }
+  //       }
+
+  //       // ---> ADDED: Increment counters for the cropped image
+  //       // this.photosTaken += 1;
+  //        this.photosProcessed +=1;
+  //        console.log("Photos Taken", this.photosTaken, "Photos Processed", this.photosProcessed);
+  //       // Optional: If you also want these to count as "processed" to balance your UI countdown spinner
+  //       // this.photosProcessed += 1; 
+
+  //       storedCroppedCracks.push({
+  //         ...crop,
+  //         filename: cropEntry.filename,
+  //         original_id: cropEntry.original_id,
+  //         cropped_id: cropEntry.cropped_id,
+  //         sessionImage: cropEntry,
+  //       });
+  //     } else {
+  //       storedCroppedCracks.push({
+  //         ...crop,
+  //         filename: generatedFilename,
+  //         original_id: parentOriginalId || undefined,
+  //         cropped_id: this.generateImageRecordId('cropped'),
+  //         sessionImage: null,
+  //         error: true,
+  //       });
+  //     }
+  //   }
+
+  //   return storedCroppedCracks;
+  // }
+
   private async persistCroppedCracksAsSessionImages(
-    croppedCracks: Array<{ croppedNumber?: number; image: string; box: BoundingBox; type: string; shape: string; severity: string; }>,
+    croppedCracks: Array<any>, // Updated to Array<any> to accept both strings and objects
     originalFilename: string,
     timestamp: string,
     userId?: string,
@@ -1721,7 +1857,12 @@ console.log("It worked line 927! Final resizedImage:", resizedImage);
 
     for (let index = 0; index < croppedCracks.length; index++) {
       const crop = croppedCracks[index];
-      const croppedNumber = typeof crop.croppedNumber === 'number' ? crop.croppedNumber : index + 1;
+      
+      // Safely extract the cropped number if it's an object
+      const croppedNumber = typeof crop === 'object' && typeof crop.croppedNumber === 'number' 
+        ? crop.croppedNumber 
+        : index + 1;
+        
       const baseName = String(originalFilename || `session-${timestamp}`);
 
       let generatedFilename = typeof service?.generateSessionFilename === 'function'
@@ -1737,13 +1878,20 @@ console.log("It worked line 927! Final resizedImage:", resizedImage);
           })
         : this.generateFilename();
 
-      const safeCrop = await this.shrinkDataUrlToBytes(crop.image, 900_000, 4000);
+      // FIX 1: Safely extract the base64 string whether 'crop' is an object or a raw string
+      const imageDataUrl = typeof crop === 'object' && crop.image ? crop.image : crop;
+      
+      console.log("Image_data 1740", imageDataUrl);
+
+      // Pass the safely extracted string to your compressor
+      const safeCrop = await this.shrinkDataUrlToBytes(imageDataUrl, 900_000, 4000);
+      
       const cropEntry: StoredImage = {
         original: safeCrop,
         timestamp,
         filename: generatedFilename,
         fileImageName: `${baseName.replace(/\.[^.]+$/, '')}-crop-${croppedNumber}`,
-        boxes: [],
+        // boxes: typeof crop === 'object' && crop.box ? [crop.box] : [], // Safely extract box if present
         userId,
         sessionId,
         original_id: parentOriginalId || undefined,
@@ -1775,15 +1923,12 @@ console.log("It worked line 927! Final resizedImage:", resizedImage);
           }
         }
 
-        // ---> ADDED: Increment counters for the cropped image
-        // this.photosTaken += 1;
-         this.photosProcessed +=1;
-         console.log("Photos Taken", this.photosTaken, "Photos Processed", this.photosProcessed);
-        // Optional: If you also want these to count as "processed" to balance your UI countdown spinner
-        // this.photosProcessed += 1; 
-
+        // this.photosProcessed += 1;
+        console.log("Photos Taken", this.photosTaken, "Photos Processed", this.photosProcessed);
+        
+        // FIX 2: Safely spread the object exactly as done in resizedImages
         storedCroppedCracks.push({
-          ...crop,
+          ...(typeof crop === 'object' ? crop : { image: crop }),
           filename: cropEntry.filename,
           original_id: cropEntry.original_id,
           cropped_id: cropEntry.cropped_id,
@@ -1791,7 +1936,7 @@ console.log("It worked line 927! Final resizedImage:", resizedImage);
         });
       } else {
         storedCroppedCracks.push({
-          ...crop,
+          ...(typeof crop === 'object' ? crop : { image: crop }),
           filename: generatedFilename,
           original_id: parentOriginalId || undefined,
           cropped_id: this.generateImageRecordId('cropped'),
@@ -1881,7 +2026,7 @@ console.log("It worked line 927! Final resizedImage:", resizedImage);
 
         // ---> ADDED: Increment counters for the resized image
         // this.photosTaken += 1;
-        this.photosProcessed +=1;
+        // this.photosProcessed +=1;
         console.log("Photos Taken", this.photosTaken, "Photos Processed", this.photosProcessed);
         
         // Optional: If you also want these to count as "processed" to balance your UI countdown spinner
@@ -2180,16 +2325,17 @@ async drawBoxesOnImage(Base64: string, boxes: BoundingBox[], maskW = 128, maskH 
 
           // Update counts and stored images
           // this.photosProcessed = processed;
-          this.photosTaken = imgs.length;
-          this.storedImages = imgs;
+          // console.log("Original Stored Image", this.originalStoredImages.length)
+          // this.photosTaken = this.originalStoredImages.length;
+          // this.storedImages = imgs;
         }
       } else {
         // No active session: fall back to global image list
         const all: StoredImage[] = await this.imageStorage.getAllImages();
 
         // Update counts based on all stored images
-        this.photosTaken = Array.isArray(all) ? all.length : 0;
-        this.photosProcessed = Array.isArray(all) ? all.filter(i => isProcessedStatus(i.statusMessage)).length : 0;
+        // this.photosTaken = Array.isArray(all) ? all.length : 0;
+        // this.photosProcessed = Array.isArray(all) ? all.filter(i => isProcessedStatus(i.statusMessage)).length : 0;
         this.storedImages = Array.isArray(all) ? all.slice() : [];
       }
 
@@ -2555,7 +2701,7 @@ async drawBoxesOnImage(Base64: string, boxes: BoundingBox[], maskW = 128, maskH 
           const storedIndex = imageElement.dataset['storedIndex'];
           if (storedIndex !== undefined && storedIndex !== '') {
             const si = parseInt(storedIndex, 10);
-            const entry = this.storedImages && this.storedImages[si];
+            const entry = this.originalStoredImages && this.originalStoredImages[si];
             if (entry) {
               imageElement.src = this.showWithBoxes ? (entry as any).withBoxes || entry.original : entry.original;
             }
@@ -2572,8 +2718,8 @@ async drawBoxesOnImage(Base64: string, boxes: BoundingBox[], maskW = 128, maskH 
       // Prefer storedImages (persisted) when available so we can toggle between original/withBoxes
       //checks if there is stored images and if so create thumbnails for each stored image
       // with onclick to select image. iterates over storedImages to create thumbnails
-      if (this.storedImages && this.storedImages.length > 0) {
-        this.storedImages.forEach((entry, idx) => {
+      if (this.originalStoredImages && this.originalStoredImages.length > 0) {
+        this.originalStoredImages.forEach((entry, idx) => {
           const img = document.createElement('img');
           img.className = 'thumbnail2';
           img.style.display = 'block';
@@ -2595,7 +2741,7 @@ async drawBoxesOnImage(Base64: string, boxes: BoundingBox[], maskW = 128, maskH 
           img.onclick = () => {
             this.selectedThumbSrc = img.src;
             this.selectedImageSelectionKey = img.dataset['overlayKey'] || this.getImageSelectionKey(entry);
-            this.selectedImageTitle = this.getShortImageTitle(entry.filename || `Stored ${idx + 1}`);
+            this.selectedImageTitle = this.getShortImageTitle(entry.userFriendlyname || `Stored ${idx + 1}`);
             title.textContent = this.selectedImageTitle;
             updateThumbnails();
           };
@@ -2915,6 +3061,11 @@ async drawBoxesOnImage(Base64: string, boxes: BoundingBox[], maskW = 128, maskH 
       alert('Failed to delete image. See console for details.');
     }
   }
+
+  // Add this getter to filter original images automatically
+get originalStoredImages(): any[] {
+  return this.storedImages ? this.storedImages.filter((img: any) => img.type === 'original') : [];
+}
 
   /** Refresh the `storedImages` array to match the active session (or show all if none) */
   /**
@@ -3273,6 +3424,7 @@ async drawBoxesOnImage(Base64: string, boxes: BoundingBox[], maskW = 128, maskH 
         console.log("Fast API Connection", this.fastApiConnection);
       },
       error: (err) => console.error('Error fetching message:', err)
+      
     });
   }
 

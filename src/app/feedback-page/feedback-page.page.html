@@ -63,21 +63,20 @@
             [src]="showWithBoxes ? img.withBoxes : img.original"
             [class.selected]="(showWithBoxes ? img.withBoxes : img.original) === selectedImage"
             (click)="onImageClick(img)"
-            (dblclick)="openZoomModal(showWithBoxes ? img.withBoxes : img.original)"
             class="image-item"
           />
         </div>
       </div>
 
       <!-- Zoom Modal Overlay -->
-      <div *ngIf="showZoomModal" class="zoom-overlay" (click)="onZoomOverlayClick($event)">
-        <div class="zoom-modal">
-          <!-- Close Button -->
+      <!-- <div *ngIf="showZoomModal" class="zoom-overlay" (click)="onZoomOverlayClick($event)"> -->
+        <!-- <div class="zoom-modal">
+  
           <button class="zoom-close-btn" (click)="closeZoomModal()">
             <span class="close-icon">&times;</span>
           </button>
           
-          <!-- Zoom Controls -->
+        
           <div class="zoom-controls">
             <button class="zoom-btn" (click)="zoomOut()" title="Zoom out">−</button>
             <span class="zoom-level">{{ currentZoomLevel.toFixed(1) }}x</span>
@@ -85,7 +84,7 @@
             <button class="zoom-btn" (click)="resetZoom()" title="Reset zoom">Reset</button>
           </div>
           
-          <!-- Zoomed Image with scroll capability -->
+      
           <div class="zoom-image-container">
             <img 
               #zoomImageElement 
@@ -95,24 +94,24 @@
             />
           </div>
           
-          <!-- Instructions -->
+          
           <div class="zoom-instructions">
             Pinch to zoom • Click outside to close
           </div>
         </div>
-      </div>
+      </div> -->
 
       <!-- Form metadata section -->
       <div class="login-form" [class.board-mode]="galleryViewState === 'originalState'" [class.notes-open]="notesExpanded" [class.engineer-checked-session]="engineerLookedSessionChecked" [class.engineer-role]="userRole === 'engineer'">
         <ng-container *ngIf="galleryViewState !== 'originalState'; else originalStateSummary">
         <!-- Wrapper keeps the title in the same visual position; delete button is placed to its left -->
-        <div class="image-title-wrapper">
+        <!-- <div class="image-title-wrapper">
           <button class="delete-left-btn" type="button" (click)="deleteSelectedImage()" title="Delete selected image">
             <img src="assets/Trash.png" alt="Delete" class="trash-icon" />
           </button>
-          <div class="image-title" [title]="selectedImageTitle">{{ getShortImageTitle(selectedImageTitle) }}</div>
+          <div class="image-title" [title]="selectedImageTitle">{{ getShortImageTitle(selectedImageTitle) }}</div> -->
           <!-- Toggle control placed beside the title on the right side -->
-          <div class="toggle-wrapper">
+          <!-- <div class="toggle-wrapper">
             <label class="switch">
               <input type="checkbox" [(ngModel)]="showWithBoxes" (change)="detectCenterImage()" />
               <span class="slider round"></span>
@@ -163,7 +162,7 @@
               <div class="engineer-inline-preview">{{ selectedPrediction.severity || 'Severity' }}</div>
             </div>
           </ng-template>
-        </div>
+        </div> -->
 
           <!-- <div class="form-group">
           <label for="dropdown3">Severity of Crack</label>
@@ -178,7 +177,7 @@
         </div> -->
 
         <!-- Notes (optional) collapsible field -->
-        <div class="form-group notes-panel" [class.expanded]="notesExpanded">
+        <!-- <div class="form-group notes-panel" [class.expanded]="notesExpanded">
           <button
             type="button"
             class="notes-header"
@@ -188,7 +187,7 @@
           >
             <div class="notes-left">
               <div class="notes-icon" aria-hidden="true">
-                <!-- simple note icon SVG matching design -->
+                
                 <svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                   <rect x="3" y="4" width="14" height="16" rx="2" stroke="#FF6F2E" stroke-width="1.6" fill="none" />
                   <path d="M7 8H15" stroke="#FF6F2E" stroke-width="1.4" stroke-linecap="round" />
@@ -198,7 +197,7 @@
               <div class="notes-title">Notes (optional)</div>
             </div>
             <div class="notes-arrow" [class.open]="notesExpanded" aria-hidden="true">
-              <!-- chevron -->
+        
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                 <path d="M6 9L12 15L18 9" stroke="#8A3A0A" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
               </svg>
@@ -221,7 +220,7 @@
               (ngModelChange)="onEngineerLookedToggle($event)"
             />
           </label>
-        </div>
+        </div> -->
 
         
 
@@ -243,7 +242,7 @@
 
         <ng-template #originalStateSummary>
           <div class="original-state-summary">
-            <div class="summary-header">
+            <!-- <div class="summary-header">
               <div class="login-title">Session Summary</div>
               <div class="login-subtitle">{{ getScopeText() }} · grouped by img number</div>
             </div>
@@ -251,7 +250,7 @@
             <div class="overall-board-container">
               <div class="board-stats">
                 <div class="board-row-top">
-                  <!-- <div class="board-left">
+                   <div class="board-left">
                     <div class="board-icon" aria-hidden="true">
                       <div class="board-icon-circle">
                         <svg width="48" height="48" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -260,7 +259,7 @@
                         </svg>
                       </div>
                     </div>
-                  </div> -->
+                  </div> 
                   <div class="board-item">
                     <div class="board-label">Image Groups</div>
                     <div class="board-value">{{ stats.totalImages }}</div>
@@ -348,15 +347,15 @@
                   </div>
                 </div>
               </div>
-            </div>
+            </div> -->
 
-            <div class="button-group board-actions">
+            <!-- <div class="button-group board-actions">
               <button class="sign-in-button" (click)="viewResults()">View Results</button>
-              <!-- <button class="sign-in-button" (click)="saveCurrentStoredImageAndGoHome()">Save Session</button> -->
-            </div>
-          </div>
+              <button class="sign-in-button" (click)="saveCurrentStoredImageAndGoHome()">Save Session</button>
+            </div> -->
+          </div> 
         </ng-template>
-    </div>
+     </div>
   </ion-content>
 </div>
 

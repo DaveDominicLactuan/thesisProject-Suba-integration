@@ -64,6 +64,7 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
   fastApiConnection: boolean = false;
   photosTaken = 0;
   private _photosProcessed = 0;
+  apiStatus: number = 1;
   // transient flag to show a short glow when a photo finishes processing
   processedGlowActive: boolean = false;
   private _processedGlowTimer?: any;
@@ -128,21 +129,25 @@ export class UploadImagePagePage implements AfterViewInit, OnDestroy {
 private imageQueue: QueueItem[] = [];
 private isQueueProcessing: boolean = false;
   apiMessage: string = 'Loading...';
-  apiStatus: string = '';
+  // apiStatus: number = 1;
   boxes: { w: number; h: number; x: number; y: number }[] = [];
 private apiUrl = 'https://your-vscode-forwarded-url.app.github.dev/';
-apiUrlWeb = 'http://127.0.0.1:8000/';
-apiUrlWeb2 = 'http://127.0.0.1:8000/helloWorld';
+// apiUrlWeb = 'http://127.0.0.1:8000/';
+// apiUrlWeb2 = 'http://127.0.0.1:8000/helloWorld';
 // private baseUrl2 = 'http://127.0.0.1:8000'; 
 // private baseUrl = 'https://16z6llmg-8000.asse.devtunnels.ms'; 
-private baseUrl2 = 'https://crack-api-repo.onrender.com'; 
-private baseUrl = 'https://crack-api-repo.onrender.com'; 
+// private baseUrl2 = 'https://crack-api-repo.onrender.com'; 
+// private baseUrl = 'https://crack-api-repo.onrender.com'; 
+private baseUrl2 = 'https://your-render-url.onrender.com/process-all'; 
+baseUrl = 'https://your-render-url.onrender.com/process-all';
   uploadedImageUrl: string = '';
   selectedFile: File | null = null;
 
   get countdown() {
     return this.photosTaken - this.photosProcessed;
   }
+
+
 
   private generateImageRecordId(prefix: 'original' | 'cropped' | 'resized'): string {
     this.imageRecordCounter += 1;
@@ -162,7 +167,8 @@ private baseUrl = 'https://crack-api-repo.onrender.com';
         if (img) {
           this.selectedThumbSrc = img.withBoxes || img.original || null;
           this.selectedImageSelectionKey = this.getImageSelectionKey(img);
-          this.selectedImageTitle = this.getShortImageTitle(img.filename ? img.filename : (img.fileImageName ? img.fileImageName : ''));
+          this.selectedImageTitle = this.getShortImageTitle(img.userFriendlyname ? img.filename : (img.fileImageName ? img.fileImageName : ''));
+                                         
         }
       });
     }
@@ -183,6 +189,9 @@ private baseUrl = 'https://crack-api-repo.onrender.com';
     //     console.warn('[UploadImagePage] failed to unsubscribe back button handler', e);
     //   }
     // }
+
+    this.getFastApiMessage();
+    this.apiStatus = 1;
 
        try {
         this.backButtonSub = this.platform.backButton.subscribeWithPriority(10, async () => {
@@ -300,7 +309,7 @@ private baseUrl = 'https://crack-api-repo.onrender.com';
     // update the selected thumbnail src and title with respect to the toggle, and auto-scroll to center
     this.selectedThumbSrc = this.showWithBoxes ? (img.withBoxes ?? img.original) : (img.original ?? img.withBoxes ?? '');
     this.selectedImageSelectionKey = this.getImageSelectionKey(img);
-    this.selectedImageTitle = img.filename ?? img.fileName ?? '';
+    this.selectedImageTitle = img.userFriendlyname ?? img.userFriendlyname ?? '';
     
     // Auto-scroll to center the selected thumbnail or item (Android Recent Apps style).  
     // after a short delay let the DOM update then center the clicked thumbnail in the scroller.
@@ -691,454 +700,927 @@ private async runQueueProcessor(): Promise<void> {
   }
 
   /** Helper to process a data URL (image) — runs inference and stores the image */
- async processDataUrl(
-   dataUrl: string,
-   filename: string,
-   blob?: Blob, // ADDED: Receive the blob here
-   bumpCounters: boolean = true,
-   addToCapturedImages: boolean = true,
-   refreshCountsAfterSave: boolean = true
- ) {
-  console.log(`🎥 [CameraProcessor] Current image name is: ${filename}`);
-  console.log(`[PIPELINE] processDataUrl: Entering for ${filename}`);
-   this.isProcessing = true;
-   this.imagePreview = dataUrl;
+//  async processDataUrl(
+//    dataUrl: string,
+//    filename: string,
+//    blob?: Blob, // ADDED: Receive the blob here
+//    bumpCounters: boolean = true,
+//    addToCapturedImages: boolean = true,
+//    refreshCountsAfterSave: boolean = true
+//  ) {
+//   console.log(`🎥 [CameraProcessor] Current image name is: ${filename}`);
+//   console.log(`[PIPELINE] processDataUrl: Entering for ${filename}`);
+//    this.isProcessing = true;
+//    this.imagePreview = dataUrl;
  
-   let backendUploadResult: UploadResponse | null = null;
+//    let backendUploadResult: UploadResponse | null = null;
    
-   if (addToCapturedImages) {
-     this.capturedImages.unshift(dataUrl);
-   }
+//    if (addToCapturedImages) {
+//      this.capturedImages.unshift(dataUrl);
+//    }
  
-   // Detect center thumbnails
-   setTimeout(() => {
-     if (typeof this.detectCenterThumbnail === 'function') {
-       this.detectCenterThumbnail();
-     }
-   }, 60);
+//    // Detect center thumbnails
+//    setTimeout(() => {
+//      if (typeof this.detectCenterThumbnail === 'function') {
+//        this.detectCenterThumbnail();
+//      }
+//    }, 60);
  
-   // Yield execution
-   if (typeof this.sleep === 'function') {
-     await this.sleep(50);
-   } else {
-     await new Promise((resolve) => setTimeout(resolve, 50));
-   }
+//    // Yield execution
+//    if (typeof this.sleep === 'function') {
+//      await this.sleep(50);
+//    } else {
+//      await new Promise((resolve) => setTimeout(resolve, 50));
+//    }
    
-   try {
-     this.cdr.detectChanges();
-   } catch (e) {
-     /* ignore change detection spikes */
-   }
+//    try {
+//      this.cdr.detectChanges();
+//    } catch (e) {
+//      /* ignore change detection spikes */
+//    }
  
  
-   // 2. Master try block to guarantee the finally block clears the spinner
-   try {
-     // --- BACKEND UPLOAD FLOW ---
-     try {
-       // FIX: Use the passed blob. If it's missing (e.g. from gallery base64), fall back to fetching it.
-       // Ensure we absolutely have a valid Blob instance
- let finalBlob = blob;
- if (!finalBlob || !(finalBlob instanceof Blob)) {
-   const response = await fetch(dataUrl);
-   finalBlob = await response.blob();
- }
+//    // 2. Master try block to guarantee the finally block clears the spinner
+//    try {
+//      // --- BACKEND UPLOAD FLOW ---
+//      try {
+//        // FIX: Use the passed blob. If it's missing (e.g. from gallery base64), fall back to fetching it.
+//        // Ensure we absolutely have a valid Blob instance
+//  let finalBlob = blob;
+//  if (!finalBlob || !(finalBlob instanceof Blob)) {
+//    const response = await fetch(dataUrl);
+//    finalBlob = await response.blob();
+//  }
  
- const generatedName = filename || `capture-${Date.now()}.jpg`;
+//  const generatedName = filename || `capture-${Date.now()}.jpg`;
  
- console.log(`[CameraProcessor] Triggering uploadToServer for backend server: ${generatedName}`);
+//  console.log(`[CameraProcessor] Triggering uploadToServer for backend server: ${generatedName}`);
  
- // 1. Check for finalBlob, NOT this.selectedFile
- if (finalBlob) {
-   console.log(`[PIPELINE] processDataUrl: Calling uploadToServer for ${generatedName}`);
-   // Pass the raw blob directly to our fixed uploadToServer function
-   backendUploadResult = await this.uploadToServer(finalBlob, generatedName);
-   console.log(`[PIPELINE] processDataUrl: Upload result:`, backendUploadResult);
- } else {
-   console.warn('[CameraProcessor] Cannot upload: finalBlob is null or missing.');
- }
+//  // 1. Check for finalBlob, NOT this.selectedFile
+//  if (finalBlob) {
+//    console.log(`[PIPELINE] processDataUrl: Calling uploadToServer for ${generatedName}`);
+//    // Pass the raw blob directly to our fixed uploadToServer function
+//    backendUploadResult = await this.uploadToServer(finalBlob, generatedName);
+//    console.log(`[PIPELINE] processDataUrl: Upload result:`, backendUploadResult);
+//  } else {
+//    console.warn('[CameraProcessor] Cannot upload: finalBlob is null or missing.');
+//  }
  
-       const croppedImages: any[] = [];
+//        const croppedImages: any[] = [];
  
-       console.log("Backend Result check cropped boi:", backendUploadResult?.message);
-       console.log("Backend Result check bounding boxes:", backendUploadResult?.rawImagePath);
-       console.log("Backend Result check cropped ROI:", backendUploadResult?.processedImagePath);
-       console.log("Backend Result check cropped ROI object store:", backendUploadResult?.bounding_boxes);
-       // console.log("Backend Result check cropped ROI:", backendUploadResult?.cropped_roi_objectStore);
-       // console.log("Backend Result check cropped ROI object store:", backendUploadResult?.resizedImagePath);
+//        console.log("Backend Result check cropped boi:", backendUploadResult?.message);
+//        console.log("Backend Result check bounding boxes:", backendUploadResult?.rawImagePath);
+//        console.log("Backend Result check cropped ROI:", backendUploadResult?.processedImagePath);
+//        console.log("Backend Result check cropped ROI object store:", backendUploadResult?.bounding_boxes);
+//        // console.log("Backend Result check cropped ROI:", backendUploadResult?.cropped_roi_objectStore);
+//        // console.log("Backend Result check cropped ROI object store:", backendUploadResult?.resizedImagePath);
  
    
        
  
        
-       console.log('[CameraProcessor] Successfully saved backend upload response:', backendUploadResult);
-     } catch (uploadSetupErr) {
-       console.error('[CameraProcessor] Failed to execute backend upload payload:', uploadSetupErr);
-     }
+//        console.log('[CameraProcessor] Successfully saved backend upload response:', backendUploadResult);
+//      } catch (uploadSetupErr) {
+//        console.error('[CameraProcessor] Failed to execute backend upload payload:', uploadSetupErr);
+//      }
  
-     if (bumpCounters) this.photosTaken += 1;
+//      if (bumpCounters) this.photosTaken += 1;
  
-     let finalizationClaimed = false;
-     const claimFinalization = () => {
-       if (finalizationClaimed) return false;
-       finalizationClaimed = true;
-       return true;
-     };
+//      let finalizationClaimed = false;
+//      const claimFinalization = () => {
+//        if (finalizationClaimed) return false;
+//        finalizationClaimed = true;
+//        return true;
+//      };
  
-     let inferenceCalled = false;
-     let userId: string | undefined = undefined;
+//      let inferenceCalled = false;
+//      let userId: string | undefined = undefined;
  
-     // Authoritative check on User Identifiers
-     try {
-       const storage = await (this.imageStorage as any)._storage;
-       if (storage) {
-         userId = await storage.get('userID');
-       }
-     } catch (e) {
-       console.warn('[CameraProcessor] Failed to retrieve userID from storage context', e);
-     }
+//      // Authoritative check on User Identifiers
+//      try {
+//        const storage = await (this.imageStorage as any)._storage;
+//        if (storage) {
+//          userId = await storage.get('userID');
+//        }
+//      } catch (e) {
+//        console.warn('[CameraProcessor] Failed to retrieve userID from storage context', e);
+//      }
  
-     const sessionImgIndex = typeof (this.imageStorage as any).getNextOriginalImageNumber === 'function'
-       ? (this.imageStorage as any).getNextOriginalImageNumber(this.selectedSessionId || undefined)
-       : undefined;
-     const originalId = this.generateImageRecordId('original');
+//      const sessionImgIndex = typeof (this.imageStorage as any).getNextOriginalImageNumber === 'function'
+//        ? (this.imageStorage as any).getNextOriginalImageNumber(this.selectedSessionId || undefined)
+//        : undefined;
+//      const originalId = this.generateImageRecordId('original');
  
-     // Execution Core Worker
-     const doWork = async () => {
-       let prediction: any = null;
-       try {
-         inferenceCalled = true;
+//      // Execution Core Worker
+//      const doWork = async () => {
+//        let prediction: any = null;
+//        try {
+//          inferenceCalled = true;
         
-         const tensor = await this.preprocessImage(dataUrl);
+//          const tensor = await this.preprocessImage(dataUrl);
          
-         try {
-           // prediction = await this.crackDetectionService.runInference(tensor);
-         } catch (infErr) {
-           console.warn('Local client model inference timed out or faulted', infErr);
-         }
-       } catch (err) {
-         console.warn('Client-side preview preprocessing failed', err);
-       }
+//          try {
+//            // prediction = await this.crackDetectionService.runInference(tensor);
+//          } catch (infErr) {
+//            console.warn('Local client model inference timed out or faulted', infErr);
+//          }
+//        } catch (err) {
+//          console.warn('Client-side preview preprocessing failed', err);
+//        }
  
-       // --- CRITICAL FIX: LINK BACKEND RESULTS TO bounding_boxes ENGINE ---
-       if (!prediction) {
-         prediction = { boxes: [] };
-       }
-       if (!prediction.boxes || prediction.boxes.length === 0) {
-         if (backendUploadResult && Array.isArray(backendUploadResult.bounding_boxes) && backendUploadResult.bounding_boxes.length > 0) {
-           console.log(`[CameraProcessor] Local model found 0 boxes. Feeding ${backendUploadResult.bounding_boxes.length} server boxes into drawing canvas engine.`);
-           prediction.boxes = backendUploadResult.bounding_boxes;
-         }
-       }
+//        // --- CRITICAL FIX: LINK BACKEND RESULTS TO bounding_boxes ENGINE ---
+//        if (!prediction) {
+//          prediction = { boxes: [] };
+//        }
+//        if (!prediction.boxes || prediction.boxes.length === 0) {
+//          if (backendUploadResult && Array.isArray(backendUploadResult.bounding_boxes) && backendUploadResult.bounding_boxes.length > 0) {
+//            console.log(`[CameraProcessor] Local model found 0 boxes. Feeding ${backendUploadResult.bounding_boxes.length} server boxes into drawing canvas engine.`);
+//            prediction.boxes = backendUploadResult.bounding_boxes;
+//          }
+//        }
  
-       const maxBytes = 900_000;
-       const safeOriginal = await this.shrinkDataUrlToBytes(dataUrl, maxBytes, 4000);
-       const timestamp = new Date().toISOString();
-       const generatedFilename = this.buildSessionFilename(
-         !!(prediction.boxes && prediction.boxes.length > 0), 
-         timestamp, 
-         filename, 
-         sessionImgIndex
-       );
+//        const maxBytes = 900_000;
+//        const safeOriginal = await this.shrinkDataUrlToBytes(dataUrl, maxBytes, 4000);
+//        const timestamp = new Date().toISOString();
+//        const generatedFilename = this.buildSessionFilename(
+//          !!(prediction.boxes && prediction.boxes.length > 0), 
+//          timestamp, 
+//          filename, 
+//          sessionImgIndex
+//        );
  
-       const entry: StoredImage = {
-         original: safeOriginal,
-         timestamp,
-         filename: generatedFilename,
-         fileImageName: filename || undefined,
-         prediction: prediction || undefined,
-         hasPrediction: !!(prediction.boxes && prediction.boxes.length > 0),
-         statusMessage: (prediction.boxes && prediction.boxes.length > 0) ?
-           'Prediction succeeded' : (inferenceCalled ? 'Prediction failed' : 'No prediction'),
-         userId: userId,
-         sessionId: this.selectedSessionId || undefined,
-         original_id: originalId,
-         cropped_id: originalId
-       };
-        console.log("It worked line 871! Boxes to draw:");
-       // Canvas Rendering & Cropping Queue Loop
-       try {
-         if (prediction && Array.isArray(prediction.boxes) && prediction.boxes.length > 0) {
-           const rawBoxes2 = backendUploadResult?.bounding_boxes || []; 
-           const boxesToDraw2 = rawBoxes2.map((b: any) => ({
-             x: b.x,
-             y: b.y,
-             w: b.w,
-             h: b.h
-           }));
-           const maskW = prediction.maskWidth || prediction.maskW || 128;
-           const maskH = prediction.maskHeight || prediction.maskH || 128;
+//        const entry: StoredImage = {
+//          original: safeOriginal,
+//          timestamp,
+//          filename: generatedFilename,
+//          fileImageName: filename || undefined,
+//          prediction: prediction || undefined,
+//          hasPrediction: !!(prediction.boxes && prediction.boxes.length > 0),
+//          statusMessage: (prediction.boxes && prediction.boxes.length > 0) ?
+//            'Prediction succeeded' : (inferenceCalled ? 'Prediction failed' : 'No prediction'),
+//          userId: userId,
+//          sessionId: this.selectedSessionId || undefined,
+//          original_id: originalId,
+//          cropped_id: originalId
+//        };
+//         console.log("It worked line 871! Boxes to draw:");
+//        // Canvas Rendering & Cropping Queue Loop
+//        try {
+//          if (prediction && Array.isArray(prediction.boxes) && prediction.boxes.length > 0) {
+//            const rawBoxes2 = backendUploadResult?.bounding_boxes || []; 
+//            const boxesToDraw2 = rawBoxes2.map((b: any) => ({
+//              x: b.x,
+//              y: b.y,
+//              w: b.w,
+//              h: b.h
+//            }));
+//            const maskW = prediction.maskWidth || prediction.maskW || 128;
+//            const maskH = prediction.maskHeight || prediction.maskH || 128;
  
-           let croppedCracks: any[] = [];
-           let resizedImage: any[] = [];
+//            let croppedCracks: any[] = [];
+//            let resizedImage: any[] = [];
  
- // 1. Check if the backend provided pre-processed crops
- const backendCrops = (backendUploadResult as any)?.backendUploadResult?.cropped_roi_objectStore;
- // With this:
- const backendResize = (backendUploadResult as any)?.resizedImagePath;
+//  // 1. Check if the backend provided pre-processed crops
+//  const backendCrops = (backendUploadResult as any)?.backendUploadResult?.cropped_roi_objectStore;
+//  // With this:
+//  const backendResize = (backendUploadResult as any)?.resizedImagePath;
  
- console.log("BackendResize", backendResize);
+//  console.log("BackendResize", backendResize);
  
- if (backendResize && typeof backendResize === 'string' && !backendResize.startsWith('data:image/')) {
-   try {
-     const response = await fetch(backendResize);
-     const blob = await response.blob();
-     const base64 = await this.convertBlobToBase64(blob);
-     resizedImage = [{ image: base64 }];
-   } catch (e) {
-     console.error("[CameraProcessor] Failed to fetch resized image from URL", e);
-     resizedImage = [];
-   }
- } else if (backendResize?.startsWith('data:image/')) {
-   // Handle the case where it might be base64 already
-   resizedImage = [{ image: backendResize }];
- } else {
-   resizedImage = [];
- }
+//  if (backendResize && typeof backendResize === 'string' && !backendResize.startsWith('data:image/')) {
+//    try {
+//      const response = await fetch(backendResize);
+//      const blob = await response.blob();
+//      const base64 = await this.convertBlobToBase64(blob);
+//      resizedImage = [{ image: base64 }];
+//    } catch (e) {
+//      console.error("[CameraProcessor] Failed to fetch resized image from URL", e);
+//      resizedImage = [];
+//    }
+//  } else if (backendResize?.startsWith('data:image/')) {
+//    // Handle the case where it might be base64 already
+//    resizedImage = [{ image: backendResize }];
+//  } else {
+//    resizedImage = [];
+//  }
  
- if (Array.isArray(backendCrops) && backendCrops.length > 0) {
-   console.log("[CameraProcessor] Using server-provided crops:", backendCrops);
-   croppedCracks = backendCrops;
- } else {
-   // 2. Fallback: Run local cropping only if backend crops are missing
-   console.log("[CameraProcessor] No backend crops found, running local cropping.");
+//  if (Array.isArray(backendCrops) && backendCrops.length > 0) {
+//    console.log("[CameraProcessor] Using server-provided crops:", backendCrops);
+//    croppedCracks = backendCrops;
+//  } else {
+//    // 2. Fallback: Run local cropping only if backend crops are missing
+//    console.log("[CameraProcessor] No backend crops found, running local cropping.");
    
-   // 2. Fallback: Run local cropping only if backend crops are missing
- console.log("[CameraProcessor] No backend crops found, running local cropping.");
+//    // 2. Fallback: Run local cropping only if backend crops are missing
+//  console.log("[CameraProcessor] No backend crops found, running local cropping.");
  
- for (const box of boxesToDraw2) {
-   const croppedNumber = croppedCracks.length + 1;
-   try {
-     // Wrap the operations in a localized function
-     const cropOperation = async () => {
-       const crop = await this.cropBoxFromImage(dataUrl, box, maskW, maskH);
-       const cropTensor = await this.preprocessImage(crop);
-       return crop;
-     };
+//  for (const box of boxesToDraw2) {
+//    const croppedNumber = croppedCracks.length + 1;
+//    try {
+//      // Wrap the operations in a localized function
+//      const cropOperation = async () => {
+//        const crop = await this.cropBoxFromImage(dataUrl, box, maskW, maskH);
+//        const cropTensor = await this.preprocessImage(crop);
+//        return crop;
+//      };
  
-     // GUARDRAIL: Give each crop a maximum of 2 seconds to complete
-     const cropTimeout = new Promise<never>((_, reject) => 
-       setTimeout(() => reject(new Error(`Crop ${croppedNumber} timed out.`)), 2000)
-     );
+//      // GUARDRAIL: Give each crop a maximum of 2 seconds to complete
+//      const cropTimeout = new Promise<never>((_, reject) => 
+//        setTimeout(() => reject(new Error(`Crop ${croppedNumber} timed out.`)), 2000)
+//      );
  
-     // Race the crop against the 2-second timeout
-     const cropResult = await Promise.race([cropOperation(), cropTimeout]);
+//      // Race the crop against the 2-second timeout
+//      const cropResult = await Promise.race([cropOperation(), cropTimeout]);
  
-     croppedCracks.push({
-       croppedNumber,
-       image: cropResult,
-       box,
-       type: 'unknown',
-       shape: 'unknown',
-       severity:'unknown'
-     });
-   } catch (cropErr) {
-     // If one box fails or times out, it logs the error but safely continues to the next box!
-     console.warn(`[CameraProcessor] Failed handling bounding box ${croppedNumber}`, cropErr);
-   }
- }
- }
+//      croppedCracks.push({
+//        croppedNumber,
+//        image: cropResult,
+//        box,
+//        type: 'unknown',
+//        shape: 'unknown',
+//        severity:'unknown'
+//      });
+//    } catch (cropErr) {
+//      // If one box fails or times out, it logs the error but safely continues to the next box!
+//      console.warn(`[CameraProcessor] Failed handling bounding box ${croppedNumber}`, cropErr);
+//    }
+//  }
+//  }
  
- console.log("It worked line 905! Final croppedCracks:", croppedCracks);
- console.log("It worked line 927! Final resizedImage:", resizedImage);
+//  console.log("It worked line 905! Final croppedCracks:", croppedCracks);
+//  console.log("It worked line 927! Final resizedImage:", resizedImage);
  
-           console.log("It worked line 907! Boxes to draw:");
+//            console.log("It worked line 907! Boxes to draw:");
  
-           try {
-             const withBoxesDataUrl = await this.drawBoxesOnImage(dataUrl, boxesToDraw2, maskW, maskH);
-             const safeWithBoxes = await this.shrinkDataUrlToBytes(withBoxesDataUrl, maxBytes, 4000);
-             (entry as any).withBoxes = safeWithBoxes;
-             (entry as any).boxes = boxesToDraw2;
-             (entry as any).croppedCracks = croppedCracks;
-             (entry as any).resizedImage = resizedImage;
-             (entry as any).detectionMessage = `Rendered ${boxesToDraw2.length} detected crack box(es)`;
-             this.totalBoundingBoxesCreated += boxesToDraw2.length;
-           } catch (renderErr) {
-             console.warn('[CameraProcessor] drawBoxesOnImage canvas drawing threw exception:', renderErr);
-             (entry as any).withBoxes = safeOriginal;
-             (entry as any).boxes = [];
-             (entry as any).detectionMessage = 'Box rendering failed';
-           }
-         } else {
-           (entry as any).withBoxes = safeOriginal;
-           (entry as any).boxes = [];
-           (entry as any).detectionMessage = 'No boxes detected';
-         }
-       } catch (e) {
-         console.warn('[CameraProcessor] Context breakdown while handling canvas configurations', e);
-         (entry as any).withBoxes = safeOriginal;
-         (entry as any).boxes = [];
-         (entry as any).detectionMessage = 'Box rendering failed';
-       }
+//            try {
+//              const withBoxesDataUrl = await this.drawBoxesOnImage(dataUrl, boxesToDraw2, maskW, maskH);
+//              const safeWithBoxes = await this.shrinkDataUrlToBytes(withBoxesDataUrl, maxBytes, 4000);
+//              (entry as any).withBoxes = safeWithBoxes;
+//              (entry as any).boxes = boxesToDraw2;
+//              (entry as any).croppedCracks = croppedCracks;
+//              (entry as any).resizedImage = resizedImage;
+//              (entry as any).detectionMessage = `Rendered ${boxesToDraw2.length} detected crack box(es)`;
+//              this.totalBoundingBoxesCreated += boxesToDraw2.length;
+//            } catch (renderErr) {
+//              console.warn('[CameraProcessor] drawBoxesOnImage canvas drawing threw exception:', renderErr);
+//              (entry as any).withBoxes = safeOriginal;
+//              (entry as any).boxes = [];
+//              (entry as any).detectionMessage = 'Box rendering failed';
+//            }
+//          } else {
+//            (entry as any).withBoxes = safeOriginal;
+//            (entry as any).boxes = [];
+//            (entry as any).detectionMessage = 'No boxes detected';
+//          }
+//        } catch (e) {
+//          console.warn('[CameraProcessor] Context breakdown while handling canvas configurations', e);
+//          (entry as any).withBoxes = safeOriginal;
+//          (entry as any).boxes = [];
+//          (entry as any).detectionMessage = 'Box rendering failed';
+//        }
  
-       console.log("Line 957");
+//        console.log("Line 957");
  
-       if (!claimFinalization()) {
-         console.warn('[CameraProcessor] Skipping storage write because processing state is already completed');
-         return entry;
-       }
+//        if (!claimFinalization()) {
+//          console.warn('[CameraProcessor] Skipping storage write because processing state is already completed');
+//          return entry;
+//        }
       
-       console.log("Line 964 added to image storage");
-       await this.imageStorage.addImage(entry, this.selectedSessionId || undefined);
+//        console.log("Line 964 added to image storage");
+//        await this.imageStorage.addImage(entry, this.selectedSessionId || undefined);
        
-       try {
-         if (this.selectedSessionId && typeof (this.imageStorage.addImageToSession) === 'function') {
-           this.imageStorage.addImageToSession(this.selectedSessionId, entry.filename);
-           this.sessionIsPristine = false;
-         }
-       } catch (e) {
-         console.warn('[CameraProcessor] Failed linking image identifier to active session key', e);
-       }
+//        try {
+//          if (this.selectedSessionId && typeof (this.imageStorage.addImageToSession) === 'function') {
+//            this.imageStorage.addImageToSession(this.selectedSessionId, entry.filename);
+//            this.sessionIsPristine = false;
+//          }
+//        } catch (e) {
+//          console.warn('[CameraProcessor] Failed linking image identifier to active session key', e);
+//        }
        
-       console.log("Line 976 cropped images");
-       if (typeof (this as any).processAndStoreCroppedCracks === 'function') {
-         await (this as any).processAndStoreCroppedCracks(entry, filename, userId, sessionImgIndex, originalId);
-       } else if (Array.isArray((entry as any).croppedCracks) && (entry as any).croppedCracks.length > 0) {
-         const storedCroppedCracks = await this.persistCroppedCracksAsSessionImages(
-           (entry as any).croppedCracks, 
-           filename, 
-           entry.timestamp, 
-           userId, 
-           sessionImgIndex, 
-           originalId
-         );
-         (entry as any).croppedCracks = storedCroppedCracks;
-         try {
-           if (typeof (this.imageStorage as any).setEntryForImage === 'function') {
-             (this.imageStorage as any).setEntryForImage(entry.filename, entry);
-           }
-         } catch (setErr) {
-           console.warn('[CameraProcessor] Failed matching parent index to sub-crops object mapping', setErr);
-         }
-       }
+//        console.log("Line 976 cropped images");
+//        if (typeof (this as any).processAndStoreCroppedCracks === 'function') {
+//          await (this as any).processAndStoreCroppedCracks(entry, filename, userId, sessionImgIndex, originalId);
+//        } else if (Array.isArray((entry as any).croppedCracks) && (entry as any).croppedCracks.length > 0) {
+//          const storedCroppedCracks = await this.persistCroppedCracksAsSessionImages(
+//            (entry as any).croppedCracks, 
+//            filename, 
+//            entry.timestamp, 
+//            userId, 
+//            sessionImgIndex, 
+//            originalId
+//          );
+//          (entry as any).croppedCracks = storedCroppedCracks;
+//          try {
+//            if (typeof (this.imageStorage as any).setEntryForImage === 'function') {
+//              (this.imageStorage as any).setEntryForImage(entry.filename, entry);
+//            }
+//          } catch (setErr) {
+//            console.warn('[CameraProcessor] Failed matching parent index to sub-crops object mapping', setErr);
+//          }
+//        }
        
-       console.log("Line 998 resized images");
-     // --- Process and store resized images ---
-       if (typeof (this as any).processAndStoreResizedImages === 'function') {
-         await (this as any).processAndStoreResizedImages(entry, filename, userId, sessionImgIndex, originalId);
-       } else if (Array.isArray((entry as any).resizedImage) && (entry as any).resizedImage.length > 0) {
-         const storedResizedImages = await this.persistResizedImagesAsSessionImages(
-           (entry as any).resizedImage, 
-           filename, 
-           entry.timestamp, 
-           userId, 
-           sessionImgIndex, 
-           originalId
-         );
-         (entry as any).resizedImage = storedResizedImages;
-         try {
-           if (typeof (this.imageStorage as any).setEntryForImage === 'function') {
-             (this.imageStorage as any).setEntryForImage(entry.filename, entry);
-           }
-         } catch (setErr) {
-           console.warn('[CameraProcessor] Failed matching parent index to resized image object mapping', setErr);
-         }
-       }
+//        console.log("Line 998 resized images");
+//      // --- Process and store resized images ---
+//        if (typeof (this as any).processAndStoreResizedImages === 'function') {
+//          await (this as any).processAndStoreResizedImages(entry, filename, userId, sessionImgIndex, originalId);
+//        } else if (Array.isArray((entry as any).resizedImage) && (entry as any).resizedImage.length > 0) {
+//          const storedResizedImages = await this.persistResizedImagesAsSessionImages(
+//            (entry as any).resizedImage, 
+//            filename, 
+//            entry.timestamp, 
+//            userId, 
+//            sessionImgIndex, 
+//            originalId
+//          );
+//          (entry as any).resizedImage = storedResizedImages;
+//          try {
+//            if (typeof (this.imageStorage as any).setEntryForImage === 'function') {
+//              (this.imageStorage as any).setEntryForImage(entry.filename, entry);
+//            }
+//          } catch (setErr) {
+//            console.warn('[CameraProcessor] Failed matching parent index to resized image object mapping', setErr);
+//          }
+//        }
  
-       await this.refreshDisplayedImages();
+//        await this.refreshDisplayedImages();
  
-       if (this.imagePaths) {
-         this.imagePaths.unshift({
-           original: entry.original,
-           withBoxes: (entry as any).withBoxes || entry.original,
-           fileName: entry.filename,
-           rawPrediction: entry.prediction,
-           original_id: (entry as any).original_id,
-           cropped_id: (entry as any).cropped_id,
-         });
-       }
+//        if (this.imagePaths) {
+//          this.imagePaths.unshift({
+//            original: entry.original,
+//            withBoxes: (entry as any).withBoxes || entry.original,
+//            fileName: entry.filename,
+//            rawPrediction: entry.prediction,
+//            original_id: (entry as any).original_id,
+//            cropped_id: (entry as any).cropped_id,
+//          });
+//        }
  
-       if (userId) {
-         try {
-           if (typeof this.imageStorage.saveImageToUser === 'function') {
-             await this.imageStorage.saveImageToUser(userId, entry);
-           }
-           if (this.selectedSessionId && typeof (this.imageStorage.getSession) === 'function' && typeof this.imageStorage.saveSessionToUser === 'function') {
-             const session = this.imageStorage.getSession(this.selectedSessionId);
-             if (session) await this.imageStorage.saveSessionToUser(userId, session);
-           }
-         } catch (e) {
-           console.warn('[CameraProcessor] Cloud storage transaction rejected', e);
-         }
-       }
+//        if (userId) {
+//          try {
+//            if (typeof this.imageStorage.saveImageToUser === 'function') {
+//              await this.imageStorage.saveImageToUser(userId, entry);
+//            }
+//            if (this.selectedSessionId && typeof (this.imageStorage.getSession) === 'function' && typeof this.imageStorage.saveSessionToUser === 'function') {
+//              const session = this.imageStorage.getSession(this.selectedSessionId);
+//              if (session) await this.imageStorage.saveSessionToUser(userId, session);
+//            }
+//          } catch (e) {
+//            console.warn('[CameraProcessor] Cloud storage transaction rejected', e);
+//          }
+//        }
  
-       if (bumpCounters) this.imagesUploadedThisSession += 1;
-       if (prediction && prediction.boxes && prediction.boxes.length > 0) this.photosProcessed += 1;
-       if (refreshCountsAfterSave) await this.updatePhotoCounts();
+//        if (bumpCounters) this.imagesUploadedThisSession += 1;
+//        if (prediction && prediction.boxes && prediction.boxes.length > 0) this.photosProcessed += 1;
+//        if (refreshCountsAfterSave) await this.updatePhotoCounts();
        
-       await this.logCurrentSessionImageObjects();
+//        await this.logCurrentSessionImageObjects();
        
-       setTimeout(() => {
-         if (typeof this.detectCenterThumbnail === 'function') {
-           this.detectCenterThumbnail();
-         }
-       }, 250);
-       return entry;
-     };
+//        setTimeout(() => {
+//          if (typeof this.detectCenterThumbnail === 'function') {
+//            this.detectCenterThumbnail();
+//          }
+//        }, 250);
+//        return entry;
+//      };
  
-     // Race Configuration
-     const overallTimeoutMs = 17_000;
-     try {
-       await Promise.race([
-         doWork(), 
-         new Promise((_, rej) => setTimeout(() => rej(new Error('processing-timeout')), overallTimeoutMs))
-       ]);
-     } catch (err: any) {
-       if (err && err.message === 'processing-timeout') {
-         // Fallback logic on timeout
-         const maxBytes = 900_000;
-         const safeOriginal = await this.shrinkDataUrlToBytes(dataUrl, maxBytes, 4000);
-         const timestamp = new Date().toISOString();
-         const fallbackFilename = this.buildSessionFilename(false, timestamp, filename, sessionImgIndex);
+//      // Race Configuration
+//      const overallTimeoutMs = 17_000;
+//      try {
+//        await Promise.race([
+//          doWork(), 
+//          new Promise((_, rej) => setTimeout(() => rej(new Error('processing-timeout')), overallTimeoutMs))
+//        ]);
+//      } catch (err: any) {
+//        if (err && err.message === 'processing-timeout') {
+//          // Fallback logic on timeout
+//          const maxBytes = 900_000;
+//          const safeOriginal = await this.shrinkDataUrlToBytes(dataUrl, maxBytes, 4000);
+//          const timestamp = new Date().toISOString();
+//          const fallbackFilename = this.buildSessionFilename(false, timestamp, filename, sessionImgIndex);
          
-         const entry: StoredImage = {
-           original: safeOriginal,
-           timestamp,
-           filename: fallbackFilename,
-           fileImageName: filename || undefined,
-           prediction: undefined,
-           hasPrediction: false,
-           statusMessage: inferenceCalled ? 'Prediction failed' : 'No prediction',
-           userId: userId,
-           sessionId: this.selectedSessionId || undefined,
-           original_id: originalId,
-           cropped_id: originalId
-         };
-         try {
-           if (claimFinalization()) {
-             await this.imageStorage.addImage(entry, this.selectedSessionId || undefined);
-             if (this.selectedSessionId && typeof (this.imageStorage.addImageToSession) === 'function') {
-               this.imageStorage.addImageToSession(this.selectedSessionId, entry.filename);
-               this.sessionIsPristine = false;
-             }
-             await this.refreshDisplayedImages();
-             if (this.imagePaths) {
-               this.imagePaths.unshift({
-                 original: entry.original,
-                 withBoxes: entry.original,
-                 fileName: entry.filename,
-                 rawPrediction: entry.prediction,
-                 original_id: entry.original_id,
-                 cropped_id: entry.cropped_id,
-               });
-             }
-             this.imagesUploadedThisSession += 1;
-             await this.updatePhotoCounts();
-           }
-         } catch (fallbackErr) {
-           console.warn('[CameraProcessor] Aborting database write operations during fallback handling', fallbackErr);
-         }
-       }
-     }
-   } finally {
-     this.isProcessing = false;
-     if (typeof this.logCurrentSessionStateAfterProcessDataUrl === 'function') {
-       await this.logCurrentSessionStateAfterProcessDataUrl();
-     }
-     if (typeof this.logBoundingBoxStats === 'function') {
-       this.logBoundingBoxStats();
-     }
-   }
- }
+//          const entry: StoredImage = {
+//            original: safeOriginal,
+//            timestamp,
+//            filename: fallbackFilename,
+//            fileImageName: filename || undefined,
+//            prediction: undefined,
+//            hasPrediction: false,
+//            statusMessage: inferenceCalled ? 'Prediction failed' : 'No prediction',
+//            userId: userId,
+//            sessionId: this.selectedSessionId || undefined,
+//            original_id: originalId,
+//            cropped_id: originalId
+//          };
+//          try {
+//            if (claimFinalization()) {
+//              await this.imageStorage.addImage(entry, this.selectedSessionId || undefined);
+//              if (this.selectedSessionId && typeof (this.imageStorage.addImageToSession) === 'function') {
+//                this.imageStorage.addImageToSession(this.selectedSessionId, entry.filename);
+//                this.sessionIsPristine = false;
+//              }
+//              await this.refreshDisplayedImages();
+//              if (this.imagePaths) {
+//                this.imagePaths.unshift({
+//                  original: entry.original,
+//                  withBoxes: entry.original,
+//                  fileName: entry.filename,
+//                  rawPrediction: entry.prediction,
+//                  original_id: entry.original_id,
+//                  cropped_id: entry.cropped_id,
+//                });
+//              }
+//              this.imagesUploadedThisSession += 1;
+//              await this.updatePhotoCounts();
+//            }
+//          } catch (fallbackErr) {
+//            console.warn('[CameraProcessor] Aborting database write operations during fallback handling', fallbackErr);
+//          }
+//        }
+//      }
+//    } finally {
+//      this.isProcessing = false;
+//      if (typeof this.logCurrentSessionStateAfterProcessDataUrl === 'function') {
+//        await this.logCurrentSessionStateAfterProcessDataUrl();
+//      }
+//      if (typeof this.logBoundingBoxStats === 'function') {
+//        this.logBoundingBoxStats();
+//      }
+//    }
+//  } 
+
+async processDataUrl(
+  dataUrl: string,
+  filename: string,
+  blob?: Blob, // ADDED: Receive the blob here
+  bumpCounters: boolean = true,
+  addToCapturedImages: boolean = true,
+  refreshCountsAfterSave: boolean = true
+) {
+ console.log(`🎥 [CameraProcessor] Current image name is: ${filename}`);
+ console.log(`[PIPELINE] processDataUrl: Entering for ${filename}`);
+  this.isProcessing = true;
+  this.imagePreview = dataUrl;
+
+  let backendUploadResult: UploadResponse | null = null;
+  
+  if (addToCapturedImages) {
+    this.capturedImages.unshift(dataUrl);
+  }
+
+  // Detect center thumbnails
+  setTimeout(() => {
+    if (typeof this.detectCenterThumbnail === 'function') {
+      this.detectCenterThumbnail();
+    }
+  }, 60);
+
+  // Yield execution
+  if (typeof this.sleep === 'function') {
+    await this.sleep(50);
+  } else {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  
+  try {
+    this.cdr.detectChanges();
+  } catch (e) {
+    /* ignore change detection spikes */
+  }
+
+
+  // 2. Master try block to guarantee the finally block clears the spinner
+  try {
+    // --- BACKEND UPLOAD FLOW ---
+    try {
+      // FIX: Use the passed blob. If it's missing (e.g. from gallery base64), fall back to fetching it.
+      // Ensure we absolutely have a valid Blob instance
+let finalBlob = blob;
+if (!finalBlob || !(finalBlob instanceof Blob)) {
+  const response = await fetch(dataUrl);
+  finalBlob = await response.blob();
+}
+
+const generatedName = filename || `capture-${Date.now()}.jpg`;
+
+console.log(`[CameraProcessor] Triggering uploadToServer for backend server: ${generatedName}`);
+
+// 1. Check for finalBlob, NOT this.selectedFile
+if (finalBlob) {
+  console.log(`[PIPELINE] processDataUrl: Calling uploadToServer for ${generatedName}`);
+  // Pass the raw blob directly to our fixed uploadToServer function
+  this.apiStatus = 1;
+  console.log(`Api status`, this.apiStatus);
+  backendUploadResult = await this.uploadToServer(finalBlob, generatedName);
+  this.apiStatus = 4; // Green
+   console.log(`Api status`, this.apiStatus);
+  console.log(`[PIPELINE] processDataUrl: Upload result:`, backendUploadResult);
+} else {
+  console.warn('[CameraProcessor] Cannot upload: finalBlob is null or missing.');
+}
+
+      const croppedImages: any[] = [];
+
+      console.log("Backend Result check cropped boi:", backendUploadResult?.message);
+      console.log("Backend Result check bounding boxes:", backendUploadResult?.rawImagePath);
+      console.log("Backend Result check cropped ROI:", backendUploadResult?.processedImagePath);
+      console.log("Backend Result check cropped ROI object store:", backendUploadResult?.bounding_boxes);
+      // console.log("Backend Result check cropped ROI:", backendUploadResult?.cropped_roi_objectStore);
+      // console.log("Backend Result check cropped ROI object store:", backendUploadResult?.resizedImagePath);
+
+  
+      
+
+      
+      console.log('[CameraProcessor] Successfully saved backend upload response:', backendUploadResult);
+    } catch (uploadSetupErr) {
+      console.error('[CameraProcessor] Failed to execute backend upload payload:', uploadSetupErr);
+    }
+
+    if (bumpCounters) this.photosTaken += 1;
+
+    let finalizationClaimed = false;
+    const claimFinalization = () => {
+      if (finalizationClaimed) return false;
+      finalizationClaimed = true;
+      return true;
+    };
+
+    let inferenceCalled = false;
+    let userId: string | undefined = undefined;
+
+    // Authoritative check on User Identifiers
+    try {
+      const storage = await (this.imageStorage as any)._storage;
+      if (storage) {
+        userId = await storage.get('userID');
+      }
+    } catch (e) {
+      console.warn('[CameraProcessor] Failed to retrieve userID from storage context', e);
+    }
+
+    const sessionImgIndex = typeof (this.imageStorage as any).getNextOriginalImageNumber === 'function'
+      ? (this.imageStorage as any).getNextOriginalImageNumber(this.selectedSessionId || undefined)
+      : undefined;
+    const originalId = this.generateImageRecordId('original');
+
+    // Execution Core Worker
+    const doWork = async () => {
+      let prediction: any = null;
+      try {
+        inferenceCalled = true;
+       
+        const tensor = await this.preprocessImage(dataUrl);
+        
+        try {
+          // prediction = await this.crackDetectionService.runInference(tensor);
+        } catch (infErr) {
+          console.warn('Local client model inference timed out or faulted', infErr);
+        }
+      } catch (err) {
+        console.warn('Client-side preview preprocessing failed', err);
+      }
+
+      // --- CRITICAL FIX: LINK BACKEND RESULTS TO bounding_boxes ENGINE ---
+      if (!prediction) {
+        prediction = { boxes: [] };
+      }
+      if (!prediction.boxes || prediction.boxes.length === 0) {
+        if (backendUploadResult && Array.isArray(backendUploadResult.bounding_boxes) && backendUploadResult.bounding_boxes.length > 0) {
+          console.log(`[CameraProcessor] Local model found 0 boxes. Feeding ${backendUploadResult.bounding_boxes.length} server boxes into drawing canvas engine.`);
+          // this.photosTaken += backendUploadResult.bounding_boxes.length;
+          prediction.boxes = backendUploadResult.bounding_boxes;
+        }
+      }
+
+      const maxBytes = 900_000;
+      const safeOriginal = await this.shrinkDataUrlToBytes(dataUrl, maxBytes, 4000);
+      const timestamp = new Date().toISOString();
+      const generatedFilename = this.buildSessionFilename(
+        !!(prediction.boxes && prediction.boxes.length > 0), 
+        timestamp, 
+        filename, 
+        sessionImgIndex
+      );
+
+      const entry: StoredImage = {
+        original: safeOriginal,
+        timestamp,
+        filename: generatedFilename,
+        fileImageName: filename || undefined,
+        prediction: prediction || undefined,
+        hasPrediction: !!(prediction.boxes && prediction.boxes.length > 0),
+        statusMessage: (prediction.boxes && prediction.boxes.length > 0) ?
+          'Prediction succeeded' : (inferenceCalled ? 'Prediction failed' : 'No prediction'),
+        userId: userId,
+        sessionId: this.selectedSessionId || undefined,
+        original_id: originalId,
+        cropped_id: originalId
+      };
+       console.log("It worked line 871! Boxes to draw:");
+      // Canvas Rendering & Cropping Queue Loop
+      try {
+        if (prediction && Array.isArray(prediction.boxes) && prediction.boxes.length > 0) {
+          const rawBoxes2 = backendUploadResult?.bounding_boxes || []; 
+          const boxesToDraw2 = rawBoxes2.map((b: any) => ({
+            x: b.x,
+            y: b.y,
+            w: b.w,
+            h: b.h
+          }));
+          const maskW = prediction.maskWidth || prediction.maskW || 128;
+          const maskH = prediction.maskHeight || prediction.maskH || 128;
+
+          let croppedCracks: any[] = [];
+          let resizedImage: any[] = [];
+
+// 1. Check if the backend provided pre-processed crops
+const backendCrops = (backendUploadResult as any)?.cropped_roi_objectStore;
+// With this:
+const backendResize = (backendUploadResult as any)?.resizedImagePath;
+
+console.log("BackendResize", backendResize);
+
+if (backendResize && typeof backendResize === 'string' && !backendResize.startsWith('data:image/')) {
+  try {
+    const response = await fetch(backendResize);
+    const blob = await response.blob();
+    const base64 = await this.convertBlobToBase64(blob);
+    resizedImage = [{ image: base64 }];
+  } catch (e) {
+    console.error("[CameraProcessor] Failed to fetch resized image from URL", e);
+    resizedImage = [];
+  }
+} else if (backendResize?.startsWith('data:image/')) {
+  // Handle the case where it might be base64 already
+  resizedImage = [{ image: backendResize }];
+} else {
+  resizedImage = [];
+}
+
+if (Array.isArray(backendCrops) && backendCrops.length > 0) {
+  console.log("[CameraProcessor] Using server-provided crops:", backendCrops);
+  
+  // FIX: Map the backend's 'image_data' and 'box_id' keys to the expected 'image' and 'croppedNumber' keys
+  croppedCracks = backendCrops.map((crop: any, index: number) => ({
+    croppedNumber: crop.box_id !== undefined ? crop.box_id : index + 1,
+    image: crop.image_data || crop.image, // Securely grabs the base64 string
+    box: crop.box || boxesToDraw2[index] || null,
+    type: crop.type || 'unknown',
+    shape: crop.shape || 'unknown',
+    severity: crop.severity || 'unknown'
+  }));
+} else {
+  // 2. Fallback: Run local cropping only if backend crops are missing
+  console.log("[CameraProcessor] No backend crops found, running local cropping.");
+
+
+for (const box of boxesToDraw2) {
+  const croppedNumber = croppedCracks.length + 1;
+  try {
+    // Wrap the operations in a localized function
+    const cropOperation = async () => {
+      const crop = await this.cropBoxFromImage(dataUrl, box, maskW, maskH);
+      const cropTensor = await this.preprocessImage(crop);
+      return crop;
+    };
+
+    // GUARDRAIL: Give each crop a maximum of 2 seconds to complete
+    const cropTimeout = new Promise<never>((_, reject) => 
+      setTimeout(() => reject(new Error(`Crop ${croppedNumber} timed out.`)), 2000)
+    );
+
+    // Race the crop against the 2-second timeout
+    const cropResult = await Promise.race([cropOperation(), cropTimeout]);
+
+    croppedCracks.push({
+      croppedNumber,
+      image: cropResult,
+      box,
+      type: 'unknown',
+      shape: 'unknown',
+      severity:'unknown'
+    });
+  } catch (cropErr) {
+    // If one box fails or times out, it logs the error but safely continues to the next box!
+    console.warn(`[CameraProcessor] Failed handling bounding box ${croppedNumber}`, cropErr);
+  }
+}
+}
+
+console.log("It worked line 905! Final croppedCracks:", croppedCracks);
+console.log("It worked line 927! Final resizedImage:", resizedImage);
+
+          console.log("It worked line 907! Boxes to draw:");
+
+          try {
+            const withBoxesDataUrl = await this.drawBoxesOnImage(dataUrl, boxesToDraw2, maskW, maskH);
+            const safeWithBoxes = await this.shrinkDataUrlToBytes(withBoxesDataUrl, maxBytes, 4000);
+            (entry as any).withBoxes = safeWithBoxes;
+            (entry as any).boxes = boxesToDraw2;
+            (entry as any).croppedCracks = croppedCracks;
+            (entry as any).resizedImage = resizedImage;
+            (entry as any).detectionMessage = `Rendered ${boxesToDraw2.length} detected crack box(es)`;
+            this.totalBoundingBoxesCreated += boxesToDraw2.length;
+          } catch (renderErr) {
+            console.warn('[CameraProcessor] drawBoxesOnImage canvas drawing threw exception:', renderErr);
+            (entry as any).withBoxes = safeOriginal;
+            (entry as any).boxes = [];
+            (entry as any).detectionMessage = 'Box rendering failed';
+          }
+        } else {
+          (entry as any).withBoxes = safeOriginal;
+          (entry as any).boxes = [];
+          (entry as any).detectionMessage = 'No boxes detected';
+        }
+      } catch (e) {
+        console.warn('[CameraProcessor] Context breakdown while handling canvas configurations', e);
+        (entry as any).withBoxes = safeOriginal;
+        (entry as any).boxes = [];
+        (entry as any).detectionMessage = 'Box rendering failed';
+      }
+
+      console.log("Line 957");
+      this.photosProcessed += 1;
+
+      if (!claimFinalization()) {
+        console.warn('[CameraProcessor] Skipping storage write because processing state is already completed');
+        return entry;
+      }
+     
+      console.log("Line 964 added to image storage");
+      await this.imageStorage.addImage(entry, this.selectedSessionId || undefined);
+      
+      try {
+        if (this.selectedSessionId && typeof (this.imageStorage.addImageToSession) === 'function') {
+          this.imageStorage.addImageToSession(this.selectedSessionId, entry.filename);
+          this.sessionIsPristine = false;
+        }
+      } catch (e) {
+        console.warn('[CameraProcessor] Failed linking image identifier to active session key', e);
+      }
+      
+      console.log("Line 976 cropped images");
+      if (typeof (this as any).processAndStoreCroppedCracks === 'function') {
+        await (this as any).processAndStoreCroppedCracks(entry, filename, userId, sessionImgIndex, originalId);
+      } else if (Array.isArray((entry as any).croppedCracks) && (entry as any).croppedCracks.length > 0) {
+        console.log("Cropped Crack Image Data 1197", (entry as any).croppedCracks);
+        console.log("Photos Taken", this.photosTaken, "Photos Processed", this.photosProcessed);
+        const storedCroppedCracks = await this.persistCroppedCracksAsSessionImages(
+          (entry as any).croppedCracks, 
+          filename, 
+          entry.timestamp, 
+          userId, 
+          sessionImgIndex, 
+          originalId
+        );
+        (entry as any).croppedCracks = storedCroppedCracks;
+        try {
+          if (typeof (this.imageStorage as any).setEntryForImage === 'function') {
+            (this.imageStorage as any).setEntryForImage(entry.filename, entry);
+          }
+        } catch (setErr) {
+          console.warn('[CameraProcessor] Failed matching parent index to sub-crops object mapping', setErr);
+        }
+      }
+      
+      console.log("Line 998 resized images");
+    // --- Process and store resized images ---
+      if (typeof (this as any).processAndStoreResizedImages === 'function') {
+        await (this as any).processAndStoreResizedImages(entry, filename, userId, sessionImgIndex, originalId);
+      } else if (Array.isArray((entry as any).resizedImage) && (entry as any).resizedImage.length > 0) {
+        console.log("Resized Image Data 1208", (entry as any).resizedImage);
+        const storedResizedImages = await this.persistResizedImagesAsSessionImages(
+          (entry as any).resizedImage, 
+          filename, 
+          entry.timestamp, 
+          userId, 
+          sessionImgIndex, 
+          originalId
+        );
+        (entry as any).resizedImage = storedResizedImages;
+        try {
+          if (typeof (this.imageStorage as any).setEntryForImage === 'function') {
+            (this.imageStorage as any).setEntryForImage(entry.filename, entry);
+          }
+        } catch (setErr) {
+          console.warn('[CameraProcessor] Failed matching parent index to resized image object mapping', setErr);
+        }
+      }
+
+      await this.refreshDisplayedImages();
+
+      if (this.imagePaths) {
+        this.imagePaths.unshift({
+          original: entry.original,
+          withBoxes: (entry as any).withBoxes || entry.original,
+          fileName: entry.filename,
+          rawPrediction: entry.prediction,
+          original_id: (entry as any).original_id,
+          cropped_id: (entry as any).cropped_id,
+        });
+      }
+
+      if (userId) {
+        try {
+          if (typeof this.imageStorage.saveImageToUser === 'function') {
+            await this.imageStorage.saveImageToUser(userId, entry);
+          }
+          if (this.selectedSessionId && typeof (this.imageStorage.getSession) === 'function' && typeof this.imageStorage.saveSessionToUser === 'function') {
+            const session = this.imageStorage.getSession(this.selectedSessionId);
+            if (session) await this.imageStorage.saveSessionToUser(userId, session);
+          }
+        } catch (e) {
+          console.warn('[CameraProcessor] Cloud storage transaction rejected', e);
+        }
+      }
+
+      if (bumpCounters) this.imagesUploadedThisSession += 1;
+      if (prediction && prediction.boxes && prediction.boxes.length > 0) this.photosProcessed += 1;
+      console.log("Photos Taken", this.photosTaken, "Photos Processed", this.photosProcessed);
+      console.log("Photos Taken", this.photosTaken, "Photos Processed", this.photosProcessed);
+      if (refreshCountsAfterSave) await this.updatePhotoCounts();
+      console.log("Photos Taken", this.photosTaken, "Photos Processed", this.photosProcessed);
+
+      
+      await this.logCurrentSessionImageObjects();
+      
+      setTimeout(() => {
+        if (typeof this.detectCenterThumbnail === 'function') {
+          this.detectCenterThumbnail();
+        }
+      }, 250);
+      return entry;
+    };
+
+    // Race Configuration
+    const overallTimeoutMs = 17_000;
+    try {
+      await Promise.race([
+        doWork(), 
+        new Promise((_, rej) => setTimeout(() => rej(new Error('processing-timeout')), overallTimeoutMs))
+      ]);
+    } catch (err: any) {
+      if (err && err.message === 'processing-timeout') {
+        // Fallback logic on timeout
+        const maxBytes = 900_000;
+        const safeOriginal = await this.shrinkDataUrlToBytes(dataUrl, maxBytes, 4000);
+        const timestamp = new Date().toISOString();
+        const fallbackFilename = this.buildSessionFilename(false, timestamp, filename, sessionImgIndex);
+
+        const userFriendlyname = this.generateUserFriendlyFilename();  
+        
+        const entry: StoredImage = {
+          original: safeOriginal,
+          timestamp,
+          filename: fallbackFilename,
+          userFriendlyname: userFriendlyname,
+          fileImageName: filename || undefined,
+          prediction: undefined,
+          hasPrediction: false,
+          statusMessage: inferenceCalled ? 'Prediction failed' : 'No prediction',
+          userId: userId,
+          sessionId: this.selectedSessionId || undefined,
+          original_id: originalId,
+          cropped_id: originalId
+        };
+        try {
+          if (claimFinalization()) {
+            await this.imageStorage.addImage(entry, this.selectedSessionId || undefined);
+            if (this.selectedSessionId && typeof (this.imageStorage.addImageToSession) === 'function') {
+              this.imageStorage.addImageToSession(this.selectedSessionId, entry.filename);
+              this.sessionIsPristine = false;
+            }
+            await this.refreshDisplayedImages();
+            if (this.imagePaths) {
+              this.imagePaths.unshift({
+                original: entry.original,
+                withBoxes: entry.original,
+                fileName: entry.filename,
+                rawPrediction: entry.prediction,
+                original_id: entry.original_id,
+                cropped_id: entry.cropped_id,
+              });
+            }
+            this.imagesUploadedThisSession += 1;
+            console.log("Photos Taken", this.photosTaken, "Photos Processed", this.photosProcessed);
+            await this.updatePhotoCounts();
+          }
+        } catch (fallbackErr) {
+          console.warn('[CameraProcessor] Aborting database write operations during fallback handling', fallbackErr);
+        }
+      }
+    }
+  } finally {
+    this.isProcessing = false;
+    if (typeof this.logCurrentSessionStateAfterProcessDataUrl === 'function') {
+      await this.logCurrentSessionStateAfterProcessDataUrl();
+    }
+    if (typeof this.logBoundingBoxStats === 'function') {
+      this.logBoundingBoxStats();
+    }
+  }
+}
 
  private convertBlobToBase64(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -1147,6 +1629,20 @@ private async runQueueProcessor(): Promise<void> {
     reader.onerror = reject;
     reader.readAsDataURL(blob);
   });
+}
+
+generateUserFriendlyFilename(): string {
+  // 1. Get the current count of original images. 
+  // Safely falls back to filtering storedImages if the getter doesn't exist yet.
+  const currentOriginalCount = (this as any).originalStoredImages 
+    ? (this as any).originalStoredImages.length 
+    : (this.storedImages ? this.storedImages.filter((img: any) => img.type === 'original').length : 0);
+
+  // 2. Add + 1 so the very first photo taken is labeled image(1) instead of image(0)
+  const nextImageNumber = currentOriginalCount + 1;
+
+  // 3. Return the formatted filename with the file extension
+  return `image(${nextImageNumber}).jpg`;
 }
 
   private async persistResizedImagesAsSessionImages(
@@ -1249,7 +1745,11 @@ private async runQueueProcessor(): Promise<void> {
      return storedResizedImages;
    }
  
-  
+    // Add this getter to filter original images automatically
+  get originalStoredImages(): any[] {
+    return this.storedImages ? this.storedImages.filter((img: any) => img.type === 'original') : [];
+  }
+
   /**
    * Draw bounding boxes on the supplied Base64 image and return a new Base64 image.
    * Boxes are expected in mask coordinates; maskW/maskH indicate mask resolution so boxes
@@ -1428,114 +1928,220 @@ private async runQueueProcessor(): Promise<void> {
   }
 
   /** Persist cropped crack results as individual session image objects. */
+  // private async persistCroppedCracksAsSessionImages(
+  //   croppedCracks: Array<{ croppedNumber?: number; image: string; box: BoundingBox; type: string; shape: string; severity: string; }>,
+  //   originalFilename: string,
+  //   timestamp: string,
+  //   userId?: string,
+  //   imgIndex?: number,
+  //   parentOriginalId?: string
+  // ): Promise<any[]> {
+  //   const storedCroppedCracks: any[] = [];
+  //   const service: any = this.imageStorage as any;
+  //   const sessionId = this.selectedSessionId || undefined;
+
+  //   for (let index = 0; index < croppedCracks.length; index++) {
+  //     const crop = croppedCracks[index];
+  //     const croppedNumber = typeof crop.croppedNumber === 'number' ? crop.croppedNumber : index + 1;
+  //     const baseName = String(originalFilename || `session-${timestamp}`);
+  //     let generatedFilename = typeof service?.generateSessionFilename === 'function'
+  //       ? service.generateSessionFilename({
+  //           sessionId,
+  //           filename: originalFilename,
+  //           originalFilename,
+  //           designatedPart: 'cropped',
+  //           croppedNumber,
+  //           imageType: 'cropped',
+  //           imgIndex,
+  //           timestamp,
+  //         })
+  //       : this.generateFilename();
+
+  //     const safeCrop = await this.shrinkDataUrlToBytes(crop.image, 900_000, 4000);
+  //     const croppedId = this.generateImageRecordId('cropped');
+  //     const cropEntry: StoredImage = {
+  //       original: safeCrop,
+  //       timestamp,
+  //       filename: generatedFilename,
+  //       fileImageName: `${baseName.replace(/\.[^.]+$/, '')}-crop-${croppedNumber}`,
+  //       prediction: {
+  //         type: crop.type,
+  //         shape: crop.shape,
+  //         severity: crop.severity,
+  //       },
+  //       hasPrediction: true,
+  //       statusMessage: `Prediction succeeded - Cropped crack ${croppedNumber} prediction stored`,
+  //       detectionMessage: `Stored cropped crack ${croppedNumber}`,
+  //       boxes: [crop.box],
+  //       userId,
+  //       sessionId,
+  //       original_id: parentOriginalId || undefined,
+  //       cropped_id: croppedId,
+  //     };
+
+  //     let addedOk = false;
+  //     try {
+  //       await this.imageStorage.addImage(cropEntry, sessionId);
+  //       addedOk = true;
+  //     } catch (addErr) {
+  //       console.warn('[UploadImagePage] Failed to add cropped crack image to storage', addErr);
+  //     }
+
+  //     if (addedOk) {
+  //       try {
+  //         if (sessionId && typeof (this.imageStorage as any).addImageToSession === 'function') {
+  //           (this.imageStorage as any).addImageToSession(sessionId, cropEntry.filename);
+  //         }
+  //       } catch (sessErr) {
+  //         console.warn('[UploadImagePage] Failed to add cropped image to session', sessErr);
+  //       }
+
+  //       if (userId) {
+  //         try {
+  //           await this.imageStorage.saveImageToUser(userId, cropEntry);
+  //         } catch (saveErr) {
+  //           console.warn('[UploadImagePage] Failed to save cropped crack to user storage', saveErr);
+  //         }
+  //       }
+
+  //       storedCroppedCracks.push({
+  //         croppedNumber,
+  //         image: safeCrop,
+  //         s3Key: null,
+  //         s3Url: null,
+  //         filename: cropEntry.filename,
+  //         box: crop.box,
+  //         type: crop.type,
+  //         shape: crop.shape,
+  //         severity: crop.severity,
+  //         sessionImage: cropEntry,
+  //       });
+  //     } else {
+  //       // push a best-effort record so the caller can still reference it
+  //       storedCroppedCracks.push({
+  //         croppedNumber,
+  //         image: safeCrop,
+  //         s3Key: null,
+  //         s3Url: null,
+  //         filename: generatedFilename,
+  //         box: crop.box,
+  //         type: crop.type,
+  //         shape: crop.shape,
+  //         severity: crop.severity,
+  //         sessionImage: null,
+  //         error: true,
+  //       });
+  //     }
+  //   }
+
+  //   return storedCroppedCracks;
+  // }
+
   private async persistCroppedCracksAsSessionImages(
-    croppedCracks: Array<{ croppedNumber?: number; image: string; box: BoundingBox; type: string; shape: string; severity: string; }>,
-    originalFilename: string,
-    timestamp: string,
-    userId?: string,
-    imgIndex?: number,
-    parentOriginalId?: string
-  ): Promise<any[]> {
-    const storedCroppedCracks: any[] = [];
-    const service: any = this.imageStorage as any;
-    const sessionId = this.selectedSessionId || undefined;
-
-    for (let index = 0; index < croppedCracks.length; index++) {
-      const crop = croppedCracks[index];
-      const croppedNumber = typeof crop.croppedNumber === 'number' ? crop.croppedNumber : index + 1;
-      const baseName = String(originalFilename || `session-${timestamp}`);
-      let generatedFilename = typeof service?.generateSessionFilename === 'function'
-        ? service.generateSessionFilename({
-            sessionId,
-            filename: originalFilename,
-            originalFilename,
-            designatedPart: 'cropped',
-            croppedNumber,
-            imageType: 'cropped',
-            imgIndex,
-            timestamp,
-          })
-        : this.generateFilename();
-
-      const safeCrop = await this.shrinkDataUrlToBytes(crop.image, 900_000, 4000);
-      const croppedId = this.generateImageRecordId('cropped');
-      const cropEntry: StoredImage = {
-        original: safeCrop,
-        timestamp,
-        filename: generatedFilename,
-        fileImageName: `${baseName.replace(/\.[^.]+$/, '')}-crop-${croppedNumber}`,
-        prediction: {
-          type: crop.type,
-          shape: crop.shape,
-          severity: crop.severity,
-        },
-        hasPrediction: true,
-        statusMessage: `Prediction succeeded - Cropped crack ${croppedNumber} prediction stored`,
-        detectionMessage: `Stored cropped crack ${croppedNumber}`,
-        boxes: [crop.box],
-        userId,
-        sessionId,
-        original_id: parentOriginalId || undefined,
-        cropped_id: croppedId,
-      };
-
-      let addedOk = false;
-      try {
-        await this.imageStorage.addImage(cropEntry, sessionId);
-        addedOk = true;
-      } catch (addErr) {
-        console.warn('[UploadImagePage] Failed to add cropped crack image to storage', addErr);
-      }
-
-      if (addedOk) {
-        try {
-          if (sessionId && typeof (this.imageStorage as any).addImageToSession === 'function') {
-            (this.imageStorage as any).addImageToSession(sessionId, cropEntry.filename);
-          }
-        } catch (sessErr) {
-          console.warn('[UploadImagePage] Failed to add cropped image to session', sessErr);
-        }
-
-        if (userId) {
-          try {
-            await this.imageStorage.saveImageToUser(userId, cropEntry);
-          } catch (saveErr) {
-            console.warn('[UploadImagePage] Failed to save cropped crack to user storage', saveErr);
-          }
-        }
-
-        storedCroppedCracks.push({
-          croppedNumber,
-          image: safeCrop,
-          s3Key: null,
-          s3Url: null,
-          filename: cropEntry.filename,
-          box: crop.box,
-          type: crop.type,
-          shape: crop.shape,
-          severity: crop.severity,
-          sessionImage: cropEntry,
-        });
-      } else {
-        // push a best-effort record so the caller can still reference it
-        storedCroppedCracks.push({
-          croppedNumber,
-          image: safeCrop,
-          s3Key: null,
-          s3Url: null,
+      croppedCracks: Array<any>, // Updated to Array<any> to accept both strings and objects
+      originalFilename: string,
+      timestamp: string,
+      userId?: string,
+      imgIndex?: number,
+      parentOriginalId?: string
+    ): Promise<any[]> {
+      const storedCroppedCracks: any[] = [];
+      const service: any = this.imageStorage as any;
+      const sessionId = this.selectedSessionId || undefined;
+  
+      for (let index = 0; index < croppedCracks.length; index++) {
+        const crop = croppedCracks[index];
+        
+        // Safely extract the cropped number if it's an object
+        const croppedNumber = typeof crop === 'object' && typeof crop.croppedNumber === 'number' 
+          ? crop.croppedNumber 
+          : index + 1;
+          
+        const baseName = String(originalFilename || `session-${timestamp}`);
+  
+        let generatedFilename = typeof service?.generateSessionFilename === 'function'
+          ? service.generateSessionFilename({
+              sessionId,
+              filename: originalFilename,
+              originalFilename,
+              designatedPart: 'cropped',
+              croppedNumber,
+              imageType: 'cropped',
+              imgIndex,
+              timestamp,
+            })
+          : this.generateFilename();
+  
+        // FIX 1: Safely extract the base64 string whether 'crop' is an object or a raw string
+        const imageDataUrl = typeof crop === 'object' && crop.image ? crop.image : crop;
+        
+        console.log("Image_data 1740", imageDataUrl);
+  
+        // Pass the safely extracted string to your compressor
+        const safeCrop = await this.shrinkDataUrlToBytes(imageDataUrl, 900_000, 4000);
+        
+        const cropEntry: StoredImage = {
+          original: safeCrop,
+          timestamp,
           filename: generatedFilename,
-          box: crop.box,
-          type: crop.type,
-          shape: crop.shape,
-          severity: crop.severity,
-          sessionImage: null,
-          error: true,
-        });
+          fileImageName: `${baseName.replace(/\.[^.]+$/, '')}-crop-${croppedNumber}`,
+          // boxes: typeof crop === 'object' && crop.box ? [crop.box] : [], // Safely extract box if present
+          userId,
+          sessionId,
+          original_id: parentOriginalId || undefined,
+          cropped_id: this.generateImageRecordId('cropped'),
+        };
+  
+        let addedOk = false;
+        try {
+          await this.imageStorage.addImage(cropEntry, sessionId);
+          addedOk = true;
+        } catch (addErr) {
+          console.warn('[CameraPage2] Failed to add cropped crack image to storage', addErr);
+        }
+  
+        if (addedOk) {
+          try {
+            if (sessionId && typeof (this.imageStorage as any).addImageToSession === 'function') {
+              (this.imageStorage as any).addImageToSession(sessionId, cropEntry.filename);
+            }
+          } catch (sessErr) {
+            console.warn('[CameraPage2] Failed to add cropped image to session', sessErr);
+          }
+  
+          if (userId) {
+            try {
+              await this.imageStorage.saveImageToUser(userId, cropEntry);
+            } catch (saveErr) {
+              console.warn('[CameraPage2] Failed to save cropped crack to user storage', saveErr);
+            }
+          }
+  
+          // this.photosProcessed += 1;
+          console.log("Photos Taken", this.photosTaken, "Photos Processed", this.photosProcessed);
+          
+          // FIX 2: Safely spread the object exactly as done in resizedImages
+          storedCroppedCracks.push({
+            ...(typeof crop === 'object' ? crop : { image: crop }),
+            filename: cropEntry.filename,
+            original_id: cropEntry.original_id,
+            cropped_id: cropEntry.cropped_id,
+            sessionImage: cropEntry,
+          });
+        } else {
+          storedCroppedCracks.push({
+            ...(typeof crop === 'object' ? crop : { image: crop }),
+            filename: generatedFilename,
+            original_id: parentOriginalId || undefined,
+            cropped_id: this.generateImageRecordId('cropped'),
+            sessionImage: null,
+            error: true,
+          });
+        }
       }
+  
+      return storedCroppedCracks;
     }
-
-    return storedCroppedCracks;
-  }
 
   async cropBoxFromImage(
     imageDataUrl: string,
@@ -2287,7 +2893,8 @@ private async runQueueProcessor(): Promise<void> {
             }
           }
           this.photosProcessed = processed;
-          this.photosTaken = imgs.length; // total stored session image objects currently available
+          this.photosTaken = this.originalStoredImages.length; // total stored session image objects currently available
+          console.log("Photos Taken", this.photosTaken, "Photos Processed", this.photosProcessed);
           this.storedImages = imgs;
           this.imagePaths = imgs.map((s: StoredImage) => ({ original: s.original, withBoxes: (s as any).withBoxes || s.original, fileName: s.filename, rawPrediction: s.prediction }));
         }
@@ -2379,7 +2986,7 @@ private async runQueueProcessor(): Promise<void> {
       } else if (this.imagePaths.length > 0) {
         const first = this.imagePaths[0];
         this.selectedThumbSrc = this.showWithBoxes ? first.withBoxes : first.original;
-        this.selectedImageTitle = first.filename || first.fileName || '';
+        this.selectedImageTitle = first.userFriendlyname || first.userFriendlyname || '';
       } else {
         // nothing left
         this.selectedThumbSrc = null;
@@ -2524,7 +3131,7 @@ private async runQueueProcessor(): Promise<void> {
     this.http.get<{ message: string }>(`${this.baseUrl}/api/hello`).subscribe({
       next: (response) => {
         this.apiMessage = response.message;
-        this.apiStatus = response.message;
+        this.apiStatus = 4;
         console.log("Api Message", this.apiMessage);
         console.log('Root connection success:', response);
         this.fastApiConnection = true;
@@ -2671,6 +3278,7 @@ async uploadImage(): Promise<UploadResponse | null> {
 
 async uploadToServer(fileToUpload: Blob, customName: string): Promise<UploadResponse | null> {
   console.log('[PIPELINE] uploadToServer: Attempting HTTP request...');
+  this.apiStatus = 2; // Orange
   
   if (!fileToUpload || !(fileToUpload instanceof Blob)) {
     console.error('[Upload] Aborting: fileToUpload is not a valid Blob.', fileToUpload);
@@ -2690,6 +3298,9 @@ async uploadToServer(fileToUpload: Blob, customName: string): Promise<UploadResp
       const request$ = this.http.post<UploadResponse>(`${url}/api/upload`, formData).pipe(
         timeout(15000) 
       );
+
+      this.apiStatus = 3; // Yellow
+       console.log(`Api status`, this.apiStatus);
       
       const response = await firstValueFrom(request$);
       

@@ -627,6 +627,7 @@ position: absolute;
 .yellow { background-color: yellow; }
 .green { background-color: green; }
 
+
 /* Base circle styles */
 .green-circle {
   // width: 20px;
@@ -636,7 +637,7 @@ position: absolute;
   // border: 1px solid #ccc; /* Helps you see the white circle */
   position: absolute;
   top: -5px;
-  right: 0px;
+  left: -5px;
   background: red;
   color: white;
   font-weight: bold;
@@ -657,6 +658,7 @@ position: absolute;
 .orange { background-color: orange; }
 .yellow { background-color: yellow; }
 .green { background-color: green; }
+.lightgreen { background-color: #25c75a;}
 
 @keyframes spin {
   0% { transform: rotate(0deg); }

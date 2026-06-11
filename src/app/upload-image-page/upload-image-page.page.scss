@@ -559,6 +559,38 @@ form, input, optgroup, select {
 	100% { transform: rotate(360deg); }
 }
 
+/* Base circle styles */
+.green-circle {
+  // width: 20px;
+  // height: 20px;
+  // border-radius: 50%;
+  // display: inline-block;
+  // border: 1px solid #ccc; /* Helps you see the white circle */
+  position: absolute;
+  top: -5px;
+  left: -5px;
+  background: red;
+  color: white;
+  font-weight: bold;
+  font-size: 10px;
+  width: 25px;
+  height: 25px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2;
+  box-shadow: none;
+  animation: none;
+}
+
+/* Color modifiers */
+.white { background-color: white; }
+.orange { background-color: orange; }
+.yellow { background-color: yellow; }
+.green { background-color: green; }
+.lightgreen { background-color: #25c75a;}
+
 /* Back button styling (copied for consistency) */
 .back-btn {
 	position: absolute;

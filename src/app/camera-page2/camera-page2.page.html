@@ -112,7 +112,13 @@
             <rect x="2" y="2" width="66" height="36" rx="12" ry="12" class="rect-spinner-path" />
           </svg>
           <div class="center-value-rect">{{ photosTaken }}/{{ photosProcessed }}</div>
-          <div class="blue-circle" [ngClass]="{ 'green': fastApiConnection, 'red': !fastApiConnection}"></div>
+          <div class="green-circle" [ngClass]="{ 
+  'grey': apiStatus === 1, 
+  'orange': apiStatus === 2,
+  'yellow': apiStatus === 3,
+  'green': apiStatus === 4,
+  'lightgreen': apiStatus === 0
+}"></div>
           <div class="red-circle" [ngClass]="{ 'green': photosProcessed === photosTaken, 'red': photosProcessed < photosTaken }"></div>
         </div>
         <!-- <div class="action-label">Images Processed</div> -->
@@ -126,19 +132,19 @@
         [disabled]="isCooldown || (isLevelEnabled && !isPhoneLeveled)"
       ></button>
 
-       <div class="green-circle" [ngClass]="{ 
+       <!-- <div class="green-circle" [ngClass]="{ 
   'grey': apiStatus === 1, 
   'orange': apiStatus === 2,
   'yellow': apiStatus === 3,
   'green': apiStatus === 4
-}"></div>
+}"></div> -->
 
 <!-- <div class="red-circle" [ngClass]="{ 'green': fastApiConnection, 'red': !fastApiConnection}"></div> -->
 
       
 
       <!-- Thumbnails on the right (render from stored images) -->
-      <div *ngIf="storedImages.length === 0" class="thumbnail-placeholder" (click)="openTestOverlay()"></div>
+      <!-- <div *ngIf="storedImages.length === 0" class="thumbnail-placeholder" (click)="openTestOverlay()"></div>
       <div *ngIf="storedImages.length > 0" class="thumbnail-scroll" (click)="openTestOverlay()">
         <img *ngFor="let img of storedImages"
              [src]="img.original"
@@ -147,7 +153,17 @@
              (click)="$event.stopPropagation(); onStoredThumbClick(img); openTestOverlay()"
              [title]="img.filename || img.timestamp"
         />
-      </div>
+      </div> -->
+      <div *ngIf="originalStoredImages.length === 0" class="thumbnail-placeholder" (click)="openTestOverlay()"></div>
+<div *ngIf="originalStoredImages.length > 0" class="thumbnail-scroll" (click)="openTestOverlay()">
+  <img *ngFor="let img of originalStoredImages"
+       [src]="img.original"
+       class="thumbnail"
+       [class.selected]="getImageSelectionKey(img) === selectedImageKey"
+       (click)="$event.stopPropagation(); onStoredThumbClick(img); openTestOverlay()"
+       [title]="img.filename || img.timestamp"
+  />
+</div>
 
   
     </div>

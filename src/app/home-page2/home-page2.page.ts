@@ -94,43 +94,47 @@ apiUrlWeb = 'http://127.0.0.1:8000/';
 apiUrlWeb2 = 'http://127.0.0.1:8000/helloWorld';
 // private baseUrl2 = 'http://127.0.0.1:8000'; 
 // private baseUrl = 'https://16z6llmg-8000.asse.devtunnels.ms'; 
-private baseUrl2 = 'https://crack-api-repo.onrender.com'; 
-baseUrl = 'https://crack-api-repo.onrender.com'; 
+// private baseUrl2 = 'https://crack-api-repo.onrender.com'; 
+// baseUrl = 'https://crack-api-repo.onrender.com'; 
+private baseUrl2 = 'https://your-render-url.onrender.com/process-all'; 
+baseUrl = 'https://your-render-url.onrender.com/process-all'; 
+
+
   uploadedImageUrl: string = '';
   selectedFile: File | null = null;
   // Add these to your class properties
 public crackData: CrackResponse | null = null;
 public isUploading: boolean = false;
 
-uploadToServer() {
-  if (!this.selectedFile) {
-    console.warn("No file selected to upload.");
-    return;
-  }
+// uploadToServer() {
+//   if (!this.selectedFile) {
+//     console.warn("No file selected to upload.");
+//     return;
+//   }
 
-  this.isUploading = true;
-  this.crackData = null; // Clear previous results
+//   this.isUploading = true;
+//   this.crackData = null; // Clear previous results
   
-  // NOTE: Ensure this matches the route defined in your FastAPI code (@app.post("/api/upload"))
-  const uploadUrl = `${this.baseUrl}/api/upload`; 
+//   // NOTE: Ensure this matches the route defined in your FastAPI code (@app.post("/api/upload"))
+//   const uploadUrl = `${this.baseUrl}/api/upload`; 
 
-  const formData = new FormData();
-  formData.append('file', this.selectedFile, this.selectedFile.name);
+//   const formData = new FormData();
+//   formData.append('file', this.selectedFile, this.selectedFile.name);
 
-  this.http.post<CrackResponse>(uploadUrl, formData).subscribe({
-    next: (response) => {
-      this.isUploading = false;
-      this.crackData = response; // Store the full structured response
+//   this.http.post<CrackResponse>(uploadUrl, formData).subscribe({
+//     next: (response) => {
+//       this.isUploading = false;
+//       this.crackData = response; // Store the full structured response
       
-      console.log('Upload Success:', response);
-      console.log('Detected Cracks:', response.crack_data.bounding_boxes.length);
-    },
-    error: (err) => {
-      this.isUploading = false;
-      console.error('Upload Error:', err);
-    }
-  });
-}
+//       console.log('Upload Success:', response);
+//       console.log('Detected Cracks:', response.crack_data.bounding_boxes.length);
+//     },
+//     error: (err) => {
+//       this.isUploading = false;
+//       console.error('Upload Error:', err);
+//     }
+//   });
+// }
 
 
   @ViewChild('fileInput', { static: false }) fileInput!: ElementRef;
@@ -650,13 +654,13 @@ private persistUserProfileToStorage(): void {
         console.warn('[HomePage2.ionViewWillEnter] Failed to refresh unread chat badge:', err);
       });
       // Start periodic location check
-      this.startLocationCheckInterval();
+      // this.startLocationCheckInterval();
     }
     // Refresh office location markers from Firestore on page entry
-    this.fetchOfficeLocationMarkerData().catch((err) => {
-      console.error('[HomePage2.ionViewWillEnter] Failed to refresh markers:', err);
-    });
-    this.requestLocationAccessOnEnter();
+    // this.fetchOfficeLocationMarkerData().catch((err) => {
+    //   console.error('[HomePage2.ionViewWillEnter] Failed to refresh markers:', err);
+    // });
+    // this.requestLocationAccessOnEnter();
   }
 
   private async refreshUnreadChatBadgeCount(userId?: string): Promise<void> {
@@ -666,33 +670,33 @@ private persistUserProfileToStorage(): void {
       return;
     }
 
-    try {
-      const chats = await firstValueFrom(this.chatService.getUserChats(resolvedUserId));
-      if (!Array.isArray(chats) || chats.length === 0) {
-        this.exploreBadgeCount = 0;
-        return;
-      }
+    // try {
+    //   const chats = await firstValueFrom(this.chatService.getUserChats(resolvedUserId));
+    //   if (!Array.isArray(chats) || chats.length === 0) {
+    //     this.exploreBadgeCount = 0;
+    //     return;
+    //   }
 
-      const unreadCounts = await Promise.all(
-        chats.map(async (chat: any) => {
-          if (!chat?.chatId) {
-            return 0;
-          }
+    //   const unreadCounts = await Promise.all(
+    //     chats.map(async (chat: any) => {
+    //       if (!chat?.chatId) {
+    //         return 0;
+    //       }
 
-          const messages = await firstValueFrom(this.chatService.getMessages(chat.chatId));
-          if (!Array.isArray(messages) || messages.length === 0) {
-            return 0;
-          }
+    //       const messages = await firstValueFrom(this.chatService.getMessages(chat.chatId));
+    //       if (!Array.isArray(messages) || messages.length === 0) {
+    //         return 0;
+    //       }
 
-          return messages.filter((message: any) => message?.senderId !== resolvedUserId && message?.isRead === false).length;
-        })
-      );
+    //       return messages.filter((message: any) => message?.senderId !== resolvedUserId && message?.isRead === false).length;
+    //     })
+    //   );
 
-      this.exploreBadgeCount = unreadCounts.reduce((total, count) => total + count, 0);
-    } catch (error) {
-      console.warn('[HomePage2.refreshUnreadChatBadgeCount] Failed to load unread message count:', error);
-      this.exploreBadgeCount = 0;
-    }
+    //   this.exploreBadgeCount = unreadCounts.reduce((total, count) => total + count, 0);
+    // } catch (error) {
+    //   console.warn('[HomePage2.refreshUnreadChatBadgeCount] Failed to load unread message count:', error);
+    //   this.exploreBadgeCount = 0;
+    // }
   }
 
   private getLocationStorageKey(userId: string): string {
@@ -2127,12 +2131,12 @@ private persistUserProfileToStorage(): void {
 
       this.officeLocationMarkerData = parsedMarkers;
       // Save to localStorage after successful fetch
-      this.saveOfficeMarkerDataToLocalStorage();
-      console.log('[HomePage2.userOfficeLocationMarker] Collection data loaded and stored.', {
-        totalDocuments: markerSnapshot.size,
-        markersStored: parsedMarkers.length,
-        markersSkipped: markerSnapshot.size - parsedMarkers.length
-      });
+      // this.saveOfficeMarkerDataToLocalStorage();
+      // console.log('[HomePage2.userOfficeLocationMarker] Collection data loaded and stored.', {
+      //   totalDocuments: markerSnapshot.size,
+      //   markersStored: parsedMarkers.length,
+      //   markersSkipped: markerSnapshot.size - parsedMarkers.length
+      // });
     } catch (error) {
       const errorCode = (error as { code?: string } | null)?.code ?? 'unknown';
       if (errorCode === 'permission-denied') {
@@ -2327,38 +2331,38 @@ async captureImage(sourceType: 'CAMERA' | 'PHOTOS') {
   //   });
   // }
 
-//   uploadToServer() {
-//   // 1. Check if a web file has been selected instead of native path
-//   if (!this.selectedFile) {
-//     console.warn("No file selected to upload.");
-//     return;
-//   }
+  uploadToServer() {
+  // 1. Check if a web file has been selected instead of native path
+  if (!this.selectedFile) {
+    console.warn("No file selected to upload.");
+    return;
+  }
 
-//   this.isUploading = true;
-//   this.uploadResult = null; // Clear any previous results
+  this.isUploading = true;
+  this.uploadResult = null; // Clear any previous results
   
-//   const uploadUrl = `${this.baseUrl}/api/upload2`;
+  const uploadUrl = `${this.baseUrl}/api/upload`;
 
-//   // 2. Build the standard multipart/form-data payload
-//   const formData = new FormData();
+  // 2. Build the standard multipart/form-data payload
+  const formData = new FormData();
   
-//   // 'file' must exactly match your FastAPI parameter name: upload_image(file: UploadFile)
-//   formData.append('file', this.selectedFile, this.selectedFile.name);
+  // 'file' must exactly match your FastAPI parameter name: upload_image(file: UploadFile)
+  formData.append('file', this.selectedFile, this.selectedFile.name);
 
-//   // 3. Make the HTTP POST request directly using Angular's HttpClient
-//   this.http.post(uploadUrl, formData).subscribe({
-//     next: (response) => {
-//       this.isUploading = false;
-//       this.uploadResult = response;
-//       console.log('Upload Success:', response);
-//     },
-//     error: (err) => {
-//       this.isUploading = false;
-//       this.uploadResult = { error: 'Upload failed', details: err };
-//       console.error('Upload Error:', err);
-//     }
-//   });
-// }
+  // 3. Make the HTTP POST request directly using Angular's HttpClient
+  this.http.post(uploadUrl, formData).subscribe({
+    next: (response) => {
+      this.isUploading = false;
+      this.uploadResult = response;
+      console.log('Upload Success:', response);
+    },
+    error: (err) => {
+      this.isUploading = false;
+      this.uploadResult = { error: 'Upload failed', details: err };
+      console.error('Upload Error:', err);
+    }
+  });
+}
 
 
 

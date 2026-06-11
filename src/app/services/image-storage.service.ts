@@ -30,6 +30,7 @@ export interface StoredImage {
   original: string; // Base64 image
   withBoxes?: string;
   boxes?: any[];
+  userFriendlyname?: string; // Optional human-friendly name for the image
   croppedCracks?: Array<{
     croppedNumber?: number;
     image?: string;
@@ -97,6 +98,7 @@ export class ImageStorageService {
   private readonly STORAGE_KEY = 'stored_images';
   private readonly SESSIONS_KEY = 'stored_image_sessions';
   private readonly FIRESTORE_IMAGES_COLLECTION = 'images';
+  private readonly FIRESTORE_ASSESSMENT_IMAGES_COLLECTION = 'assessmentImages';
   private readonly FIRESTORE_CORRECT_IMAGES_COLLECTION = 'correctImagesByEngineer';
   private readonly FIRESTORE_SESSIONS_COLLECTION = 'sessionsImages';
   private readonly FIRESTORE_DOC_MAX_BYTES = 900_000;
@@ -108,7 +110,7 @@ export class ImageStorageService {
   // Separate counter map for original uploads so cropped variants can reuse the same img index.
   private sessionOriginalImageCounters: Map<string, number> = new Map();
 
-  newSessionIdForFileShare = '';
+  newSessionIdForFileShare = ''; 
 
   private s3Client: S3Client;
 
@@ -1095,8 +1097,8 @@ export class ImageStorageService {
       original_id: fallbackOriginalId,
       cropped_id: fallbackCroppedId,
       // hasPrediction: image.hasPrediction || false,
-      statusMessage: image.statusMessage || '',
-      detectionMessage: image.detectionMessage || '',
+      // statusMessage: image.statusMessage || '',
+      // detectionMessage: image.detectionMessage || '',
       // prediction: image.prediction || null,
       // multiPredictions: image.multiPredictions || [],
       // correctedPrediction: image.correctedPrediction || null,
@@ -1106,10 +1108,10 @@ export class ImageStorageService {
       // croppedCracks: this.sanitizeCroppedCracksForFirestore(image.croppedCracks),
       originalS3Key: image.originalS3Key || image.storagePath || null,
       originalS3Url: image.originalS3Url || image.storageUrl || null,
-      withBoxesS3Key: image.withBoxesS3Key || null,
+      // withBoxesS3Key: image.withBoxesS3Key || null,
       storagePath: image.storagePath || null,
       storageUrl: image.storageUrl || null,
-      returnedBoudingBox: image.boxes || [],
+      // returnedBoudingBox: image.boxes || [],
 
     };
   }
@@ -1159,9 +1161,11 @@ export class ImageStorageService {
       });
       const sessionsCollection = collection(this.firestore, this.FIRESTORE_SESSIONS_COLLECTION);
       const imagesCollection = collection(this.firestore, this.FIRESTORE_IMAGES_COLLECTION);
+      const assessmentImagesCollection = collection(this.firestore, this.FIRESTORE_ASSESSMENT_IMAGES_COLLECTION);
 
       // Remove existing images for this session so Firestore reflects local state
       const existingQuery = query(imagesCollection, where('sessionId', '==', session.id), where('userId', '==', currentUid));
+      const assessmentImageQuery = query(assessmentImagesCollection, where('sessionId', '==', session.id), where('userId', '==', currentUid));
       const existingSnapshot = await getDocs(existingQuery);
       const deleteBatch = writeBatch(this.firestore);
       existingSnapshot.forEach(docSnapshot => deleteBatch.delete(docSnapshot.ref));
@@ -1177,7 +1181,7 @@ export class ImageStorageService {
         name: session.name,
         imageKeys: session.imageKeys || [],
         created: session.created,
-        totalBoundingBoxes: session.totalBoundingBoxes || 0,
+        // totalBoundingBoxes: session.totalBoundingBoxes || 0,
         userId: receiverId || currentUid,
         // createdBy,
         // ReceivedBy: receiverId || currentUid,
@@ -1236,6 +1240,7 @@ export class ImageStorageService {
 
 
         const imageRef = doc(imagesCollection, image.filename);
+        const assessmentImageRef = doc(assessmentImagesCollection, image.filename);
         const imageWritePayload: any = {
           ...this.sanitizeStoredImageForFirestore({
             ...image,
@@ -1256,8 +1261,39 @@ export class ImageStorageService {
           // OriginUserId: currentUid,
           // engineerCheckedSession: !!session.engineerCheckedSession,
           // correctedByEngineer: !!session.correctedByEngineer,
-          type: imageType
+          type: imageType,
+          // userFriendlyName: image.userFriendlyname,
+          
         };
+        
+      if (imageType === 'original' || imageType === 'resized') {
+        const assessmentImageWritePayload: any = {
+          ...this.sanitizeStoredImageForFirestore({
+            ...image,
+            userId: receiverId || currentUid,
+            sessionId: session.id,
+            original_id: preservedOriginalId ?? undefined,
+            // cropped_id: preservedCroppedId ?? undefined,
+            // prediction: predictionPayload || undefined,
+            // correctedPrediction: correctedPrediction || undefined,
+            // boxes: preservedBoxes,
+            originalS3Key: image.storagePath || null,
+            originalS3Url: image.storageUrl || null,
+            // correctedByEngineer: !!session.correctedByEngineer,
+            // returnedBoudingBox: preservedBoxes,
+          } as StoredImage),
+          // createdBy,
+          // ReceivedBy: receiverId || currentUid,
+          // OriginUserId: currentUid,
+          // engineerCheckedSession: !!session.engineerCheckedSession,
+          // correctedByEngineer: !!session.correctedByEngineer,
+          type: imageType,
+          // userFriendlyName: image.userFriendlyname,
+        };
+        
+        batch.set(assessmentImageRef, assessmentImageWritePayload);
+        
+      }
 
         console.group('[ImageStorageService] 🖼️ Session Image Object Being Saved');
         console.log('Image filename:', image.filename);
@@ -1277,7 +1313,9 @@ export class ImageStorageService {
 
         // withBoxes S3/storage helper fields intentionally omitted from Firestore payload
 
+        
         batch.set(imageRef, imageWritePayload);
+        
 
         if (engineerCheckedSnapshot) {
           correctImageWrites.push({
@@ -1997,6 +2035,7 @@ export class ImageStorageService {
       const currentDateText = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
       const currentTimeText = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}.${String(now.getMilliseconds()).padStart(3, '0')}`;
       const imagesCollection = collection(this.firestore, this.FIRESTORE_IMAGES_COLLECTION);
+      const assessmentImagesCollection = collection(this.firestore, this.FIRESTORE_ASSESSMENT_IMAGES_COLLECTION);
       const docRef = doc(imagesCollection, docId);
       console.log("Step 1, docID", docId, "and effectiveUserId", effectiveUserId, "and collection", imagesCollection, "docRef", docRef);
 
@@ -2082,6 +2121,7 @@ export class ImageStorageService {
       // const docId = `${docIdPrefix}_${timestamp}_${Math.random().toString(36).substr(2, 9)}`;
       const docId = imgObj?.filename ? imgObj.filename.replace(/\.[^/.]+$/, '') : `${docIdPrefix}_${timestamp}_${Math.random().toString(36).substr(2, 9)}`; // Use filename without extension as doc ID if available, otherwise use generated docId
       const imagesCollection = collection(this.firestore, this.FIRESTORE_IMAGES_COLLECTION);
+      const assessmentImagesCollection = collection(this.firestore, this.FIRESTORE_ASSESSMENT_IMAGES_COLLECTION);
       const docRef = doc(imagesCollection, docId);
 
 

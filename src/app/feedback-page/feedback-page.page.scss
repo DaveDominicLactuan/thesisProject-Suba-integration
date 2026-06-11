@@ -445,6 +445,7 @@
 .scroll-wrapper {
   position: relative;
   top: 0%; /* Push down under fixed top bar */
+  margin-top: 50px;
   background-color: #ffffff9c;
   display: flex;
   flex-direction: column;
@@ -454,7 +455,7 @@
   overflow-x: hidden;
   overflow-y: visible;
   padding: 10px 0;
-  height: 500px;
+  height: 650px;
   border-radius: 7.5%;
   transition: height 0.3s ease;
   box-sizing: border-box;
@@ -505,12 +506,12 @@
 
 .image-item {
   flex: 0 0 auto;
-  max-width: 90%;
-  max-height: 90%;
+  max-width: 95%;
+  max-height: 95%;
   width: auto;
   height: auto;
-  min-height: 350px;
-  min-width: 270px;
+  min-height: 370px;
+  min-width: 290px;
   object-fit: contain; /* preserve aspect and avoid cropping */
   scroll-snap-align: center;
   border-radius: 10px;

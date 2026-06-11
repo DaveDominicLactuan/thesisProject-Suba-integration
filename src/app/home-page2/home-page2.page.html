@@ -12,8 +12,8 @@
   (click)="closeSidebar()"
 ></div>
 
-<div class="custom-sidebar" [ngClass]="{'open': isSidebarOpen}" (click)="$event.stopPropagation()">
-  <div class="profile-section">
+ <div class="custom-sidebar" [ngClass]="{'open': isSidebarOpen}" (click)="$event.stopPropagation()"> 
+  <!-- <div class="profile-section">
     <div class="profile-avatar" (click)="goToProfilePage()" style="cursor: pointer;">
       <img src="assets/engIcon.png" alt="Profile" />
     </div>
@@ -21,10 +21,10 @@
       <h1 class="profile-name">{{ firstName }} {{ lastName }}</h1>
       <p class="profile-email">{{ email }}</p>
     </div>
-  </div>
+  </div> -->
   <ul class="menu-items scrollable-menu">
     <div class="menu-section">
-      <li class="menu-item" (click)="goToHomePage()">
+      <!-- <li class="menu-item" (click)="goToHomePage()">
         <img src="assets/newHomeIcon.png" alt="Chat" class="menu-item-icon" />
         <span>Home</span>
       </li>
@@ -47,7 +47,7 @@
       <li class="menu-item" (click)="getFastApiMessage()">
         <img src="assets/ChatIconNew.png" alt="Chat" class="menu-item-icon" />
         <span>Test</span>      
-      </li>
+      </li> -->
        <li class="menu-item" (click)="getFastApiMessage()">
         <img src="assets/ChatIconNew.png" alt="Chat" class="menu-item-icon" />
         <span>Test</span>      
@@ -63,7 +63,7 @@
     </div>
      <div class="menu-section">
         <div class="menu-header">Other</div>
-        <div class="red-circle" [ngClass]="{ 'green': apiStatus === 'success', 'red': apiStatus !== 'success' }"></div>
+        <!-- <div class="red-circle" [ngClass]="{ 'green': apiStatus === 'success', 'red': apiStatus !== 'success' }"></div> -->
 
        <li class="menu-item" (click)="getFastApiMessage()">
   <img src="assets/ChatIconNew.png" alt="Chat" class="menu-item-icon" />
@@ -72,10 +72,10 @@
   </span>      
 </li>
    
-      <li class="menu-item" (click)="logout(); closeSidebar(); $event.stopPropagation()" data-action="logout">
+      <!-- <li class="menu-item" (click)="logout(); closeSidebar(); $event.stopPropagation()" data-action="logout">
         <img src="assets/newLoginIcon.png" alt="Chat" class="menu-item-icon" />
                 <span>Log Out</span>
-      </li>
+      </li> -->
     </div>
    
   </ul>
@@ -111,9 +111,9 @@
     <div class="red-circle" [ngClass]="{ 'green': apiStatus === 'success', 'red': apiStatus !== 'success' }"></div>
   </div>
 
-  <div class="explore-section" aria-label="Explore options">
+  <!-- <div class="explore-section" aria-label="Explore options">
     <div class="explore-title">Explore</div>
-    <div class="explore-grid">
+    <div class="explore-grid"> -->
       
 
       
@@ -193,9 +193,9 @@
 
 
       
-
+<!-- 
     </div>
-  </div>
+  </div> -->
 
  
 

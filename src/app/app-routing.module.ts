@@ -8,7 +8,7 @@ const routes: Routes = [
   },
   {
     path: '',
-    redirectTo: 'landing-page',
+    redirectTo: 'home-page2',
     pathMatch: 'full'
   },
   {
@@ -63,7 +63,8 @@ const routes: Routes = [
   {
     path: 'chat-page',
     loadChildren: () => import('./chat-page/chat-page.module').then( m => m.ChatPagePageModule)
-  },  {
+  },
+  {
     path: 'office-map-marker-page',
     loadChildren: () => import('./office-map-marker-page/office-map-marker-page.module').then( m => m.OfficeMapMarkerPagePageModule)
   },

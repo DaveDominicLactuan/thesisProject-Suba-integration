@@ -4,50 +4,51 @@ import { Observable, throwError } from 'rxjs';
 import { catchError, map, tap } from 'rxjs/operators';
 import { environment } from '../environments/environment';
 
+export interface AnalyzeSessionPayload {
+  sessionId: string;
+  originals: Array<{
+    id: string;
+    url: string;
+    resized_variants?: any[];
+  }>;
+}
+
 @Injectable({
   providedIn: 'root'
 })
 export class ApiService {
 
-    // private baseUrl = 'http://127.0.0.1:8000/api/hello/'; // Your active Ngrok base URL
+private baseUrl = 'https://your-render-url.onrender.com/process-all';
 
-  //  private baseUrl = environment.apiUrl;
-
-  //https://e5a17b8ab388.ngrok-free.app -> http://localhost:8000 
+// private baseUrl = 'https://16z6llmg-8000.asse.devtunnels.ms/'
 
   constructor(private http: HttpClient) {}
 
+  /**
+   * Encapsulates raw image binary streams into FormData
+   * @param file Blob data grabbed from ionic camera plugin/web file input
+   */
+  uploadInspection(file: File | Blob, filename: string = 'crack_inspection.jpg'): Observable<any> {
+    const formData = new FormData();
+    // Key 'file' must exactly match your Python definition: upload_inspection(file: Optional[UploadFile] = File(None))
+    formData.append('file', file, filename);
 
-  
-  getHelloJson(): Observable<any> {
-  return this.http.get('https://743d07fce129.ngrok-free.app/api/hello/');
-}
+    return this.http.post<any>(`${this.baseUrl}/upload`, formData);
+  }
 
+  // analyzeSession(sessionId: string, originals: any[]): Observable<any> {
+  //   const payload = {
+  //     sessionId: sessionId,
+  //     originals: originals
+  //   };
 
+  //   // Sent as standard application/json headers automatically by Angular
+  //   return this.http.post<any>(`${`${this.baseUrl}/analyze-session`}`, payload);
+  // }
 
-
-getHelloText(): Observable<any> {
-  return this.http.get('https://743d07fce129.ngrok-free.app/api/hello/', {
-    responseType: 'text'
-  }).pipe(
-    map((res: string) => {
-      try {
-        return JSON.parse(res);
-      } catch (e) {
-        console.error('Invalid JSON response:', res);
-        throw new Error('Failed to parse JSON');
-      }
-    })
-  );
-}
-
-
-
-getHelloTest(): Observable<any> {
-  return this.http.get('https://kg7zbdg9-8000.asse.devtunnels.ms/api/hello/');
-}
-
-
+  analyzeSession(payload: AnalyzeSessionPayload): Observable<any> {
+    return this.http.post<any>(`${this.baseUrl}/analyze-session`, payload);
+  }
 
 
 
